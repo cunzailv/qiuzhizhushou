@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "Boss直聘智能求职助手",
+  "version": "1.0.0",
+  "description": "上传简历自动投递、AI分析匹配度、追踪投递进度、批量下载岗位信息",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_title": "Boss直聘智能求职助手",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_page": "src/options/index.html",
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.zhipin.com/*",
+        "https://zhipin.com/*"
+      ],
+      "js": ["src/content/index.ts"],
+      "run_at": "document_end"
+    }
+  ],
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications",
+    "tabs",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://www.zhipin.com/*",
+    "https://zhipin.com/*"
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/assets/*"],
+      "matches": ["https://www.zhipin.com/*", "https://zhipin.com/*"]
+    }
+  ]
+}

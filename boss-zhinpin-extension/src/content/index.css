@@ -1,0 +1,38 @@
+/* Content script styles - minimal to avoid conflicts with host page */
+/* All major styling is done in shadow DOM via inject-ui.tsx */
+
+/* Job card highlight for matched results */
+.boss-assistant-highlight {
+  position: relative;
+}
+
+.boss-assistant-match-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: linear-gradient(135deg, #6366F1, #8B5CF6);
+  color: white;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
+}
+
+.boss-assistant-match-badge.low {
+  background: linear-gradient(135deg, #9CA3AF, #6B7280);
+}
+
+.boss-assistant-skip-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: rgba(239, 68, 68, 0.8);
+  color: white;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  z-index: 10;
+}

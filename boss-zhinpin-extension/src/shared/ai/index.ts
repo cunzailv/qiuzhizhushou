@@ -1,0 +1,6 @@
+export { computeLocalMatch } from './local-matcher'
+export { matchResumeToJob, batchMatchJobs } from './remote-matcher'
+export { analyzeResumeQuality } from './resume-analyzer'
+export { chatCompletion, testAIConnection } from './api-client'
+export { BUILTIN_MODELS, getPresetById, getDefaultPreset } from './model-presets'
+export type { ModelPreset } from './model-presets'

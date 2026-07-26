@@ -1,0 +1,19 @@
+# Dependencies
+boss-zhinpin-extension/node_modules/
+
+# Build output
+boss-zhinpin-extension/dist/
+boss-zhinpin-extension/dist.crx
+boss-zhinpin-extension/dist.pem
+
+# Project local data (not source code)
+.codebuddy/
+
+# Logs
+*.log
+
+# OS / Editor
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea

@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    @apply bg-surface-darkest text-text-primary font-sans;
+    margin: 0;
+    padding: 0;
+    min-width: 400px;
+    min-height: 500px;
+  }
+
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(99, 102, 241, 0.3);
+    border-radius: 3px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(99, 102, 241, 0.5);
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-surface-dark/60 backdrop-blur-xl border border-white/5 rounded-2xl shadow-lg;
+  }
+
+  .glass-card {
+    @apply bg-surface-medium/50 backdrop-blur-md border border-white/5 rounded-xl p-4;
+  }
+
+  .gradient-text {
+    @apply bg-gradient-to-r from-primary via-primary-light to-primary-lighter bg-clip-text text-transparent;
+  }
+
+  .gradient-button {
+    @apply bg-gradient-to-r from-primary to-primary-light text-white font-semibold rounded-xl px-6 py-3 transition-all duration-300 hover:shadow-glow active:scale-95;
+  }
+
+  .stat-card {
+    @apply glass-card flex flex-col gap-2 transition-all duration-300 hover:scale-[1.02] hover:shadow-glow;
+  }
+
+  .tab-button {
+    @apply px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200;
+  }
+
+  .tab-button-active {
+    @apply bg-primary/20 text-primary-light;
+  }
+
+  .tab-button-inactive {
+    @apply text-text-muted hover:text-text-secondary hover:bg-white/5;
+  }
+
+  .input-field {
+    @apply w-full bg-surface-medium border border-white/10 rounded-lg px-4 py-2.5 text-sm text-text-primary placeholder-text-muted focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/30 transition-all duration-200;
+  }
+
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+}
