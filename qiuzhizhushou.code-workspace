@@ -1,0 +1,19 @@
+{
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {
+    "cSpell.words": [
+      "qiuzhizhushou",
+      "zhipin",
+      "liepin",
+      "crxjs",
+      "Dexie",
+      "Recharts",
+      "mammoth"
+    ],
+    "typescript.tsdk": "node_modules/typescript/lib"
+  }
+}
