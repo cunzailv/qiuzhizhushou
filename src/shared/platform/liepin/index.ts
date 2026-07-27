@@ -386,16 +386,38 @@ async function fillGreetingMessage(
 
   // 投简历模式：点「发简历」→ 点「立刻投递」→ 关闭弹窗
   if (resumeMode) {
-    const sendBtn = findButtonByText(document, ['发简历', '发送简历'])
+    // 在模态框中搜索「发简历」按钮（可能是 button/a/span/div）
+    let sendBtn: HTMLElement | null = findButtonByText(document, ['发简历', '发送简历'])
+    if (!sendBtn) {
+      // 扩展搜索所有元素
+      const allEls = qa<HTMLElement>('button, a, span, div, [role="button"]', document)
+      for (const el of allEls) {
+        const text = (el.textContent || '').replace(/\s+/g, '')
+        if (text.includes('发简历') || text.includes('发送简历')) {
+          sendBtn = el; break
+        }
+      }
+    }
     if (sendBtn) {
       sendBtn.click()
+      sendBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
       log('[liepin]', 'fillGreetingMessage', 'Clicked 发简历')
       await new Promise((r) => setTimeout(r, 1500))
 
       // 第二个弹窗：找「立刻投递」并点击
-      const confirmBtn = findButtonByText(document, ['立刻投递', '确认投递'])
+      let confirmBtn: HTMLElement | null = findButtonByText(document, ['立刻投递', '确认投递', '投递简历'])
+      if (!confirmBtn) {
+        const allEls2 = qa<HTMLElement>('button, a, span, div, [role="button"]', document)
+        for (const el of allEls2) {
+          const text = (el.textContent || '').replace(/\s+/g, '')
+          if (text.includes('立刻投递') || text.includes('确认投递') || text.includes('投递简历')) {
+            confirmBtn = el; break
+          }
+        }
+      }
       if (confirmBtn) {
         confirmBtn.click()
+        confirmBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
         log('[liepin]', 'fillGreetingMessage', 'Clicked 立刻投递')
         await new Promise((r) => setTimeout(r, 1000))
       } else {
