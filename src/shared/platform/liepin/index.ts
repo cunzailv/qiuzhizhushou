@@ -62,13 +62,17 @@ function extractId(url: string): string {
 
 function detectPageType(): PageType {
   const url = location.href
-  // 猎聘求职端 URL 模式：/job/ 为详情页，zhaopin / so 为搜索/推荐
+  // 猎聘求职端 URL 模式
   if (url.includes('/job/') || url.includes('jobdetail')) return 'detail'
-  if (url.includes('zhaopin') || url.includes('/so/') || url.includes('search') || url.includes('recommend')) return 'search'
   if (url.includes('msg') || url.includes('chat') || url.includes('im')) return 'chat'
-  // 猎聘首页 / 推荐流也视为可投递页面（如果页面上有岗位卡片）
+  // 猎聘列表/推荐页：zhaopin、so、search、recommend，以及首页 / 带时间戳的推荐流
+  if (url.includes('zhaopin') || url.includes('/so/') || url.includes('search') || url.includes('recommend')) return 'search'
+  // c.liepin.com / www.liepin.com 首页（可能带 ?time= 参数）视为推荐流
+  if (/liepin\.com\/?(\?.*)?$/.test(url)) return 'recommend'
+  // 其他 liepin 页面（如列表子路径），页面上有卡片就视为搜索页
   if (qa(JOB_CARD_SELECTOR).length > 0) return 'search'
-  return 'other'
+  // 兜底：猎聘域名上的页面默认视为推荐页（可能是动态加载的岗位列表）
+  return 'recommend'
 }
 
 function parseJobCardsFromSearchPage(): JobCard[] {
