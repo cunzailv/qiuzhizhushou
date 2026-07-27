@@ -659,7 +659,27 @@ async function sendResumesOnChatPage(): Promise<void> {
 
     // 点击联系人
     await clickContact(contact)
-    await randomDelay(800, 1500)
+    await randomDelay(1000, 1500)
+
+    // 调试：收集页面上所有按钮文字
+    if (i === 0) {
+      const allBtns = document.querySelectorAll('button, [role="button"], [class*="btn"], span[class*="action"], [class*="clickable"]')
+      let btnTexts: string[] = []
+      allBtns.forEach(b => {
+        const t = (b.textContent || '').trim()
+        if (t && t.length >= 2 && t.length <= 10 && !btnTexts.includes(t)) btnTexts.push(t)
+      })
+      const sample = btnTexts.slice(0, 15).join(', ')
+      updatePanelContent(panelHost!, {
+        mode: currentMode, status: 'applying',
+        message: `[${i + 1}/${contacts.length}] ${contact.name}\n页面按钮: ${sample || '无'}`,
+        stats: { total: contacts.length, processed: i, matched: sent },
+        resumeMode: liepinResumeMode, isChatPage: true,
+        filters: currentFilters,
+      })
+      await new Promise((r) => setTimeout(r, 2000))
+      if (!isApplying) { isApplying = false; return }
+    }
 
     // 检查是否已发过简历
     if (hasResumeSentInChat()) {

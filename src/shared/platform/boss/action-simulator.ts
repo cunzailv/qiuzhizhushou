@@ -362,9 +362,9 @@ export function getChatContacts(): ChatContact[] {
     const text = (el.textContent || '').trim()
     if (!text || text.length < 5) return
 
-    // 排除非联系人的 UI 元素
-    const excludeWords = ['全部未读', '新招呼', '仅沟通', '有交换', '有面试', '不感兴趣', 'AI筛选', '提交', '更多', '已读']
-    if (excludeWords.some(w => text === w || (text.includes(w) && text.length < 20))) return
+    // 排除非联系人的 UI 元素（过滤栏、标签页等）
+    const excludeWords = ['全部未读', '全部', '未读', '新招呼', '仅沟通', '有交换', '有面试', '不感兴趣', 'AI筛选', '提交', '更多', '已读', '筛选']
+    if (excludeWords.some(w => text.startsWith(w) || text === w)) return
 
     // 必须有时间戳格式（HH:MM）或名称格式才是联系人
     const hasTime = /\d{1,2}:\d{2}/.test(text.slice(0, 6))
