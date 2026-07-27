@@ -222,22 +222,27 @@ async function activateJobCard(
   expectedTitle?: string,
   expectedCompany?: string,
 ): Promise<HTMLElement | null> {
-  // 先按 data 属性匹配，再按标题+公司名模糊匹配
-  let card: Element | null =
-    q(`[data-job-id="${jobId}"]`) ||
-    q(`[data-id="${jobId}"]`)
+  // 在当前页面找到对应卡片（不跳转！猎聘所有操作都在当前页完成）
+  let card: Element | null = null
 
-  if (!card) {
-    card =
-      qa(JOB_CARD_SELECTOR).find((el) => {
-        const title = (q(TITLE_SELECTOR, el)?.textContent || '').trim()
-        const company = (q(COMPANY_SELECTOR, el)?.textContent || '').trim()
-        if (expectedTitle && expectedCompany) {
-          return title === expectedTitle && company === expectedCompany
-        }
-        if (expectedTitle) return title === expectedTitle
-        return false
-      }) ?? null
+  // 按标题+公司名在所有卡片中匹配
+  const cards = qa(JOB_CARD_SELECTOR)
+  for (const el of cards) {
+    const title = (q(TITLE_SELECTOR, el)?.textContent || '').trim()
+    const company = (q(COMPANY_SELECTOR, el)?.textContent || '').trim()
+    if (expectedTitle && expectedCompany && title === expectedTitle && company === expectedCompany) {
+      card = el
+      break
+    }
+    if (expectedTitle && title === expectedTitle) {
+      card = el
+      break
+    }
+    // 模糊匹配：标题包含关键词
+    if (expectedTitle && title.includes(expectedTitle)) {
+      card = el
+      break
+    }
   }
 
   if (!card) {
@@ -245,51 +250,31 @@ async function activateJobCard(
     return null
   }
 
-  // 关键：hover 卡片以触发「聊一聊」按钮出现
+  // 滚动卡片到可视区域
+  ;(card as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' })
+  await new Promise((r) => setTimeout(r, 500))
+
+  // hover 卡片以触发「聊一聊」按钮出现
   triggerHover(card as HTMLElement)
+  await new Promise((r) => setTimeout(r, 800))
 
-  // 等待按钮渲染（猎聘有 hover → React 状态更新 → 按钮出现的延迟）
-  const start = Date.now()
-  while (Date.now() - start < 3000) {
-    const btn = findButtonByText(card, APPLY_TEXTS) || findButtonByText(document, APPLY_TEXTS)
-    if (btn) {
-      log('[liepin]', 'activateJobCard', 'Button appeared after hover')
-      return card as HTMLElement
-    }
-    await new Promise((r) => setTimeout(r, 200))
-  }
-
-  log('[liepin]', 'activateJobCard', 'Button did not appear after hover, returning card anyway')
-  return card as HTMLElement
-}
-
-async function clickApplyButton(jobCard: HTMLElement): Promise<boolean> {
-  // 再次触发 hover 确保按钮可见（可能因 DOM 更新丢失 hover 状态）
-  triggerHover(jobCard)
-
-  // 等待按钮出现
-  let btn: HTMLElement | null = null
-  const start = Date.now()
-  while (Date.now() - start < 3000) {
-    btn = findButtonByText(document, APPLY_TEXTS)
-    if (btn) break
-    await new Promise((r) => setTimeout(r, 200))
-  }
-
-  if (!btn) {
-    log('[liepin]', 'clickApplyButton', 'Apply button not found')
-    return false
+  // 在卡片内查找「聊一聊」按钮（排除职位详情链接，避免跳转）
+  const btn = findButtonByText(card, APPLY_TEXTS)
+  if (!btn || btn.tagName === 'A') {
+    // 如果卡片内的按钮是链接或者是找不到的，跳过（避免页面跳转）
+    log('[liepin]', 'activateJobCard', 'Chat button is link or not found, skipping navigation')
+    return card as HTMLElement
   }
 
   btn.click()
-  await new Promise((r) => setTimeout(r, 800))
+  log('[liepin]', 'activateJobCard', 'Clicked 聊一聊, waiting for modal...')
+  await new Promise((r) => setTimeout(r, 1500))
 
-  // 检查是否弹出了沟通对话框
-  const dialog = q('.chat-dialog, .greeting-dialog, .im-dialog, [class*="chat"], [class*="dialog"]')
-  if (dialog) {
-    log('[liepin]', 'clickApplyButton', 'Chat dialog opened')
-  }
+  return card as HTMLElement
+}
 
+async function clickApplyButton(_jobCard: HTMLElement): Promise<boolean> {
+  // 猎聘的「聊一聊」已在 activateJobCard 中点击，这里不需要重复操作
   return true
 }
 
@@ -297,25 +282,23 @@ async function fillGreetingMessage(
   message: string,
   _snapshot?: CommunicationUiSnapshot, // eslint-disable-line @typescript-eslint/no-unused-vars
 ): Promise<boolean> {
-  // 猎聘点击「聊一聊」后会弹出沟通对话框，输入框在对话框内。
-  // 选择器覆盖常见 class 名称。
+  // 猎聘点击「聊一聊」后弹出模态框，输入框在模态框内。
+  // 填入招呼语后，关闭模态框（不发送），继续下一个。
   const textareaSelectors = [
-    'textarea.greeting-input',
-    'textarea.chat-input',
-    'textarea.message-input',
-    '.chat-dialog textarea',
-    '.im-dialog textarea',
+    'textarea',
     '[class*="chat"] textarea',
     '[class*="dialog"] textarea',
-    'textarea',
+    '[class*="message"] textarea',
+    '[class*="greeting"] textarea',
   ]
 
-  let input: HTMLTextAreaElement | HTMLInputElement | null = null
+  // 等待模态框中的 textarea 出现
+  let input: HTMLTextAreaElement | null = null
   const start = Date.now()
   while (Date.now() - start < 5000) {
     for (const sel of textareaSelectors) {
       const el = q<HTMLTextAreaElement>(sel) as HTMLTextAreaElement | null
-      if (el && el.offsetParent !== null) {
+      if (el && el.offsetParent !== null && el.offsetWidth > 0) {
         input = el
         break
       }
@@ -325,33 +308,56 @@ async function fillGreetingMessage(
   }
 
   if (!input) {
-    log('[liepin]', 'fillGreetingMessage', 'Greeting textarea not found in dialog')
-    return false
+    log('[liepin]', 'fillGreetingMessage', 'Greeting textarea not found, trying to close modal anyway')
+    await closeAnyModal()
+    return true // 找不到输入框不算失败，关闭弹窗继续
   }
 
-  // 使用 React value setter 确保框架感知到值变化
+  // 填入招呼语
+  input.focus()
   const proto = Object.getPrototypeOf(input)
   const valueSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set ??
-    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set ??
-    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set
   if (valueSetter) {
     valueSetter.call(input, message)
   } else {
-    ;(input as unknown as { value: string }).value = message
+    input.value = message
   }
-
   input.dispatchEvent(new Event('input', { bubbles: true }))
   input.dispatchEvent(new Event('change', { bubbles: true }))
-
-  // 查找并点击发送按钮
   await new Promise((r) => setTimeout(r, 500))
-  const sendBtn = findButtonByText(document, ['发送', 'Send'])
-  if (sendBtn) {
-    sendBtn.click()
-    log('[liepin]', 'fillGreetingMessage', 'Send button clicked')
-  }
 
+  // 关闭模态框（右上角 X 按钮）
+  await closeAnyModal()
+  log('[liepin]', 'fillGreetingMessage', 'Greeting filled and modal closed')
   return true
+}
+
+/** 查找并点击模态框的关闭按钮（右上角 X 或取消按钮） */
+async function closeAnyModal(): Promise<void> {
+  // 尝试各种关闭方式
+  const closeSelectors = [
+    '[class*="modal"] [class*="close"]',
+    '[class*="dialog"] [class*="close"]',
+    '[class*="modal"] .anticon-close',
+    '[class*="dialog"] .anticon-close',
+    '[class*="drawer"] [class*="close"]',
+    'button[class*="close"]',
+    '[aria-label="close"]',
+    '[aria-label="关闭"]',
+    '.ant-modal-close',
+  ]
+  for (const sel of closeSelectors) {
+    const closeBtn = q<HTMLElement>(sel)
+    if (closeBtn && closeBtn.offsetParent !== null) {
+      closeBtn.click()
+      await new Promise((r) => setTimeout(r, 500))
+      return
+    }
+  }
+  // 用 ESC 键兜底
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  await new Promise((r) => setTimeout(r, 300))
 }
 
 function getJobSpecificGreeting(resumeName: string, job: JobCard, match: MatchResult): string {
