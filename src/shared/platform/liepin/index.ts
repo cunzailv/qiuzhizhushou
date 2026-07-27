@@ -112,7 +112,7 @@ function parseJobCardsFromSearchPage(): JobCard[] {
     }
 
     // 公司 logo
-    const logoImg = q('img', card)
+    const logoImg = q<HTMLImageElement>('img', card)
     const companyLogo = logoImg?.src || ''
 
     // 招聘者信息
