@@ -617,19 +617,28 @@ async function sendResumesOnChatPage(): Promise<void> {
   log(MOD, 'sendResumes', `Found ${contacts.length} contacts`)
 
   if (contacts.length === 0) {
-    // 调试：抓取页面中所有可能的列表容器信息
-    const containers = document.querySelectorAll('ul, ol, [class*="list"], [class*="item"], nav, aside, [class*="sidebar"], [class*="left"]')
+    // 调试：搜索所有有多个相似子元素的大容器（可能是联系人列表）
+    const allDivs = document.querySelectorAll('div, section, ul, ol, main, article')
     let debugHtml = ''
-    containers.forEach((c, i) => {
-      if (i >= 5) return
-      const cls = c.className?.toString?.()?.slice(0, 40) || ''
+    let found = 0
+    allDivs.forEach((c) => {
+      if (found >= 10) return
       const childCount = c.children.length
-      const text = (c.textContent || '').trim().slice(0, 60)
-      if (childCount >= 2) debugHtml += `${c.tagName}.${cls} (${childCount}子): ${text}\n`
+      if (childCount < 3) return
+      const cls = c.className?.toString?.()?.slice(0, 50) || ''
+      // 检查子元素是否有文本内容（排除纯图标/空元素）
+      let textChildren = 0
+      for (let j = 0; j < Math.min(childCount, 5); j++) {
+        if ((c.children[j]?.textContent || '').trim().length > 2) textChildren++
+      }
+      if (textChildren < 2) return
+      const text = (c.textContent || '').trim().slice(0, 80)
+      debugHtml += `${c.tagName}.${cls} (${childCount}子): ${text}\n`
+      found++
     })
     updatePanelContent(panelHost!, {
       mode: currentMode, status: 'idle',
-      message: `❌ 未找到联系人。页面容器:\n${debugHtml || '无'}`,
+      message: `❌ 未找到联系人(${found}容器):\n${debugHtml || '无'}`,
       filters: currentFilters, resumeMode: liepinResumeMode, isChatPage: true,
     })
     isApplying = false
