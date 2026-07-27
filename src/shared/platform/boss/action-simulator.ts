@@ -424,39 +424,24 @@ export function hasResumeSentInChat(): boolean {
 export async function clickSendResume(): Promise<boolean> {
   await new Promise((r) => setTimeout(r, 1000))
 
-  // 只搜 button，且文本精确等于「发简历」，排除「请求电话」等
+  // 只搜 button，且文本精确等于「发简历」
   let btn: HTMLElement | null = null
+  const allBtnTexts: string[] = []
   for (const b of document.querySelectorAll<HTMLElement>('button')) {
     const t = (b.textContent || '').trim()
-    if (t === '发简历' || t.startsWith('发简历')) {
-      if (!t.includes('请求') && !t.includes('电话')) { btn = b; break }
-    }
+    if (t.length >= 2 && t.length <= 15) allBtnTexts.push(t)
+    if (t === '发简历') { btn = b; break }
   }
+  console.log('[clickSendResume] All buttons:', allBtnTexts.join(', '))
+  console.log('[clickSendResume] Found btn:', btn ? (btn.textContent || '').trim() : 'NULL')
 
   if (!btn) return false
 
   btn.scrollIntoView({ block: 'center' })
   await new Promise((r) => setTimeout(r, 300))
-
-  const rect = btn.getBoundingClientRect()
-  const cx = rect.left + rect.width / 2
-  const cy = rect.top + rect.height / 2
-  const init: MouseEventInit = {
-    bubbles: true, cancelable: true, view: window,
-    clientX: cx, clientY: cy, screenX: cx, screenY: cy, button: 0,
-  }
-
-  btn.dispatchEvent(new PointerEvent('pointerdown', init))
-  btn.dispatchEvent(new MouseEvent('mousedown', init))
-  btn.dispatchEvent(new PointerEvent('pointerup', init))
-  btn.dispatchEvent(new MouseEvent('mouseup', init))
-  btn.dispatchEvent(new PointerEvent('click', init))
-  btn.dispatchEvent(new MouseEvent('click', init))
   btn.click()
-
   await new Promise((r) => setTimeout(r, 1500))
   return true
-}
 }
 
 /** 在简历弹窗中选简历并点发送 */
@@ -496,19 +481,6 @@ export async function selectAndSendResume(): Promise<boolean> {
 
   if (!sendBtn) return false
 
-  const rect = sendBtn.getBoundingClientRect()
-  const cx = rect.left + rect.width / 2
-  const cy = rect.top + rect.height / 2
-  const init: MouseEventInit = {
-    bubbles: true, cancelable: true, view: window,
-    clientX: cx, clientY: cy, screenX: cx, screenY: cy, button: 0,
-  }
-  sendBtn.dispatchEvent(new PointerEvent('pointerdown', init))
-  sendBtn.dispatchEvent(new MouseEvent('mousedown', init))
-  sendBtn.dispatchEvent(new PointerEvent('pointerup', init))
-  sendBtn.dispatchEvent(new MouseEvent('mouseup', init))
-  sendBtn.dispatchEvent(new PointerEvent('click', init))
-  sendBtn.dispatchEvent(new MouseEvent('click', init))
   sendBtn.click()
   await new Promise((r) => setTimeout(r, 1500))
   return true
