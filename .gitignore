@@ -1,19 +1,38 @@
-# Dependencies
-boss-zhinpin-extension/node_modules/
+# Build
+dist
+dist-ssr
+*.local
+dist.crx
+dist.pem
 
-# Build output
-boss-zhinpin-extension/dist/
-boss-zhinpin-extension/dist.crx
-boss-zhinpin-extension/dist.pem
-
-# Project local data (not source code)
-.codebuddy/
+# Package
+node_modules
 
 # Logs
+logs
 *.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
 
-# OS / Editor
-.DS_Store
+# IDE
 .vscode/*
 !.vscode/extensions.json
 .idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Testing
+test-results
+playwright-report
+
+# Env
+.env
+.env.local
+.env.*.local
