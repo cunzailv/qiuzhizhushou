@@ -112,7 +112,7 @@ async function init(): Promise<void> {
     updatePanelContent(panelHost, {
       mode: currentMode,
       status: 'idle',
-      filters: currentFilters,
+      filters: currentFilters, resumeMode: liepinResumeMode,
     })
     log(MOD, 'init', 'Floating panel created')
   } else {
@@ -173,7 +173,7 @@ window.addEventListener('message', (event) => {
     updatePanelContent(panelHost!, {
       mode: currentMode,
       status: 'idle',
-      filters: currentFilters,
+      filters: currentFilters, resumeMode: liepinResumeMode,
     })
   }
   if (data?.type === 'BOSS_ASSISTANT_CHANGE_SCORING') {
@@ -184,8 +184,7 @@ window.addEventListener('message', (event) => {
     updatePanelContent(panelHost!, {
       mode: currentMode,
       status: 'idle',
-      filters: currentFilters,
-      resumeMode: liepinResumeMode,
+      filters: currentFilters, resumeMode: liepinResumeMode,
     })
   }
   if (data?.type === 'BOSS_ASSISTANT_CHANGE_RESUME_MODE') {
@@ -194,8 +193,7 @@ window.addEventListener('message', (event) => {
     updatePanelContent(panelHost!, {
       mode: currentMode,
       status: 'idle',
-      filters: currentFilters,
-      resumeMode: liepinResumeMode,
+      filters: currentFilters, resumeMode: liepinResumeMode,
     })
   }
 })
@@ -273,7 +271,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
     mode: currentMode,
     status: 'scanning',
     message: '已收到启动指令，正在读取简历并扫描岗位…',
-    filters,
+    filters, resumeMode: liepinResumeMode,
   })
 
   logGroup(MOD, 'startApply')
@@ -311,7 +309,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
         mode: currentMode,
         status: 'scanning',
         message: `正在下滑加载更多岗位，已发现 ${count} 个…`,
-        filters,
+        filters, resumeMode: liepinResumeMode,
       })
     },
     // 用户在「扫描」阶段点击「停止」时立即中止采集。
@@ -325,7 +323,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
       mode: currentMode,
       status: 'idle',
       message: '未找到岗位卡片，请确保在招聘平台搜索页或推荐页',
-      filters,
+      filters, resumeMode: liepinResumeMode,
     })
     isApplying = false
     logGroupEnd()
@@ -346,7 +344,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
       mode: currentMode,
       status: 'idle',
       message: `找到 ${allJobs.length} 个岗位，但均不符合筛选条件`,
-      filters,
+      filters, resumeMode: liepinResumeMode,
     })
     showPanelToast(panelHost!, '没有符合筛选条件的岗位', 'warning')
     isApplying = false
@@ -365,7 +363,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
     message: filters?.enableAiMatch === false
       ? `筛选后 ${jobs.length} 个岗位，准备沟通...`
       : `筛选后 ${jobs.length} 个岗位，开始匹配分析...`,
-    filters,
+    filters, resumeMode: liepinResumeMode,
   })
 
   matchResults = []
@@ -451,7 +449,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
       message: scoreBypassed
         ? `筛选通过: ${job.title}`
         : `分析: ${job.title} — ${evaluatedMatch.score}分 ${evaluatedMatch.isRecommended ? '✓推荐' : '×跳过'}`,
-      filters: currentFilters,
+      filters: currentFilters, resumeMode: liepinResumeMode,
     })
 
     // Apply if batch mode + recommended
@@ -483,7 +481,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
           : currentFilters.enableAiMatch
             ? `分析完成！发现 ${matchedCount} 个匹配岗位`
             : `筛选完成！共 ${matchedCount} 个岗位可直投`),
-    filters: currentFilters,
+    filters: currentFilters, resumeMode: liepinResumeMode,
   })
 
   if (currentMode === 'batch') {
@@ -509,7 +507,7 @@ async function applyToJob(job: JobCard, match: MatchResult): Promise<boolean> {
     mode: currentMode,
     status: 'applying',
     message: `正在沟通：${job.title} @ ${job.companyName}`,
-    filters: currentFilters,
+    filters: currentFilters, resumeMode: liepinResumeMode,
   })
 
   const jobDetail = await adapter.activateJobCard(job.url, job.id, job.title, job.companyName)
@@ -588,7 +586,7 @@ function stopApply(): void {
       mode: currentMode,
       status: 'pause',
       message: '已停止沟通',
-      filters: currentFilters,
+      filters: currentFilters, resumeMode: liepinResumeMode,
     })
     showPanelToast(panelHost!, '已停止', 'warning')
   }
