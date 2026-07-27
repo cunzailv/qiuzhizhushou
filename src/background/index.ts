@@ -33,7 +33,7 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   log(MOD, 'alarm', `Alarm fired: ${alarm.name}`)
 
   if (alarm.name === 'daily-reset') {
-    resetDailyCounter()
+    await resetDailyCounter()
     log(MOD, 'alarm', 'Daily counter reset')
   }
 

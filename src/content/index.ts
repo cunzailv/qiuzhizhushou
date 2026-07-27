@@ -6,7 +6,7 @@ import { setPlatformName } from './inject-ui'
 // 当前活动平台适配器（由 PlatformManager 按网址自动识别，或按设置手动覆盖）。
 let adapter: PlatformAdapter
 import { createFloatingPanel, updatePanelContent, showPanelToast } from './inject-ui'
-import { randomDelay, scanRisk } from '../shared/antiBot'
+import { randomDelay, scanRisk, checkDailyLimit, incrementCounter } from '../shared/antiBot'
 import { matchResumeToJob } from '../shared/ai'
 import { getSharedResumeSummary, getSharedFullResume, getSharedAppliedJobIds, addSharedAppliedJobId } from '../shared/db/shared-state'
 import { log, logWarn, logError, logGroup, logGroupEnd } from '../shared/utils/logger'
@@ -389,6 +389,14 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
       continue
     }
 
+    // Check daily limit before processing this job
+    const limitCheck = await checkDailyLimit()
+    if (!limitCheck.allowed) {
+      showPanelToast(panelHost!, `今日投递次数已达上限，剩余 ${limitCheck.remaining} 次`, 'warning')
+      logWarn(MOD, 'startApply', `Daily limit reached — stopping run (${limitCheck.remaining} remaining)`)
+      break
+    }
+
     const scoreBypassed = filters?.enableAiMatch === false
     let evaluatedMatch: MatchResult
     if (scoreBypassed) {
@@ -435,7 +443,10 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
     // Apply if batch mode + recommended
     if (currentMode === 'batch' && evaluatedMatch.isRecommended) {
       const applied = await applyToJob(job, evaluatedMatch)
-      if (applied) appliedCount++
+      if (applied) {
+        appliedCount++
+        await incrementCounter()
+      }
     }
 
     // Delay between processing
