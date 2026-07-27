@@ -387,14 +387,6 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
     ${message ? `
     <div class="panel-message">${message}</div>
     ` : ''}
-    <div class="mode-toggle">
-      <button class="mode-btn ${mode === 'batch' ? 'active' : ''}" data-mode="batch" ${lockAttr}${lockHint}>⚡ 批量沟通</button>
-      <button class="mode-btn ${mode === 'recommend' ? 'active' : ''}" data-mode="recommend" ${lockAttr}${lockHint}>🤔 AI推荐确认</button>
-    </div>
-    <div class="score-toggle">
-      <button class="score-btn ${effectiveFilters.enableAiMatch ? 'active' : ''}" id="score-filter" ${lockAttr}${lockHint}>⭐ 按分筛选</button>
-      <button class="score-btn ${effectiveFilters.enableAiMatch ? '' : 'active direct'}" id="score-direct" ${lockAttr}${lockHint}>🚀 不评分沟通</button>
-    </div>
     ${content.isChatPage ? '' : `
     <div class="mode-toggle">
       <button class="mode-btn ${mode === 'batch' ? 'active' : ''}" data-mode="batch" ${lockAttr}${lockHint}>⚡ 批量沟通</button>
