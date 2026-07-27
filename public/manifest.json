@@ -27,7 +27,8 @@
       "matches": [
         "https://www.zhipin.com/*",
         "https://zhipin.com/*",
-        "*://*.liepin.com/*"
+        "*://*.liepin.com/*",
+        "*://liepin.com/*"
       ],
       "js": ["src/content/index.ts"],
       "run_at": "document_end"
@@ -43,12 +44,13 @@
   "host_permissions": [
     "https://www.zhipin.com/*",
     "https://zhipin.com/*",
-    "*://*.liepin.com/*"
+    "*://*.liepin.com/*",
+    "*://liepin.com/*"
   ],
   "web_accessible_resources": [
     {
       "resources": ["src/assets/*"],
-      "matches": ["https://www.zhipin.com/*", "https://zhipin.com/*", "*://*.liepin.com/*"]
+      "matches": ["https://www.zhipin.com/*", "https://zhipin.com/*", "*://*.liepin.com/*", "*://liepin.com/*"]
     }
   ]
 }
