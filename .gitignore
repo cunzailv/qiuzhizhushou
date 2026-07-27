@@ -36,3 +36,6 @@ playwright-report
 .env
 .env.local
 .env.*.local
+
+# Project local data (not source code)
+.codebuddy/
