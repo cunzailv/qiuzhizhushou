@@ -101,6 +101,16 @@ src/
 - 💡 [功能建议](https://github.com/cunzailv/qiuzhizhushou/issues/new?template=feature_request.yml)
 - 📦 [提交 PR](CONTRIBUTING.md#提交代码)
 
+## ☕ 赞助
+
+如果这个项目对你有帮助，欢迎请作者喝杯咖啡 ☕
+
+<p align="center">
+  <img src="docs/sponsor-qr.jpg" alt="微信收款码" width="280">
+</p>
+
+**微信**：`AQuan12070310`
+
 ## ⚠️ 免责声明
 
 本工具仅供学习和技术研究使用。使用自动化功能时请遵守招聘平台的服务条款，合理控制操作频率。使用者对自身行为负责，项目作者不对滥用导致的账号封禁等后果承担责任。
