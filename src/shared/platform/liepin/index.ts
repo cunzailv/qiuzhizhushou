@@ -386,39 +386,48 @@ async function fillGreetingMessage(
 
   // 投简历模式：点「发简历」→ 点「立刻投递」→ 关闭弹窗
   if (resumeMode) {
-    // 在模态框中搜索「发简历」按钮（可能是 button/a/span/div）
-    let sendBtn: HTMLElement | null = findButtonByText(document, ['发简历', '发送简历'])
+    // 猎聘 DOM: <span class="im-ui-action-button action-resume">...<span>发简历</span></span>
+    // 优先按 class 精准定位，再兜底文字搜索
+    let sendBtn: HTMLElement | null =
+      q('.action-resume') as HTMLElement | null ||
+      q('[class*="action-resume"]') as HTMLElement | null ||
+      q('[class*="im-ui-action-button"][class*="resume"]') as HTMLElement | null
     if (!sendBtn) {
-      // 扩展搜索所有元素
-      const allEls = qa<HTMLElement>('button, a, span, div, [role="button"]', document)
+      // 兜底：搜索所有元素中包含「发简历」文字的，然后取父级 action button
+      const allEls = qa<HTMLElement>('span, div', document)
       for (const el of allEls) {
-        const text = (el.textContent || '').replace(/\s+/g, '')
-        if (text.includes('发简历') || text.includes('发送简历')) {
-          sendBtn = el; break
+        if ((el.textContent || '').trim() === '发简历') {
+          sendBtn = el.closest('[class*="action"]') as HTMLElement | null || el
+          break
         }
       }
     }
     if (sendBtn) {
       sendBtn.click()
       sendBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
-      log('[liepin]', 'fillGreetingMessage', 'Clicked 发简历')
+      log('[liepin]', 'fillGreetingMessage', `Clicked 发简历 (class=${sendBtn.className})`)
       await new Promise((r) => setTimeout(r, 1500))
 
-      // 第二个弹窗：找「立刻投递」并点击
-      let confirmBtn: HTMLElement | null = findButtonByText(document, ['立刻投递', '确认投递', '投递简历'])
+      // 第二个弹窗：找「立刻投递」
+      let confirmBtn: HTMLElement | null =
+        q('[class*="action-deliver"]') as HTMLElement | null ||
+        q('[class*="action-submit"]') as HTMLElement | null
       if (!confirmBtn) {
-        const allEls2 = qa<HTMLElement>('button, a, span, div, [role="button"]', document)
+        const allEls2 = qa<HTMLElement>('span, div, button', document)
         for (const el of allEls2) {
-          const text = (el.textContent || '').replace(/\s+/g, '')
-          if (text.includes('立刻投递') || text.includes('确认投递') || text.includes('投递简历')) {
-            confirmBtn = el; break
+          const text = (el.textContent || '').trim()
+          if (text === '立刻投递' || text === '确认投递' || text.includes('立刻投递')) {
+            confirmBtn = el.closest('[class*="action"]') as HTMLElement | null
+              || el.closest('button') as HTMLElement | null
+              || el
+            break
           }
         }
       }
       if (confirmBtn) {
         confirmBtn.click()
         confirmBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
-        log('[liepin]', 'fillGreetingMessage', 'Clicked 立刻投递')
+        log('[liepin]', 'fillGreetingMessage', `Clicked 立刻投递 (class=${confirmBtn.className})`)
         await new Promise((r) => setTimeout(r, 1000))
       } else {
         log('[liepin]', 'fillGreetingMessage', '立刻投递 button not found')
