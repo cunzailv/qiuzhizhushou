@@ -113,6 +113,7 @@ export default function App() {
   const [platforms, setPlatforms] = useState<Array<{ id: string; name: string; icon: string }>>([])
   const [applyRunning, setApplyRunning] = useState(false)
   const [runningTabId, setRunningTabId] = useState<number | null>(null)
+  const [activeTabId, setActiveTabId] = useState<number | null>(null)
   const [toast, setToast] = useState<ToastState>({
     visible: false,
     message: '',
@@ -163,8 +164,11 @@ export default function App() {
         })
         if (!tab?.id || !tab.url) {
           setPlatformName('')
+          setActiveTabId(null)
           return
         }
+
+        setActiveTabId(tab.id)
 
         // 先尝试通过 content script 获取精确的平台信息
         let detectedName = ''
@@ -238,10 +242,27 @@ export default function App() {
     const platformLabel = effectivePlatformName || '招聘平台'
     showToast(`正在连接 ${platformLabel} 页面…`, 'info')
     try {
-      let targetTab = await findSupportedBossTab(preferred)
-      const createdTarget = !targetTab
-      if (!targetTab) targetTab = await createSupportedBossTab(preferred)
-      if (!targetTab.id) throw new Error('未找到可用的页面')
+      // 优先使用 popup 检测到的当前活动 tab（用户在哪个平台就操作哪个平台）
+      let targetTab: chrome.tabs.Tab | undefined
+      let createdTarget = false
+
+      if (activeTabId) {
+        try {
+          targetTab = await chrome.tabs.get(activeTabId)
+        } catch {
+          // tab 已关闭
+        }
+      }
+
+      // 如果当前 tab 不是目标平台，再查找其他 tab
+      if (!targetTab?.id) {
+        targetTab = await findSupportedBossTab(preferred)
+      }
+
+      // 不要自动创建新 tab —— 用户已经在平台页面上，应该直接操作当前页
+      if (!targetTab?.id) {
+        throw new Error(`未找到 ${platformLabel} 页面。请打开 ${platformLabel} 后重试`)
+      }
 
       log(MOD, 'handleStartApply', 'Sending EXECUTE_APPLY', { tabId: targetTab.id, preferred })
       const response = await sendMessageWithRecovery(targetTab.id, {
