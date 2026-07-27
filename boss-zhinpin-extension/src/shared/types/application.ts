@@ -45,4 +45,6 @@ export interface Application {
   bossTitle: string
   appliedAt: string
   updatedAt: string
+  // 所属平台 id（如 boss / liepin），用于多平台区分投递记录
+  platformId?: string
 }

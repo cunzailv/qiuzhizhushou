@@ -1,13 +1,10 @@
 // Content script entry point - injected into Boss Zhipin pages
-import { parseJobCardsFromSearchPage, detectPageType, extractJobDescriptionFromDetail } from './dom-parser'
-import {
-  activateJobCard,
-  clickApplyButton,
-  collectJobCards,
-  fillGreetingMessage,
-  getJobSpecificGreeting,
-  snapshotCommunicationUi,
-} from './action-simulator'
+import { getActivePlatform } from '../shared/platform'
+import type { PlatformAdapter } from '../shared/platform/types'
+import { setPlatformName } from './inject-ui'
+
+// 当前活动平台适配器（由 PlatformManager 按网址自动识别，或按设置手动覆盖）。
+let adapter: PlatformAdapter
 import { createFloatingPanel, updatePanelContent, showPanelToast } from './inject-ui'
 import { randomDelay, scanRisk } from '../shared/antiBot'
 import { matchResumeToJob } from '../shared/ai'
@@ -23,6 +20,7 @@ const MOD = 'ContentScript'
 
 // ------ State ------
 let isApplying = false
+let runStopped = false
 let currentMode: 'batch' | 'recommend' = 'recommend'
 let panelHost: HTMLElement | null = null
 let matchResults: Array<{
@@ -84,8 +82,11 @@ async function loadApplyDefaultsFromSettings(): Promise<void> {
 // ------ Initialization ------
 async function init(): Promise<void> {
   logGroup(MOD, 'init')
-  const pageType = detectPageType()
-  log(MOD, 'init', `Page type: ${pageType} | url: ${window.location.href}`)
+  // 按网址自动识别平台（或按设置手动选择），后续所有解析/动作均通过该适配器执行。
+  adapter = await getActivePlatform()
+  setPlatformName(adapter.name)
+  const pageType = adapter.detectPageType()
+  log(MOD, 'init', `Platform: ${adapter.name} | Page type: ${pageType} | url: ${window.location.href}`)
 
   if (pageType === 'search' || pageType === 'recommend' || pageType === 'detail') {
     // Step 1: Quick check from chrome.storage.local — does a default resume exist?
@@ -123,7 +124,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'EXECUTE_APPLY') {
     const mode = message.payload?.mode || 'recommend'
     const filters = message.payload?.filters
-    const pageType = detectPageType()
+    const pageType = adapter.detectPageType()
     if (pageType === 'other' || pageType === 'chat') {
       sendResponse({ success: false, error: '当前不是岗位列表或详情页' })
       return true
@@ -138,8 +139,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     sendResponse({ success: true })
   }
   if (message.type === 'GET_PAGE_INFO') {
-    const pageType = detectPageType()
-    sendResponse({ url: window.location.href, title: document.title, pageType })
+    const pageType = adapter.detectPageType()
+    sendResponse({
+      url: window.location.href,
+      title: document.title,
+      pageType,
+      platformId: adapter.id,
+      platformName: adapter.name,
+    })
   }
   return true
 })
@@ -242,6 +249,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
     return
   }
   isApplying = true
+  runStopped = false
   currentMode = mode
   filters = { ...currentFilters, ...filters }
   currentFilters = filters
@@ -275,9 +283,15 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
 
   log(MOD, 'startApply', `Resume: ${defaultResume.name} (skills=${defaultResume.structuredData?.skills?.length})`)
 
+  // 读取用户配置的「单次扫描数量」。<=0 表示不限制（扫描到页面无更多为止）。
+  const maxScanCount = await getSetting<number>('maxScanCount', 50)
+  const maxJobs = maxScanCount > 0 ? maxScanCount : undefined
+  log(MOD, 'startApply', `Max scan count: ${maxJobs ?? 'unlimited'}`)
+
   // BOSS initially renders only a small first batch. Scroll and keep collecting
   // newly loaded cards before filtering/matching them.
-  const allJobs = await collectJobCards(parseJobCardsFromSearchPage, {
+  const allJobs = await adapter.collectJobCards(adapter.parseJobCardsFromSearchPage, {
+    maxJobs,
     onCountChange: (count) => {
       updatePanelContent(panelHost!, {
         mode: currentMode,
@@ -286,6 +300,8 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
         filters,
       })
     },
+    // 用户在「扫描」阶段点击「停止」时立即中止采集。
+    shouldCancel: () => !isApplying,
   })
   log(MOD, 'startApply', `Parsed ${allJobs.length} job cards`)
 
@@ -349,7 +365,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
     // Check risk. Most signals are non-fatal (just warn), but a `block`
     // (account anomaly OR daily communication cap) is fatal — we must stop
     // the whole run, otherwise we keep hammering a wall and risk the account.
-    const risk = scanRisk()
+    const risk = scanRisk(adapter.getRiskConfig())
     if (risk) {
       if (risk.type === 'block') {
         showPanelToast(panelHost!, risk.message, 'error')
@@ -429,16 +445,19 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
   log(MOD, 'startApply', `Done: ${matchedCount} matched / ${processedCount} processed / ${jobs.length} total`)
   // When the UI says the run is complete, a new run must be accepted immediately.
   isApplying = false
+  const finishedByStop = runStopped
   updatePanelContent(panelHost!, {
     mode: currentMode,
     stats: { total: jobs.length, processed: processedCount, matched: matchedCount },
-    status: 'done',
+    status: finishedByStop ? 'pause' : 'done',
     matchResults,
-    message: currentMode === 'batch'
-      ? `投递完成！成功 ${appliedCount}/${processedCount} 个岗位`
-      : currentFilters.enableAiMatch
-        ? `分析完成！发现 ${matchedCount} 个匹配岗位`
-        : `筛选完成！共 ${matchedCount} 个岗位可直投`,
+    message: finishedByStop
+      ? '已停止投递'
+      : (currentMode === 'batch'
+          ? `投递完成！成功 ${appliedCount}/${processedCount} 个岗位`
+          : currentFilters.enableAiMatch
+            ? `分析完成！发现 ${matchedCount} 个匹配岗位`
+            : `筛选完成！共 ${matchedCount} 个岗位可直投`),
     filters: currentFilters,
   })
 
@@ -448,6 +467,12 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
       appliedCount > 0 ? `投递完成！成功 ${appliedCount} 个` : '未完成任何投递，请检查岗位页面',
       appliedCount > 0 ? 'success' : 'warning',
     )
+  }
+  // 通知 popup「本次运行已结束」，使其复位「停止」按钮状态。
+  try {
+    chrome.runtime.sendMessage({ type: 'APPLY_ENDED', stopped: finishedByStop })
+  } catch {
+    // popup 未打开时忽略
   }
   logGroupEnd()
 }
@@ -462,7 +487,7 @@ async function applyToJob(job: JobCard, match: MatchResult): Promise<boolean> {
     filters: currentFilters,
   })
 
-  const jobDetail = await activateJobCard(job.url, job.id, job.title, job.companyName)
+  const jobDetail = await adapter.activateJobCard(job.url, job.id, job.title, job.companyName)
   if (!jobDetail) {
     logWarn(MOD, 'applyToJob', `Could not activate job detail: ${job.title}`)
     return false
@@ -472,19 +497,19 @@ async function applyToJob(job: JobCard, match: MatchResult): Promise<boolean> {
   // persisted and exported. The JD block often renders a touch after the apply
   // button, so give it a beat before reading.
   await new Promise((r) => setTimeout(r, 350))
-  const fullDesc = extractJobDescriptionFromDetail(jobDetail)
+  const fullDesc = adapter.extractJobDescriptionFromDetail(jobDetail)
   if (fullDesc && fullDesc.length > (job.jobDescription || '').length) {
     job.jobDescription = fullDesc
   }
 
   // Click apply button
-  const communicationUiBeforeClick = snapshotCommunicationUi()
-  const applied = await clickApplyButton(jobDetail)
+  const communicationUiBeforeClick = adapter.snapshotCommunicationUi()
+  const applied = await adapter.clickApplyButton(jobDetail)
   if (applied) {
     // Fill greeting message
     const name = defaultResume?.structuredData?.name || '求职者'
-    const greeting = getJobSpecificGreeting(name, job, match)
-    const greetingSent = await fillGreetingMessage(greeting, communicationUiBeforeClick)
+    const greeting = adapter.getJobSpecificGreeting(name, job, match)
+    const greetingSent = await adapter.fillGreetingMessage(greeting, communicationUiBeforeClick)
     if (!greetingSent) {
       logWarn(MOD, 'applyToJob', `Greeting was not sent: ${job.title}`)
       return false
@@ -515,6 +540,7 @@ async function saveApplication(job: JobCard, match: MatchResult): Promise<boolea
         job,
         match,
         resumeId: defaultResume?.id || '',
+        platformId: adapter?.id || 'unknown',
       },
     }, (response) => {
       if (chrome.runtime.lastError) {
@@ -528,12 +554,14 @@ async function saveApplication(job: JobCard, match: MatchResult): Promise<boolea
 }
 
 function stopApply(): void {
+  if (!isApplying) return
   isApplying = false
+  runStopped = true
   log(MOD, 'stopApply', 'Stopped by user')
   if (panelHost) {
     updatePanelContent(panelHost!, {
       mode: currentMode,
-      status: 'idle',
+      status: 'pause',
       message: '已停止投递',
       filters: currentFilters,
     })

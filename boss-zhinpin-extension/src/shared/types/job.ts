@@ -14,6 +14,8 @@ export interface JobCard {
   bossOnline: boolean
   publishedAt: string
   url: string
+  // 所属平台 id（如 boss / liepin），用于多平台区分
+  platformId?: string
 }
 
 export interface MatchResult {

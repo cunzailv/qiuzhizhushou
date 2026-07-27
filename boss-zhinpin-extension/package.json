@@ -1,8 +1,28 @@
 {
-  "name": "boss-zhinpin-extension",
-  "private": true,
-  "version": "0.0.0",
+  "name": "qiuzhizhushou",
+  "version": "1.0.0",
+  "private": false,
+  "description": "多平台智能求职助手 — 支持 Boss直聘、猎聘的 AI 驱动的自动打招呼与简历投递 Chrome 扩展（求职者端）",
   "type": "module",
+  "author": "cunzailv",
+  "license": "MIT",
+  "homepage": "https://github.com/cunzailv/qiuzhizhushou#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cunzailv/qiuzhizhushou.git"
+  },
+  "bugs": {
+    "url": "https://github.com/cunzailv/qiuzhizhushou/issues"
+  },
+  "keywords": [
+    "chrome-extension",
+    "boss-zhipin",
+    "liepin",
+    "job-application",
+    "ai-matching",
+    "automation",
+    "resume-management"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

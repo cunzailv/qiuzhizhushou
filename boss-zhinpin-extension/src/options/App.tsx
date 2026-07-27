@@ -33,7 +33,7 @@ export default function App() {
         {/* Logo */}
         <div className="mb-8 px-2">
           <h1 className="text-lg font-bold gradient-text">求职助手</h1>
-          <p className="text-[10px] text-text-muted mt-0.5">Boss直聘 · 管理后台</p>
+          <p className="text-[10px] text-text-muted mt-0.5">智能求职助手 · 管理后台</p>
         </div>
 
         {/* Navigation */}
@@ -57,7 +57,7 @@ export default function App() {
         {/* Footer */}
         <div className="border-t border-white/5 pt-3 mt-4">
           <p className="text-[10px] text-text-muted text-center">
-            v1.0.0 · Boss直聘智能求职助手
+            v1.0.0 · 智能求职助手
           </p>
         </div>
       </aside>

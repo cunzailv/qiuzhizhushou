@@ -16,12 +16,27 @@ interface PanelContent {
   message?: string
   dailyRemaining?: number
   filters?: Partial<ApplyFilters>
+  platformName?: string
 }
 
 let isMinimized = false
 let triggerBtn: HTMLDivElement | null = null
 let activeHost: HTMLElement | null = null
 let resizeListenerInstalled = false
+let currentPlatformName = ''
+
+/**
+ * 设置当前活动平台名称并在浮动面板头部徽标中展示。
+ * 由 content/index.ts 在识别到平台后调用（初始化时先于面板创建执行，
+ * 因此新建面板时会自动带上平台名；面板已存在时则就地更新）。
+ */
+export function setPlatformName(name: string): void {
+  currentPlatformName = name
+  const shadow = activeHost?.shadowRoot
+  if (!shadow) return
+  const badge = shadow.getElementById('platform-badge')
+  if (badge) badge.textContent = name
+}
 
 const VIEWPORT_MARGIN = 8
 
@@ -146,7 +161,10 @@ export function createFloatingPanel(): HTMLElement {
     <div class="panel-header">
       <div class="header-left">
         <span class="header-icon">🤖</span>
-        <h3>智能求职助手</h3>
+        <div class="header-titles">
+          <h3>智能求职助手</h3>
+          <span class="platform-badge" id="platform-badge">${currentPlatformName}</span>
+        </div>
       </div>
       <div class="header-actions">
         <button class="btn-header" id="btn-minimize" title="最小化">−</button>
@@ -300,6 +318,10 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
   const filterBar = shadow.getElementById('filter-bar')
   const { mode, stats, matchResults, status = 'idle', message, dailyRemaining, filters } = content
   const effectiveFilters: ApplyFilters = { ...DEFAULT_FILTERS, ...filters }
+
+  // Sync platform badge (explicit payload wins, else module state)
+  const badge = shadow.getElementById('platform-badge')
+  if (badge) badge.textContent = content.platformName ?? currentPlatformName
 
   // Update filter bar
   if (filterBar) {
@@ -580,6 +602,13 @@ function getStyles(): string {
       gap: 6px;
     }
     .header-icon { font-size: 16px; }
+.header-titles { display: flex; flex-direction: column; line-height: 1.15; gap: 1px; }
+.platform-badge {
+  font-size: 10px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+  letter-spacing: 0.3px;
+}
     .panel-header h3 {
       color: white;
       font-size: 13px;

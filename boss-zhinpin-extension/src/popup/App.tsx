@@ -3,7 +3,12 @@ import { Tabs } from '../components/ui/tabs'
 import { Toast } from '../components/ui/toast'
 import type { ApplyFilters } from '../shared/types/filters'
 import { log } from '../shared/utils/logger'
-import { getSetting } from '../shared/db/settings-store'
+import { getSetting, setSetting, syncSettingsToSharedStorage } from '../shared/db/settings-store'
+import {
+  getSupportedUrlPatterns,
+  getPlatformsMeta,
+  getPlatformById,
+} from '../shared/platform'
 import {
   LayoutDashboard, FileText, ListChecks, Settings2,
 } from 'lucide-react'
@@ -19,12 +24,10 @@ type ToastState = {
   type: 'success' | 'error' | 'warning' | 'info'
 }
 
-const BOSS_URL_PATTERNS = [
-  'https://www.zhipin.com/*',
-  'https://zhipin.com/*',
-]
-
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+
+// 默认用于「没有可用标签页时自动打开」的目标平台（当前以 Boss 推荐页为默认入口）。
+const DEFAULT_TARGET_URL = 'https://www.zhipin.com/web/geek/job-recommend'
 
 async function sendMessageWithRecovery(tabId: number, message: unknown): Promise<unknown> {
   try {
@@ -52,8 +55,15 @@ async function sendMessageWithRecovery(tabId: number, message: unknown): Promise
   }
 }
 
-async function findSupportedBossTab(): Promise<chrome.tabs.Tab | undefined> {
-  const tabs = await chrome.tabs.query({ url: BOSS_URL_PATTERNS })
+async function findSupportedBossTab(
+  preferredPlatformId?: string,
+): Promise<chrome.tabs.Tab | undefined> {
+  const patterns = preferredPlatformId
+    ? getSupportedUrlPatterns().filter((p) =>
+        p.toLowerCase().includes(preferredPlatformId === 'boss' ? 'zhipin' : 'liepin'),
+      )
+    : getSupportedUrlPatterns()
+  const tabs = await chrome.tabs.query({ url: patterns })
   const orderedTabs = [...tabs].sort((left, right) => {
     if (left.active !== right.active) return left.active ? -1 : 1
     return (right.lastAccessed ?? 0) - (left.lastAccessed ?? 0)
@@ -72,19 +82,20 @@ async function findSupportedBossTab(): Promise<chrome.tabs.Tab | undefined> {
   }
 }
 
-async function createSupportedBossTab(): Promise<chrome.tabs.Tab> {
+async function createSupportedBossTab(platformId?: string): Promise<chrome.tabs.Tab> {
+  const url = (platformId ? getPlatformById(platformId)?.homeUrl : undefined) ?? DEFAULT_TARGET_URL
   const tab = await chrome.tabs.create({
-    url: 'https://www.zhipin.com/web/geek/job-recommend',
+    url,
     active: false,
   })
-  if (!tab.id) throw new Error('无法创建 BOSS 岗位推荐页')
+  if (!tab.id) throw new Error('无法创建岗位推荐页')
 
   for (let attempt = 0; attempt < 100; attempt++) {
     const current = await chrome.tabs.get(tab.id)
     if (current.status === 'complete') return current
     await wait(150)
   }
-  throw new Error('BOSS 岗位推荐页加载超时')
+  throw new Error('岗位推荐页加载超时')
 }
 
 const TABS = [
@@ -97,11 +108,21 @@ const TABS = [
 export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [applyMode, setApplyMode] = useState<'batch' | 'recommend'>('batch')
+  const [platformName, setPlatformName] = useState('')
+  const [platformOverride, setPlatformOverride] = useState('auto')
+  const [platforms, setPlatforms] = useState<Array<{ id: string; name: string; icon: string }>>([])
+  const [applyRunning, setApplyRunning] = useState(false)
   const [toast, setToast] = useState<ToastState>({
     visible: false,
     message: '',
     type: 'info',
   })
+
+  // 启动时把 Dexie 中的历史设置迁移到 chrome.storage.local，
+  // 保证 content script 能读到用户配置（content 的 IndexedDB 属于网页域）。
+  useEffect(() => {
+    syncSettingsToSharedStorage()
+  }, [])
 
   // Honor the "一键投递默认" mode configured in Settings instead of always
   // forcing batch mode.
@@ -110,6 +131,50 @@ export default function App() {
       setApplyMode(m === 'recommend' ? 'recommend' : 'batch')
     })
   }, [])
+
+  // 加载平台列表与用户手动选择的平台覆盖项。
+  useEffect(() => {
+    setPlatforms(getPlatformsMeta())
+    getSetting<string>('platformOverride', 'auto').then((o) => setPlatformOverride(o || 'auto'))
+  }, [])
+
+  // 接收 content 脚本「运行结束」通知，复位「停止」按钮。
+  useEffect(() => {
+    const listener = (message: { type?: string; stopped?: boolean }) => {
+      if (message?.type === 'APPLY_ENDED') setApplyRunning(false)
+    }
+    chrome.runtime.onMessage.addListener(listener)
+    return () => chrome.runtime.onMessage.removeListener(listener)
+  }, [])
+
+  // 探测当前活动标签页所属招聘平台，并在头部展示平台状态。
+  useEffect(() => {
+    (async () => {
+      try {
+        const [tab] = await chrome.tabs.query({
+          active: true,
+          currentWindow: true,
+          url: getSupportedUrlPatterns(),
+        })
+        if (!tab?.id) {
+          setPlatformName('')
+          return
+        }
+        const info = await sendMessageWithRecovery(tab.id, { type: 'GET_PAGE_INFO' }) as {
+          platformName?: string
+        }
+        setPlatformName(info?.platformName ?? '')
+      } catch {
+        setPlatformName('')
+      }
+    })()
+  }, [])
+
+  // 头部展示的平台名：手动选择时优先显示所选平台，否则显示自动识别结果。
+  const effectivePlatformName =
+    platformOverride !== 'auto'
+      ? (platforms.find((p) => p.id === platformOverride)?.name ?? platformName)
+      : platformName
 
   const showToast = (message: string, type: ToastState['type']) => {
     setToast({ visible: true, message, type })
@@ -128,28 +193,51 @@ export default function App() {
       minMatchScore: filters.minMatchScore,
     })
 
-    showToast('正在连接 BOSS 页面…', 'info')
+    const preferred = platformOverride !== 'auto' ? platformOverride : undefined
+    const platformLabel = effectivePlatformName || '招聘平台'
+    showToast(`正在连接 ${platformLabel} 页面…`, 'info')
     try {
-      let targetTab = await findSupportedBossTab()
+      let targetTab = await findSupportedBossTab(preferred)
       const createdTarget = !targetTab
-      if (!targetTab) targetTab = await createSupportedBossTab()
-      if (!targetTab.id) throw new Error('未找到可用的 BOSS 页面')
+      if (!targetTab) targetTab = await createSupportedBossTab(preferred)
+      if (!targetTab.id) throw new Error('未找到可用的页面')
 
-      log(MOD, 'handleStartApply', 'Sending EXECUTE_APPLY to zhipin.com tab', targetTab.id)
+      log(MOD, 'handleStartApply', 'Sending EXECUTE_APPLY', { tabId: targetTab.id, preferred })
       const response = await sendMessageWithRecovery(targetTab.id, {
           type: 'EXECUTE_APPLY',
           payload: { mode: applyMode, filters },
       }) as { success?: boolean; error?: string } | undefined
 
       if (!response?.success) {
-        throw new Error(response?.error || 'BOSS 页面未确认启动')
+        throw new Error(response?.error || '页面未确认启动')
       }
-      showToast('已连接 BOSS 页面，开始扫描岗位', 'success')
+      showToast(`已连接 ${platformLabel} 页面，开始扫描岗位`, 'success')
+      setApplyRunning(true)
       if (createdTarget) await chrome.tabs.update(targetTab.id, { active: true })
     } catch (error) {
       const message = error instanceof Error ? error.message : '未知错误'
       log(MOD, 'handleStartApply', 'Failed to start apply', error)
-      showToast(`启动失败：${message}。请刷新 BOSS 页面后重试`, 'error')
+      showToast(`启动失败：${message}。请刷新页面后重试`, 'error')
+    }
+  }
+
+  const handlePlatformChange = async (value: string) => {
+    setPlatformOverride(value)
+    await setSetting('platformOverride', value)
+  }
+
+  const handleStopApply = async () => {
+    showToast('正在停止…', 'info')
+    try {
+      const preferred = platformOverride !== 'auto' ? platformOverride : undefined
+      const targetTab = await findSupportedBossTab(preferred)
+      if (!targetTab?.id) throw new Error('未找到运行中的页面')
+      await sendMessageWithRecovery(targetTab.id, { type: 'EXECUTE_STOP' })
+      showToast('已发送停止指令', 'success')
+      setApplyRunning(false)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '未知错误'
+      showToast(`停止失败：${message}`, 'error')
     }
   }
 
@@ -158,11 +246,38 @@ export default function App() {
       {/* Header */}
       <div className="sticky top-0 z-10 bg-surface-darkest/80 backdrop-blur-md border-b border-white/5">
         <Tabs tabs={TABS} activeTab={activeTab} onTabChange={setActiveTab} className="m-3" />
+        <div className="px-3 pb-2 -mt-1 flex items-center justify-between gap-2 text-[11px] text-text-muted">
+          <label className="flex items-center gap-1.5">
+            平台：
+            <select
+              value={platformOverride}
+              onChange={(e) => handlePlatformChange(e.target.value)}
+              className="rounded bg-surface-dark px-1.5 py-0.5 text-[11px] text-text-normal border border-white/10 outline-none focus:border-emerald-500"
+            >
+              <option value="auto">自动识别</option>
+              {platforms.map((p) => (
+                <option key={p.id} value={p.id}>{p.icon} {p.name}</option>
+              ))}
+            </select>
+          </label>
+          <span className="truncate">
+            {effectivePlatformName
+              ? <span className="text-emerald-400">{effectivePlatformName}</span>
+              : '未检测到招聘平台页面'}
+          </span>
+        </div>
       </div>
 
       {/* Content */}
       <Suspense fallback={<div className="p-6 text-center text-xs text-text-muted">加载中...</div>}>
-        {activeTab === 'dashboard' && <Dashboard onStartApply={handleStartApply} />}
+        {activeTab === 'dashboard' && (
+          <Dashboard
+            onStartApply={handleStartApply}
+            onStopApply={handleStopApply}
+            platformName={effectivePlatformName}
+            applyRunning={applyRunning}
+          />
+        )}
         {activeTab === 'resumes' && <Resumes />}
         {activeTab === 'tracker' && <Tracker />}
         {activeTab === 'settings' && <Settings />}

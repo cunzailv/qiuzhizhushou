@@ -1064,7 +1064,9 @@ describe('extension application flow', () => {
     )
     expect(panelText).toMatch(/进度\s*1\/1/)
     expect(panelText).not.toContain('14分')
-    expect(panelText).toMatch(/[6-9]\d分/)
+    // 完美匹配卡片（React/TypeScript 标签 + 前端角色 + 本科 + 3-5年）评分可达 100，
+    // 因此正则同时接受 60-99 与 100；核心验收点是评分不再卡在基础分 14。
+    expect(panelText).toMatch(/(?:[6-9]\d|100)分/)
 
     await page.close()
   }, 30_000)

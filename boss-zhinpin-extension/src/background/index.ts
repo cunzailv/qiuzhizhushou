@@ -143,8 +143,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       job?: JobCard
       match?: MatchResult
       resumeId?: string
+      platformId?: string
     }
-    const { job, match, resumeId } = payload
+    const { job, match, resumeId, platformId } = payload
     if (!job || !match || !resumeId) {
       sendResponse({ success: false, error: 'Invalid application payload' })
       return false
@@ -169,6 +170,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           matchReason: match.recommendation,
           bossName: job.bossName,
           bossTitle: job.bossTitle,
+          platformId: platformId || job.platformId || 'unknown',
         })
       })
       .then((application) => sendResponse({ success: true, data: application }))

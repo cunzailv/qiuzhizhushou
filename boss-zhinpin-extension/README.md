@@ -1,58 +1,110 @@
-# Boss 直聘智能求职助手
+<p align="center">
+  <h1 align="center">🧠 智能求职助手</h1>
+  <p align="center">
+    多平台 AI 驱动的 Chrome 扩展，自动打招呼、智能投递、简历管理。
+  </p>
+</p>
 
-Chrome 扩展，用于管理简历、筛选和匹配岗位、辅助发起沟通，并在本地追踪投递记录。
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+  <a href="https://github.com/cunzailv/qiuzhizhushou/stargazers"><img src="https://img.shields.io/github/stars/cunzailv/qiuzhizhushou?style=flat" alt="Stars"></a>
+  <a href="https://github.com/cunzailv/qiuzhizhushou/issues"><img src="https://img.shields.io/github/issues/cunzailv/qiuzhizhushou" alt="Issues"></a>
+  <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
+  <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
+</p>
 
-## 安装
+---
 
-要求：Node.js 18+、Chrome。
+## ✨ 功能
+
+| 模块 | 说明 |
+|------|------|
+| 📄 **简历管理** | 上传 PDF / DOCX，自动解析为结构化数据 |
+| 🤖 **AI 匹配** | 接入 DeepSeek / OpenAI / 自定义模型，分析岗位与简历匹配度 |
+| 🎯 **智能筛选** | 岗位/地点/薪资/学历多维度过滤，关键词排除 |
+| 🚀 **一键投递** | 批量自动沟通，支持 Boss 直聘 & 猎聘 |
+| 🛡️ **防封策略** | 可配置延迟范围、每日上限、风险评估 |
+| 📊 **数据追踪** | 投递记录、面试日历、黑名单管理、Excel 导出 |
+
+## 🎬 快速开始
+
+### 安装
 
 ```bash
+git clone https://github.com/cunzailv/qiuzhizhushou.git
+cd qiuzhizhushou
 npm install
 npm run build
 ```
 
-然后在 Chrome 中：
+### 加载扩展
 
 1. 打开 `chrome://extensions/`
-2. 开启“开发者模式”
-3. 点击“加载已解压的扩展程序”
-4. 选择本项目的 `dist` 目录
+2. 开启「开发者模式」
+3. 点击「加载已解压的扩展程序」
+4. 选择项目的 `dist` 目录
 
-每次修改代码后重新运行 `npm run build`，并在扩展管理页点击刷新。
+### 使用流程
 
-## 完整使用流程
+1. 点击扩展图标 → **简历** → 上传 PDF / DOCX 简历
+2. 确认简历解析完毕，自动设为默认
+3. 打开 **Boss 直聘**或**猎聘**的搜索/推荐页
+4. 在扩展 **概览** 中设置筛选条件
+5. 点击 **开始投递**，右下角面板实时显示进度
+6. 回到 **追踪** 页查看投递记录
 
-1. 点击扩展图标，进入“简历”，上传 PDF 或 DOCX 简历。
-2. 确认简历已解析；第一份简历会自动设为默认简历。
-3. 登录 Boss 直聘，打开岗位推荐页或搜索结果页。
-4. 在扩展“概览”中展开筛选条件：
-   - 设置岗位、地点、薪资、经验和学历
-   - 可排除不希望投递的关键词
-   - 开启匹配时可设置最低匹配分数
-5. 点击“开始投递”。网页右下角面板会显示扫描、匹配和投递进度。
-6. 回到扩展“追踪”页查看投递记录和更新状态。
+## 🏗️ 技术栈
 
-关闭“简历智能匹配”时，只使用基础筛选条件；开启后，低于所选最低分数的岗位不会投递。
+| 层 | 技术选型 |
+|----|---------|
+| 框架 | React 18 + TypeScript |
+| 构建 | Vite 5 + crxjs |
+| 样式 | Tailwind CSS 3 |
+| 数据 | Dexie (IndexedDB) + chrome.storage |
+| AI | OpenAI / DeepSeek / 自定义兼容接口 |
+| 测试 | Vitest + Playwright |
+| UI 组件 | Lucide React + Recharts |
 
-## 开发与验证
+## 📁 项目结构
 
-```bash
-npm run lint
-npm run build
-npm test
+```
+src/
+├── background/         # Service Worker
+├── content/            # Content Script（页面注入）
+├── popup/              # 弹窗 UI
+├── options/            # 完整设置页
+├── components/ui/      # 共享 UI 组件
+└── shared/
+    ├── ai/             # AI 模型对接
+    ├── antiBot/        # 防封 & 延迟引擎
+    ├── db/             # 数据库 & 状态同步
+    ├── platform/       # 多平台适配
+    │   ├── boss/       #   Boss 直聘
+    │   └── liepin/      #   猎聘
+    └── types/          # 全局类型定义
 ```
 
-`npm test` 会启动带扩展的 Chromium，覆盖以下真实扩展链路：
+## 🔌 接入新平台
 
-- 搜索页岗位激活
-- 发起沟通并填写招呼语
-- 后台持久化投递记录
-- 弹窗追踪页读取记录
-- 最低匹配分数拦截
+1. 在 `src/shared/platform/<name>/` 新建目录
+2. 实现 `PlatformAdapter` 接口（约 12 个方法）
+3. 在 `src/shared/platform/index.ts` 注册适配器
+4. 写测试并校准选择器
 
-## 数据与安全
+参考 `src/shared/platform/liepin/` 的完整实现。
 
-- 简历、设置和投递记录保存在浏览器本地，不会上传到本项目的服务器。
-- 只有启用并配置第三方 AI 模型时，简历摘要和岗位描述才会发送给对应模型服务。
-- 自动化功能会受到 Boss 直聘页面结构、登录状态、验证码和频率限制影响。遇到验证或限制时会暂停，请勿绕过平台风控。
-- 页面结构发生变化后，应先更新选择器并运行端到端测试，不要在未验证的情况下批量操作。
+## 🤝 贡献
+
+欢迎任何形式的贡献！请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+- 🐛 [报告 Bug](https://github.com/cunzailv/qiuzhizhushou/issues/new?template=bug_report.yml)
+- 💡 [功能建议](https://github.com/cunzailv/qiuzhizhushou/issues/new?template=feature_request.yml)
+- 📦 [提交 PR](CONTRIBUTING.md#提交代码)
+
+## ⚠️ 免责声明
+
+本工具仅供学习和技术研究使用。使用自动化功能时请遵守招聘平台的服务条款，合理控制操作频率。使用者对自身行为负责，项目作者不对滥用导致的账号封禁等后果承担责任。
+
+## 📄 协议
+
+[MIT License](LICENSE) © cunzailv

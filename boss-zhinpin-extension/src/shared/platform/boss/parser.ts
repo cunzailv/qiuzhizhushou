@@ -1,4 +1,7 @@
-import type { JobCard } from '../shared/types/job'
+// Boss 直聘专属的 DOM 解析逻辑（已从 content/dom-parser 下沉至此）。
+// 该模块只服务于 Boss 平台，不依赖任何 content 层代码。
+import type { JobCard } from '../../types/job'
+import type { PageType } from '../types'
 
 interface JobMatchingTextFields {
   title: string
@@ -400,9 +403,8 @@ export function parseJobCardsFromSearchPage(): JobCard[] {
     // best-effort company name and capture the card HTML for debugging.
     if (title) {
       if (!companyName && !debugLogged) {
-        debugLogged = true
-        // eslint-disable-next-line no-console
-        console.error(
+          debugLogged = true
+          console.error(
           '[BOSS-DEBUG] companyName empty for a card. Card HTML:\n',
           html.outerHTML.slice(0, 2000),
         )
@@ -420,7 +422,19 @@ export function parseJobCardsFromSearchPage(): JobCard[] {
         experience,
         education,
         tags,
-        jobDescription: jobDescPreview,
+        // 评分器以 jobDescription 为唯一匹配文本输入；搜索卡片几乎读不到职位描述，
+        // 因此用 buildJobMatchingText 把标题/公司/薪资/地点/经验/学历/标签拼入该字段，
+        // 让本地评分真正反映卡片元数据（否则长期卡在基础分）。
+        jobDescription: buildJobMatchingText({
+          title,
+          companyName,
+          salary,
+          location,
+          experience,
+          education,
+          tags,
+          description: jobDescPreview,
+        }),
         bossName,
         bossTitle,
         bossOnline,
@@ -476,7 +490,7 @@ export function parseJobDetailFromPage(): JobCard | null {
 }
 
 // Parse the current page type
-export function detectPageType(): 'search' | 'detail' | 'chat' | 'recommend' | 'other' {
+export function detectPageType(): PageType {
   const url = window.location.href
 
   if (url.includes('/job_detail/')) return 'detail'

@@ -1,5 +1,12 @@
-import { randomDelay } from '../shared/antiBot'
-import type { JobCard, MatchResult } from '../shared/types/job'
+// Boss 直聘专属的页面操作逻辑（已从 content/action-simulator 下沉至此）。
+// 该模块只服务于 Boss 平台，不依赖任何 content 层代码。
+import { randomDelay } from '../../antiBot'
+import type { JobCard, MatchResult } from '../../types/job'
+
+export interface CommunicationUiSnapshot {
+  inputs: Set<Element>
+  visibleDialogs: Set<Element>
+}
 
 const APPLY_SELECTOR = [
   '[class*="btn-chat"]',
@@ -173,10 +180,12 @@ export async function collectJobCards(
     maxJobs?: number
     stableRounds?: number
     onCountChange?: (count: number) => void
+    shouldCancel?: () => boolean
   },
 ): Promise<JobCard[]> {
   const maxJobs = options?.maxJobs ?? Infinity
   const requiredStableRounds = options?.stableRounds ?? 5
+  const shouldCancel = options?.shouldCancel
   const jobs = new Map<string, JobCard>()
   let unchangedRounds = 0
 
@@ -209,18 +218,15 @@ export async function collectJobCards(
 
   collectCurrent()
   while (jobs.size < maxJobs && unchangedRounds < requiredStableRounds) {
+    if (shouldCancel?.()) break
     scrollToBottom()
     // Give the feed enough time to fetch & render the next batch of cards.
     await randomDelay(1200, 2000)
+    if (shouldCancel?.()) break
     unchangedRounds = collectCurrent() ? 0 : unchangedRounds + 1
   }
 
   return Array.from(jobs.values())
-}
-
-export interface CommunicationUiSnapshot {
-  inputs: Set<Element>
-  visibleDialogs: Set<Element>
 }
 
 function isVisible(element: Element): boolean {

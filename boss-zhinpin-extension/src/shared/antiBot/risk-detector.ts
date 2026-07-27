@@ -1,4 +1,7 @@
-// Risk detection for Boss Zhipin anti-bot measures
+// Risk detection for anti-bot measures (multi-platform aware).
+// 各平台的风控文案通过 PlatformRiskConfig 传入；不传时回退到 Boss 直聘的
+// 原生判定逻辑，保证 Boss 端行为完全不变。
+import type { PlatformRiskConfig } from '../platform/types'
 
 export interface RiskSignal {
   type: 'captcha' | 'rate_limit' | 'block' | 'warning'
@@ -8,14 +11,21 @@ export interface RiskSignal {
 
 const riskSignals: RiskSignal[] = []
 
-export function detectCaptcha(): boolean {
+function containsAny(text: string, markers?: string[]): boolean {
+  if (!markers || markers.length === 0) return false
+  return markers.some((m) => text.includes(m))
+}
+
+export function detectCaptcha(markers?: string[]): boolean {
   const captchaElements = document.querySelectorAll(
     '[class*="captcha"], [class*="verify"], [id*="captcha"], [id*="verify"], .geetest_panel, .captcha-box'
   )
-  return captchaElements.length > 0
+  if (captchaElements.length > 0) return true
+  if (containsAny(document.body?.innerText || '', markers)) return true
+  return false
 }
 
-export function detectRateLimit(): boolean {
+export function detectRateLimit(markers?: string[]): boolean {
   const errorElements = document.querySelectorAll(
     '[class*="limit"], [class*="too-many"], [class*="频繁"], .error-tips'
   )
@@ -25,43 +35,47 @@ export function detectRateLimit(): boolean {
       return true
     }
   }
+  if (containsAny(document.body?.innerText || '', markers)) return true
   return false
 }
 
-export function detectBlock(): boolean {
-  const pageText = document.body.innerText || ''
-  return pageText.includes('账号异常') || pageText.includes('已被限制')
+export function detectBlock(markers?: string[]): boolean {
+  const pageText = document.body?.innerText || ''
+  if (pageText.includes('账号异常') || pageText.includes('已被限制')) return true
+  if (containsAny(pageText, markers)) return true
+  return false
 }
 
-// BOSS enforces a hard daily communication cap (e.g. "您已与150位BOSS沟通").
-// When this pops up the session can't send any more messages today, so the
-// auto-apply must stop entirely (and resume tomorrow) instead of burning
-// requests against a wall.
-export function detectDailyCommunicationLimit(): string | null {
-  const markers = ['已达到沟通上限', '沟通上限', '位BOSS沟通', '今天已与', '明天再来']
-  const check = (text: string): boolean =>
+// BOSS enforces a hard daily communication cap. When this pops up the session
+// can't send any more messages today, so the auto-apply must stop entirely.
+export function detectDailyCommunicationLimit(markers?: string[]): string | null {
+  const bossCheck = (text: string): boolean =>
     text.includes('沟通上限') ||
     (text.includes('位BOSS沟通') && (text.includes('今天') || text.includes('已与')))
-  if (check(document.body.innerText || '')) {
+  const pageText = document.body?.innerText || ''
+  if (bossCheck(pageText)) {
     return '今日沟通已达上限，已自动停止，请明天再来'
   }
+  if (containsAny(pageText, markers)) {
+    const found = markers?.find((m) => pageText.includes(m)) ?? ''
+    return `检测到达到每日沟通上限相关提示：${found}`
+  }
   const overlays = document.querySelectorAll(
-    '[class*="dialog"], [class*="modal"], [class*="toast"], [class*="dialog-box"], [class*="limit"], [class*="tip"], .dialog-con',
+    '[class*="dialog"], [class*="modal"], [class*="toast"], [class*="dialog-box"], [class*="limit"], [class*="tip"], .dialog-con'
   )
   for (const el of overlays) {
     const t = (el as HTMLElement).innerText || ''
-    if (markers.some((m) => t.includes(m)) || check(t)) {
-      return '今日沟通已达上限，已自动停止，请明天再来'
-    }
+    if (bossCheck(t)) return '今日沟通已达上限，已自动停止，请明天再来'
+    if (containsAny(t, markers)) return '今日沟通/投递已达上限，已自动停止'
   }
   return null
 }
 
-export function scanRisk(): RiskSignal | null {
-  if (detectBlock()) {
+export function scanRisk(platform?: PlatformRiskConfig): RiskSignal | null {
+  if (detectBlock(platform?.blockMarkers)) {
     const signal: RiskSignal = {
       type: 'block',
-      message: '检测到账号异常，已自动暂停操作',
+      message: '检测到账号异常或风控限制，已自动暂停操作',
       detectedAt: new Date().toISOString(),
     }
     riskSignals.push(signal)
@@ -69,7 +83,7 @@ export function scanRisk(): RiskSignal | null {
   }
 
   // Daily communication cap is a hard stop — same severity as a block.
-  const dailyLimit = detectDailyCommunicationLimit()
+  const dailyLimit = detectDailyCommunicationLimit(platform?.dailyLimitMarkers)
   if (dailyLimit) {
     const signal: RiskSignal = {
       type: 'block',
@@ -80,7 +94,7 @@ export function scanRisk(): RiskSignal | null {
     return signal
   }
 
-  if (detectRateLimit()) {
+  if (detectRateLimit(platform?.rateLimitMarkers)) {
     const signal: RiskSignal = {
       type: 'rate_limit',
       message: '检测到操作频率限制，请等待一段时间后再试',
@@ -90,7 +104,7 @@ export function scanRisk(): RiskSignal | null {
     return signal
   }
 
-  if (detectCaptcha()) {
+  if (detectCaptcha(platform?.captchaMarkers)) {
     const signal: RiskSignal = {
       type: 'captcha',
       message: '检测到验证码，请手动完成验证后继续',

@@ -1,0 +1,60 @@
+name: 🐛 Bug 报告
+description: 报告你遇到的问题
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: "感谢你花时间报告 Bug！"
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 发生了什么？
+      description: 简要描述你遇到的问题
+      placeholder: "例如：点击「开始投递」后没有反应"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 请列出能够让 Bug 复现的详细步骤
+      placeholder: "1. 打开 Boss 直聘搜索页\n2. 设置筛选条件\n3. 点击开始投递\n4. ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+      description: 你期望看到什么？
+  - type: input
+    id: browser
+    attributes:
+      label: 浏览器版本
+      placeholder: "Chrome 120 / Edge 120"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: 操作系统
+      placeholder: "macOS 14 / Windows 11"
+  - type: input
+    id: extension-version
+    attributes:
+      label: 扩展版本
+      placeholder: "v1.0.0"
+  - type: textarea
+    id: logs
+    attributes:
+      label: 控制台日志
+      description: "请在浏览器控制台（F12 → Console）查看以 `[Boss Assistant]` 开头的日志，粘贴相关内容"
+      render: shell
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 招聘平台
+      options:
+        - Boss 直聘
+        - 猎聘
+        - 其他

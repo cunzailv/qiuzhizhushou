@@ -12,6 +12,9 @@ export interface PluginSettings {
   maxDelay: number
   scrollDelay: number
 
+  // 单次扫描（采集）的最大岗位数量。0 表示不限制（扫描到页面无更多为止）。
+  maxScanCount: number
+
   // Apply mode
   applyMode: 'batch' | 'recommend'
 
@@ -35,6 +38,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   minDelay: 2000,
   maxDelay: 8000,
   scrollDelay: 1500,
+  maxScanCount: 50,
   applyMode: 'recommend',
   enableAiMatch: true,
   interviewReminder: true,

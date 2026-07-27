@@ -278,6 +278,21 @@ export default function Settings() {
             </div>
           </div>
           <div>
+            <label className="text-[11px] text-text-muted mb-1 block">
+              单次扫描数量: {settings.maxScanCount > 0 ? `${settings.maxScanCount} 个` : '不限制'}
+            </label>
+            <select
+              value={settings.maxScanCount}
+              onChange={(e) => handleSave({ maxScanCount: parseInt(e.target.value) })}
+              className="input-field w-full text-xs"
+            >
+              {[10, 20, 30, 50, 80, 100, 150, 200].map((v) => (
+                <option key={v} value={v}>{v} 个</option>
+              ))}
+              <option value={0}>不限制</option>
+            </select>
+          </div>
+          <div>
             <label className="text-[11px] text-text-muted mb-1 block">投递模式</label>
             <div className="flex gap-2">
               <button

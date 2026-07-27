@@ -2,11 +2,12 @@ import React, { useState, useEffect, useRef } from 'react'
 import { Card } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
 import { Toast } from '../../components/ui/toast'
-import { setSetting, getAllSettings } from '../../shared/db/settings-store'
+import { getSetting, setSetting, getAllSettings } from '../../shared/db/settings-store'
 import { testAIConnection, BUILTIN_MODELS, getPresetById } from '../../shared/ai'
 import type { PluginSettings } from '../../shared/types/settings'
 import { DEFAULT_SETTINGS } from '../../shared/types/settings'
-import { Key, Zap, Shield, ChevronDown, ExternalLink, AlertTriangle } from 'lucide-react'
+import { getPlatformsMeta } from '../../shared/platform'
+import { Key, Zap, Shield, ChevronDown, ExternalLink, AlertTriangle, Globe } from 'lucide-react'
 
 export default function Settings() {
   const [settings, setLocalSettings] = useState<PluginSettings>(DEFAULT_SETTINGS)
@@ -14,6 +15,7 @@ export default function Settings() {
   const [testing, setTesting] = useState(false)
   const [showModelDropdown, setShowModelDropdown] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const [platformOverride, setPlatformOverride] = useState('auto')
 
   const selectedPreset = getPresetById(settings.modelPreset)
   const isCustom = settings.modelPreset === 'custom'
@@ -32,6 +34,14 @@ export default function Settings() {
   async function loadSettings() {
     const all = await getAllSettings()
     setLocalSettings({ ...DEFAULT_SETTINGS, ...all } as PluginSettings)
+    const override = await getSetting<string>('platformOverride', 'auto')
+    setPlatformOverride(override)
+  }
+
+  async function handlePlatformOverrideChange(value: string) {
+    setPlatformOverride(value)
+    await setSetting('platformOverride', value)
+    showToast('平台识别策略已更新', 'success')
   }
 
   async function handleSave(updates: Partial<PluginSettings>) {
@@ -73,6 +83,28 @@ export default function Settings() {
         <h2 className="text-2xl font-bold text-text-primary">扩展设置</h2>
         <p className="text-sm text-text-muted mt-1">配置 AI 模型、投递策略和通知偏好</p>
       </div>
+
+      {/* Platform */}
+      <Card>
+        <div className="flex items-center gap-2 mb-4">
+          <Globe className="w-5 h-5 text-primary-light" />
+          <span className="font-semibold text-text-primary">平台识别</span>
+        </div>
+        <div>
+          <label className="text-xs text-text-muted mb-1.5 block">当前平台策略</label>
+          <select
+            value={platformOverride}
+            onChange={(e) => handlePlatformOverrideChange(e.target.value)}
+            className="w-full px-3 py-2.5 rounded-xl bg-surface-darkest border border-white/10 text-sm text-text-primary focus:border-primary-light focus:outline-none"
+          >
+            <option value="auto">自动识别（按网址）</option>
+            {getPlatformsMeta().map((p) => (
+              <option key={p.id} value={p.id}>{p.icon} {p.name}（手动）</option>
+            ))}
+          </select>
+          <p className="text-xs text-text-muted mt-1.5">默认按当前网址自动识别招聘平台；如自动识别失败，可手动指定。</p>
+        </div>
+      </Card>
 
       {/* AI Model */}
       <Card>
@@ -246,6 +278,26 @@ export default function Settings() {
                 ))}
               </select>
             </div>
+          </div>
+
+          <div>
+            <label className="text-xs text-text-muted mb-1.5 block">
+              单次扫描数量{' '}
+              <span className="text-primary-light">
+                {settings.maxScanCount > 0 ? `${settings.maxScanCount} 个` : '不限制'}
+              </span>
+            </label>
+            <select
+              value={settings.maxScanCount}
+              onChange={(e) => handleSave({ maxScanCount: parseInt(e.target.value) })}
+              className="w-full px-3 py-2 rounded-xl bg-surface-darkest border border-white/10 text-sm"
+            >
+              {[10, 20, 30, 50, 80, 100, 150, 200].map((v) => (
+                <option key={v} value={v}>{v} 个</option>
+              ))}
+              <option value={0}>不限制（扫描到无更多为止）</option>
+            </select>
+            <p className="text-xs text-text-muted mt-1.5">每次点击「开始投递」时，扫描/采集的最大岗位数量。数值越大耗时越长。</p>
           </div>
 
           <div>

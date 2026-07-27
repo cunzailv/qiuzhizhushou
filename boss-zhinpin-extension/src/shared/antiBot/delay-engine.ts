@@ -14,5 +14,6 @@ export async function getScrollDelay(): Promise<number> {
 
 export async function shouldThrottle(actionCount: number): Promise<boolean> {
   // 无限制模式：投递数量不再触发节流
+  void actionCount
   return false
 }

@@ -20,9 +20,17 @@ const MOD = 'Popup:Dashboard'
 
 interface DashboardProps {
   onStartApply?: (filters: ApplyFilters) => void
+  onStopApply?: () => void
+  platformName?: string
+  applyRunning?: boolean
 }
 
-export default function Dashboard({ onStartApply }: DashboardProps) {
+export default function Dashboard({
+  onStartApply,
+  onStopApply,
+  platformName,
+  applyRunning,
+}: DashboardProps) {
   const [stats, setStats] = useState({ total: 0, today: 0, interview: 0, read: 0, passRate: 0 })
   const [recentApps, setRecentApps] = useState<Application[]>([])
   const [filters, setFilters] = useState<ApplyFilters>(DEFAULT_FILTERS)
@@ -126,12 +134,18 @@ export default function Dashboard({ onStartApply }: DashboardProps) {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-bold gradient-text">求职助手</h1>
-          <p className="text-xs text-text-muted mt-0.5">Boss直聘 · 智能投递</p>
+          <p className="text-xs text-text-muted mt-0.5">{platformName || '招聘平台'} · 智能投递</p>
         </div>
-        <Button size="sm" onClick={handleStart}>
-          <Send className="w-3.5 h-3.5" />
-          开始投递
-        </Button>
+        {applyRunning ? (
+          <Button size="sm" variant="danger" onClick={() => onStopApply?.()}>
+            停止
+          </Button>
+        ) : (
+          <Button size="sm" onClick={handleStart}>
+            <Send className="w-3.5 h-3.5" />
+            开始投递
+          </Button>
+        )}
       </div>
 
       {/* Filters */}
