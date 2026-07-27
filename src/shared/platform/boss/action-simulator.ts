@@ -351,17 +351,59 @@ export interface ChatContact {
 /** 获取聊天页左侧联系人列表 */
 export function getChatContacts(): ChatContact[] {
   const contacts: ChatContact[] = []
-  // Boss 聊天页联系人选择器
-  const items = document.querySelectorAll(
-    '[class*="chat-item"], [class*="conversation-item"], [class*="contact-item"], [class*="user-item"], [class*="chat-list"] > li, [class*="chat-list"] > div'
-  )
+
+  // 先尝试各种可能的联系人容器
+  let container: Element | null = null
+  const containerSelectors = [
+    '[class*="chat-list"]', '[class*="conversation"]', '[class*="contact-list"]',
+    '[class*="user-list"]', '[class*="message-list"]', '[class*="session-list"]',
+    '[class*="chat-left"]', '[class*="left-panel"]', '[class*="sidebar"]',
+  ]
+  for (const sel of containerSelectors) {
+    container = document.querySelector(sel)
+    if (container) break
+  }
+  const root = container || document
+
+  // 在容器内找联系人项
+  const itemSelectors = [
+    '[class*="chat-item"]', '[class*="conversation-item"]', '[class*="contact-item"]',
+    '[class*="user-item"]', '[class*="session-item"]', '[class*="list-item"]',
+    'li', '[class*="item"]',
+  ]
+  let items: NodeListOf<Element> | null = null
+  for (const sel of itemSelectors) {
+    items = root.querySelectorAll(sel)
+    if (items.length > 0) break
+  }
+
+  // 如果以上都没找到，打印调试信息
+  if (!items || items.length === 0) {
+    const bodyClasses = Array.from(document.body.classList).join(' ')
+    const allDivs = document.querySelectorAll('div, li, section')
+    // 找文字最多的几个元素（可能是联系人列表）
+    const candidates = Array.from(allDivs)
+      .filter(el => {
+        const text = (el.textContent || '').trim()
+        return text.length > 5 && text.length < 100 && el.children.length >= 1 && el.children.length <= 5
+      })
+      .slice(0, 3)
+    const samples = candidates.map(el => ({
+      tag: el.tagName,
+      class: el.className?.toString?.().slice(0, 60) || '',
+      text: (el.textContent || '').trim().slice(0, 50),
+    }))
+    console.log('[getChatContacts] No items found. Body classes:', bodyClasses, 'Samples:', JSON.stringify(samples))
+    return contacts
+  }
+
   items.forEach((el, i) => {
     const text = (el.textContent || '').trim()
-    if (!text) return
+    if (!text || text.length < 2) return
     // 提取名称和公司
-    const nameEl = el.querySelector('[class*="name"], [class*="title"], h3, h4, strong')
-    const companyEl = el.querySelector('[class*="company"], [class*="subtitle"], [class*="desc"]')
-    const name = (nameEl?.textContent || text.split(/\s+/)[0] || '').trim()
+    const nameEl = el.querySelector('[class*="name"], [class*="title"], h3, h4, strong, [class*="nickname"]')
+    const companyEl = el.querySelector('[class*="company"], [class*="subtitle"], [class*="desc"], [class*="position"]')
+    const name = (nameEl?.textContent || text.split(/[\s·]+/)[0] || '').trim()
     const company = (companyEl?.textContent || '').trim()
     contacts.push({
       id: el.getAttribute('data-id') || el.getAttribute('data-uid') || `contact-${i}`,

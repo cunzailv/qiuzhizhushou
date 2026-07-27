@@ -614,8 +614,27 @@ async function sendResumesOnChatPage(): Promise<void> {
   })
 
   const contacts = getChatContacts()
-  console.log(`[求职助手] sendResumes: Found ${contacts.length} contacts`)
   log(MOD, 'sendResumes', `Found ${contacts.length} contacts`)
+
+  if (contacts.length === 0) {
+    // 调试：抓取页面中所有可能的列表容器信息
+    const containers = document.querySelectorAll('ul, ol, [class*="list"], [class*="item"], nav, aside, [class*="sidebar"], [class*="left"]')
+    let debugHtml = ''
+    containers.forEach((c, i) => {
+      if (i >= 5) return
+      const cls = c.className?.toString?.()?.slice(0, 40) || ''
+      const childCount = c.children.length
+      const text = (c.textContent || '').trim().slice(0, 60)
+      if (childCount >= 2) debugHtml += `${c.tagName}.${cls} (${childCount}子): ${text}\n`
+    })
+    updatePanelContent(panelHost!, {
+      mode: currentMode, status: 'idle',
+      message: `❌ 未找到联系人。页面容器:\n${debugHtml || '无'}`,
+      filters: currentFilters, resumeMode: liepinResumeMode, isChatPage: true,
+    })
+    isApplying = false
+    return
+  }
 
   let sent = 0
   let skipped = 0
