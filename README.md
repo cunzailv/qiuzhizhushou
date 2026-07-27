@@ -13,6 +13,10 @@
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
 </p>
 
+<p align="center">
+  <img src="docs/cover.svg" alt="智能求职助手" width="100%">
+</p>
+
 ---
 
 ## ✨ 功能
