@@ -352,66 +352,43 @@ export interface ChatContact {
 export function getChatContacts(): ChatContact[] {
   const contacts: ChatContact[] = []
 
-  // 先尝试各种可能的联系人容器
-  let container: Element | null = null
-  const containerSelectors = [
-    '[class*="chat-list"]', '[class*="conversation"]', '[class*="contact-list"]',
-    '[class*="user-list"]', '[class*="message-list"]', '[class*="session-list"]',
-    '[class*="chat-left"]', '[class*="left-panel"]', '[class*="sidebar"]',
-  ]
-  for (const sel of containerSelectors) {
-    container = document.querySelector(sel)
-    if (container) break
-  }
-  const root = container || document
+  // Boss 聊天页联系人容器：DIV.chat-user.v2
+  const container = document.querySelector('[class*="chat-user"]')
+  if (!container) return contacts
 
-  // 在容器内找联系人项
-  const itemSelectors = [
-    '[class*="chat-item"]', '[class*="conversation-item"]', '[class*="contact-item"]',
-    '[class*="user-item"]', '[class*="session-item"]', '[class*="list-item"]',
-    'li', '[class*="item"]',
-  ]
-  let items: NodeListOf<Element> | null = null
-  for (const sel of itemSelectors) {
-    items = root.querySelectorAll(sel)
-    if (items.length > 0) break
-  }
-
-  // 如果以上都没找到，打印调试信息
-  if (!items || items.length === 0) {
-    const bodyClasses = Array.from(document.body.classList).join(' ')
-    const allDivs = document.querySelectorAll('div, li, section')
-    // 找文字最多的几个元素（可能是联系人列表）
-    const candidates = Array.from(allDivs)
-      .filter(el => {
-        const text = (el.textContent || '').trim()
-        return text.length > 5 && text.length < 100 && el.children.length >= 1 && el.children.length <= 5
-      })
-      .slice(0, 3)
-    const samples = candidates.map(el => ({
-      tag: el.tagName,
-      class: el.className?.toString?.().slice(0, 60) || '',
-      text: (el.textContent || '').trim().slice(0, 50),
-    }))
-    console.log('[getChatContacts] No items found. Body classes:', bodyClasses, 'Samples:', JSON.stringify(samples))
-    return contacts
-  }
-
+  // 联系人项是容器内的直接子 DIV（排除 filter/header）
+  const items = container.querySelectorAll(':scope > div, :scope > a, :scope > li')
   items.forEach((el, i) => {
     const text = (el.textContent || '').trim()
-    if (!text || text.length < 2) return
-    // 提取名称和公司
-    const nameEl = el.querySelector('[class*="name"], [class*="title"], h3, h4, strong, [class*="nickname"]')
-    const companyEl = el.querySelector('[class*="company"], [class*="subtitle"], [class*="desc"], [class*="position"]')
-    const name = (nameEl?.textContent || text.split(/[\s·]+/)[0] || '').trim()
-    const company = (companyEl?.textContent || '').trim()
+    if (!text || text.length < 5) return
+
+    // 排除筛选条件栏（仅沟通/有交换/有面试等）
+    if (text.includes('仅沟通') && text.includes('有交换') && text.length < 30) return
+    if (text === '全部' || text === '未读' || text === '新招呼') return
+
+    // 提取时间 + 名称 + 公司（Boss 格式: "23:14赵越法本招聘经理Hello..."）
+    // 名称通常是中文字符，前面可能有时间戳
+    const timeMatch = text.match(/^(\d{1,2}:\d{2})/)
+    const time = timeMatch ? timeMatch[1] : ''
+    const rest = timeMatch ? text.slice(time.length) : text
+
+    // 名称：取前几个中文字符作为名称
+    const nameMatch = rest.match(/^([一-龥]{2,4})/)
+    const name = nameMatch ? nameMatch[1] : rest.slice(0, 4)
+
+    // 公司/职位：名称后面的部分
+    const afterName = nameMatch ? rest.slice(nameMatch[1].length) : ''
+    const companyMatch = afterName.match(/^([一-龥]{2,6}(?:集团|科技|网络|信息|软件|数据|有限公司|公司)?)/)
+    const company = companyMatch ? companyMatch[1] : afterName.slice(0, 10)
+
     contacts.push({
-      id: el.getAttribute('data-id') || el.getAttribute('data-uid') || `contact-${i}`,
-      name: name || text.slice(0, 20),
+      id: el.getAttribute('data-id') || el.getAttribute('data-uid') || `chat-${i}`,
+      name,
       company,
       element: el as HTMLElement,
     })
   })
+
   return contacts
 }
 
