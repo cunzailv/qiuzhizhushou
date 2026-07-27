@@ -84,7 +84,7 @@ export default function Blacklist() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold gradient-text">公司黑名单</h1>
-          <p className="text-sm text-text-muted mt-1">投递时自动跳过黑名单中的公司</p>
+          <p className="text-sm text-text-muted mt-1">沟通时自动跳过黑名单中的公司</p>
         </div>
       </div>
 

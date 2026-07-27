@@ -40,7 +40,7 @@ export default function Export() {
 
   async function handleExportJobCards() {
     if (applications.length === 0) {
-      showToast('没有投递记录', 'warning')
+      showToast('没有沟通记录', 'warning')
       return
     }
     const jobs = applications.map((app) => ({
@@ -73,7 +73,7 @@ export default function Export() {
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-bold gradient-text">数据导出中心</h1>
-        <p className="text-sm text-text-muted mt-1">导出投递记录和岗位信息</p>
+        <p className="text-sm text-text-muted mt-1">导出沟通记录和岗位信息</p>
       </div>
 
       {/* Export Options */}
@@ -81,7 +81,7 @@ export default function Export() {
         {/* Export Applications */}
         <Card className="p-6">
           <FileSpreadsheet className="w-10 h-10 text-primary-light mb-4" />
-          <h3 className="text-lg font-semibold text-text-primary mb-2">导出投递记录</h3>
+          <h3 className="text-lg font-semibold text-text-primary mb-2">导出沟通记录</h3>
           <p className="text-sm text-text-secondary mb-4">
             导出包含状态、匹配分、公司等信息
           </p>
@@ -142,7 +142,7 @@ export default function Export() {
 
           <Button className="w-full" onClick={handleExportApps}>
             <Download className="w-4 h-4" />
-            导出投递记录
+            导出沟通记录
           </Button>
         </Card>
 
@@ -151,7 +151,7 @@ export default function Export() {
           <Users className="w-10 h-10 text-success mb-4" />
           <h3 className="text-lg font-semibold text-text-primary mb-2">批量下载岗位信息</h3>
           <p className="text-sm text-text-secondary mb-4">
-            合并所有投递过的公司岗位信息到一个Excel文件
+            合并所有沟通过的公司岗位信息到一个Excel文件
           </p>
 
           <div className="space-y-2 text-xs text-text-muted mb-4">

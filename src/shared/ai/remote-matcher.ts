@@ -21,7 +21,7 @@ async function matchWithAI(resume: Resume, job: JobCard): Promise<MatchResult> {
   "score": 0-100的匹配分数,
   "skillMatch": ["匹配的技能1", "匹配的技能2"],
   "skillGap": ["缺失的技能1", "缺失的技能2"],
-  "recommendation": "详细的匹配分析和投递建议（100字以内）",
+  "recommendation": "详细的匹配分析和沟通建议（100字以内）",
   "isRecommended": true或false（分数>=70为true）
 }`
 

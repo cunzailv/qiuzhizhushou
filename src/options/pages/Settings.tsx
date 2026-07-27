@@ -81,7 +81,7 @@ export default function Settings() {
     <div className="max-w-3xl space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-text-primary">扩展设置</h2>
-        <p className="text-sm text-text-muted mt-1">配置 AI 模型、投递策略和通知偏好</p>
+        <p className="text-sm text-text-muted mt-1">配置 AI 模型、沟通策略和通知偏好</p>
       </div>
 
       {/* Platform */}
@@ -297,11 +297,11 @@ export default function Settings() {
               ))}
               <option value={0}>不限制（扫描到无更多为止）</option>
             </select>
-            <p className="text-xs text-text-muted mt-1.5">每次点击「开始投递」时，扫描/采集的最大岗位数量。数值越大耗时越长。</p>
+            <p className="text-xs text-text-muted mt-1.5">每次点击「开始沟通」时，扫描/采集的最大岗位数量。数值越大耗时越长。</p>
           </div>
 
           <div>
-            <label className="text-xs text-text-muted mb-1.5 block">投递模式</label>
+            <label className="text-xs text-text-muted mb-1.5 block">沟通模式</label>
             <div className="flex gap-2">
               <button
                 onClick={() => handleSave({ applyMode: 'batch' })}
@@ -311,7 +311,7 @@ export default function Settings() {
                     : 'bg-surface-darkest text-text-muted'
                 }`}
               >
-                一键批量投递
+                一键批量沟通
               </button>
               <button
                 onClick={() => handleSave({ applyMode: 'recommend' })}
@@ -334,7 +334,7 @@ export default function Settings() {
               className="w-4 h-4 rounded accent-primary"
             />
             <span className="text-sm text-text-secondary">
-              启用 AI 评分筛选（关闭后「一键投递」不评分、直接投递）
+              启用 AI 评分筛选（关闭后「一键沟通」不评分、直接沟通）
             </span>
           </label>
         </div>
@@ -346,7 +346,7 @@ export default function Settings() {
         <div>
           <p className="text-sm text-text-secondary font-medium">安全提示</p>
           <p className="text-xs text-text-muted mt-0.5">
-            建议每天不超过 {settings.dailyLimit} 次投递。所有数据存储在浏览器本地，不会上传到任何服务器。
+            建议每天不超过 {settings.dailyLimit} 次沟通。所有数据存储在浏览器本地，不会上传到任何服务器。
             你的 API Key 也仅保存在浏览器中，用于直接调用所选的大模型 API。
           </p>
         </div>

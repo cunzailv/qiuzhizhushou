@@ -9,7 +9,7 @@ import { Search, Building2, Clock } from 'lucide-react'
 
 const STATUS_FILTERS: Array<{ label: string; value: ApplicationStatus | 'all' }> = [
   { label: '全部', value: 'all' },
-  { label: '已投递', value: 'applied' },
+  { label: '已沟通', value: 'applied' },
   { label: '已读', value: 'read' },
   { label: '沟通中', value: 'communicating' },
   { label: '面试', value: 'interview' },
@@ -62,7 +62,7 @@ export default function Tracker() {
 
   return (
     <div className="p-4 space-y-3">
-      <h2 className="text-lg font-bold gradient-text">投递追踪</h2>
+      <h2 className="text-lg font-bold gradient-text">沟通追踪</h2>
 
       {/* Search */}
       <div className="relative">
@@ -96,7 +96,7 @@ export default function Tracker() {
       {/* Applications List */}
       <div className="space-y-2 max-h-[400px] overflow-y-auto">
         {filtered.length === 0 ? (
-          <p className="text-xs text-text-muted text-center py-8">暂无匹配的投递记录</p>
+          <p className="text-xs text-text-muted text-center py-8">暂无匹配的沟通记录</p>
         ) : (
           filtered.map((app) => (
             <Card

@@ -151,11 +151,11 @@ export function computeLocalMatch(resume: Resume, job: JobCard): MatchResult {
 
   let recommendation = ''
   if (score >= 80) {
-    recommendation = '高度匹配！您的技能和经验与岗位要求非常吻合，强烈建议投递。'
+    recommendation = '高度匹配！您的技能和经验与岗位要求非常吻合，强烈建议沟通。'
   } else if (score >= 60) {
     recommendation = '匹配度良好。主要技能符合要求，部分技能可以后续补充。'
   } else if (score >= 40) {
-    recommendation = '匹配度一般。建议提升以下技能再投递。'
+    recommendation = '匹配度一般。建议提升以下技能再沟通。'
   } else {
     recommendation = '匹配度较低。该岗位与您的技能背景差异较大。'
   }

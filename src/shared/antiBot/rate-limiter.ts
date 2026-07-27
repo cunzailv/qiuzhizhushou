@@ -1,4 +1,4 @@
-// 每日投递计数器（基于 chrome.storage.local，跨上下文可访问）
+// 每日沟通计数器（基于 chrome.storage.local，跨上下文可访问）
 // - 通过 chrome.alarms 每日重置（background/index.ts 中的 daily-reset alarm）
 // - 用户可在设置中配置 dailyLimit 上限
 

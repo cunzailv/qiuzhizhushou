@@ -84,7 +84,7 @@ export default function Settings() {
   async function handleExport() {
     const apps = await getAllApplications()
     if (apps.length === 0) {
-      showToast('暂无投递记录可导出', 'warning')
+      showToast('暂无沟通记录可导出', 'warning')
       return
     }
     exportApplications({ applications: apps, format: 'xlsx' })
@@ -239,7 +239,7 @@ export default function Settings() {
         <div className="space-y-2">
           <div>
             <label className="text-[11px] text-text-muted mb-1 block">
-              每日投递上限: {settings.dailyLimit} 次
+              每日沟通上限: {settings.dailyLimit} 次
             </label>
             <input
               type="range"
@@ -293,7 +293,7 @@ export default function Settings() {
             </select>
           </div>
           <div>
-            <label className="text-[11px] text-text-muted mb-1 block">投递模式</label>
+            <label className="text-[11px] text-text-muted mb-1 block">沟通模式</label>
             <div className="flex gap-2">
               <button
                 onClick={() => handleSave({ applyMode: 'batch' })}
@@ -303,7 +303,7 @@ export default function Settings() {
                     : 'bg-surface-darkest text-text-muted'
                 }`}
               >
-                一键批量投递
+                一键批量沟通
               </button>
               <button
                 onClick={() => handleSave({ applyMode: 'recommend' })}
@@ -329,7 +329,7 @@ export default function Settings() {
         <div className="space-y-2">
           <Button variant="secondary" size="sm" className="w-full" onClick={handleExport}>
             <Download className="w-3.5 h-3.5" />
-            导出投递记录 (Excel)
+            导出沟通记录 (Excel)
           </Button>
           <div className="flex items-center justify-between text-xs text-text-muted">
             <span>黑名单公司</span>
@@ -342,7 +342,7 @@ export default function Settings() {
       <div className="flex items-start gap-2 p-3 rounded-xl bg-warning/10 border border-warning/20">
         <AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
         <p className="text-xs text-text-secondary">
-          自动化投递功能仅用于提高效率，请合理使用。建议保持每天50次以内的投递量，避免账号被限制。
+          自动化投递功能仅用于提高效率，请合理使用。建议保持每天50次以内的沟通量，避免账号被限制。
         </p>
       </div>
 

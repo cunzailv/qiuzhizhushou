@@ -29,7 +29,7 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
       >
         <div className="flex items-center gap-2">
           <Filter className="w-3.5 h-3.5 text-primary-light" />
-          <span className="text-xs font-medium text-text-primary">投递筛选条件</span>
+          <span className="text-xs font-medium text-text-primary">沟通筛选条件</span>
           {activeCount > 0 && (
             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary-light">
               {activeCount}
@@ -130,14 +130,14 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
                 className="w-3.5 h-3.5 rounded accent-primary"
               />
               <span className="text-[10px] text-text-muted">
-                {filters.enableAiMatch ? `最低 ${filters.minMatchScore} 分` : '关闭 · 直接投递'}
+                {filters.enableAiMatch ? `最低 ${filters.minMatchScore} 分` : '关闭 · 直接沟通'}
               </span>
             </label>
           </div>
 
           {!filters.enableAiMatch && (
             <p className="text-[10px] leading-4 text-warning">
-              不计算匹配门槛；通过职位、地区等基础筛选后直接投递。
+              不计算匹配门槛；通过职位、地区等基础筛选后直接沟通。
             </p>
           )}
 
@@ -164,7 +164,7 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
             className="w-full mt-1 py-2.5 rounded-xl bg-gradient-to-r from-primary to-primary-light text-white text-sm font-semibold hover:shadow-lg hover:shadow-primary/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
           >
             <Sparkles className="w-4 h-4" />
-            开始智能投递
+            开始智能沟通
           </button>
         </div>
       )}

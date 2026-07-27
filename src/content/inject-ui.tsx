@@ -340,7 +340,7 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
       statusText = effectiveFilters.enableAiMatch ? 'AI匹配分析中...' : '准备直投中...'
       statusColor = '#F59E0B'
       break
-    case 'applying': statusText = '投递中...'; statusColor = '#10B981'; break
+    case 'applying': statusText = '沟通中...'; statusColor = '#10B981'; break
     case 'pause': statusText = '已暂停'; statusColor = '#EF4444'; break
     case 'done': statusText = '完成'; statusColor = '#10B981'; break
   }
@@ -353,7 +353,7 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
   // would be silently ignored and confuse the user.
   const lockToggles = status === 'scanning' || status === 'matching' || status === 'applying'
   const lockAttr = lockToggles ? 'disabled' : ''
-  const lockHint = lockToggles ? ' title="扫描/投递进行中，无法切换"' : ''
+  const lockHint = lockToggles ? ' title="扫描/沟通进行中，无法切换"' : ''
 
   wrapper.innerHTML = `
     <div class="stat-row">
@@ -385,18 +385,18 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
     <div class="panel-message">${message}</div>
     ` : ''}
     <div class="mode-toggle">
-      <button class="mode-btn ${mode === 'batch' ? 'active' : ''}" data-mode="batch" ${lockAttr}${lockHint}>⚡ 批量投递</button>
+      <button class="mode-btn ${mode === 'batch' ? 'active' : ''}" data-mode="batch" ${lockAttr}${lockHint}>⚡ 批量沟通</button>
       <button class="mode-btn ${mode === 'recommend' ? 'active' : ''}" data-mode="recommend" ${lockAttr}${lockHint}>🤔 AI推荐确认</button>
     </div>
     <div class="score-toggle">
       <button class="score-btn ${effectiveFilters.enableAiMatch ? 'active' : ''}" id="score-filter" ${lockAttr}${lockHint}>⭐ 按分筛选</button>
-      <button class="score-btn ${effectiveFilters.enableAiMatch ? '' : 'active direct'}" id="score-direct" ${lockAttr}${lockHint}>🚀 不评分直投</button>
+      <button class="score-btn ${effectiveFilters.enableAiMatch ? '' : 'active direct'}" id="score-direct" ${lockAttr}${lockHint}>🚀 不评分沟通</button>
     </div>
     <div class="btn-row">
-      ${status === 'idle' ? `<button class="btn btn-primary" id="btn-start">🚀 开始智能投递</button>` : ''}
+      ${status === 'idle' ? `<button class="btn btn-primary" id="btn-start">🚀 开始智能沟通</button>` : ''}
       ${status === 'applying' ? `<button class="btn btn-danger" id="btn-stop">⏹ 停止</button>` : ''}
-      ${status === 'done' ? `<button class="btn btn-primary" id="btn-start">🔄 继续投递</button>` : ''}
-      ${status === 'pause' ? `<button class="btn btn-primary" id="btn-resume">▶ 继续投递</button>` : ''}
+      ${status === 'done' ? `<button class="btn btn-primary" id="btn-start">🔄 继续沟通</button>` : ''}
+      ${status === 'pause' ? `<button class="btn btn-primary" id="btn-resume">▶ 继续沟通</button>` : ''}
       ${status === 'scanning' || status === 'matching' ? `<button class="btn btn-danger" id="btn-stop">⏹ 停止</button>` : ''}
     </div>
     <div class="debug-row">

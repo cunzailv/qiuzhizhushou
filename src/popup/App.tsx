@@ -124,7 +124,7 @@ export default function App() {
     syncSettingsToSharedStorage()
   }, [])
 
-  // Honor the "一键投递默认" mode configured in Settings instead of always
+  // Honor the "一键沟通默认" mode configured in Settings instead of always
   // forcing batch mode.
   useEffect(() => {
     getSetting<'batch' | 'recommend'>('applyMode', 'batch').then((m) => {

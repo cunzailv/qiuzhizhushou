@@ -97,7 +97,7 @@ export default function Dashboard({
   }
 
   function handleStart() {
-    log(MOD, 'handleStart', 'User clicked 开始智能投递', {
+    log(MOD, 'handleStart', 'User clicked 开始智能沟通', {
       jobTitles: filters.jobTitles,
       locations: filters.locations,
       salaryRange: `${filters.salaryMin ?? '?'}-${filters.salaryMax ?? '?'}K`,
@@ -143,7 +143,7 @@ export default function Dashboard({
         ) : (
           <Button size="sm" onClick={handleStart}>
             <Send className="w-3.5 h-3.5" />
-            开始投递
+            开始沟通
           </Button>
         )}
       </div>
@@ -173,7 +173,7 @@ export default function Dashboard({
         <h3 className="text-sm font-semibold text-text-secondary mb-3">最近投递</h3>
         <div className="space-y-2">
           {recentApps.length === 0 ? (
-            <p className="text-xs text-text-muted text-center py-6">暂无投递记录，快去投递吧！</p>
+            <p className="text-xs text-text-muted text-center py-6">暂无沟通记录，快去沟通吧！</p>
           ) : (
             recentApps.map((app) => (
               <Card key={app.id} className="flex items-center gap-3 py-2.5 px-3">

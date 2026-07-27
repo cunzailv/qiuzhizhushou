@@ -349,7 +349,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
     stats: { total: jobs.length, processed: 0, matched: 0 },
     status: 'matching',
     message: filters?.enableAiMatch === false
-      ? `筛选后 ${jobs.length} 个岗位，准备投递...`
+      ? `筛选后 ${jobs.length} 个岗位，准备沟通...`
       : `筛选后 ${jobs.length} 个岗位，开始匹配分析...`,
     filters,
   })
@@ -407,7 +407,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
         scoreBypassed: true,
         skillMatch: [],
         skillGap: [],
-        recommendation: '未启用匹配评分（直接投递）',
+        recommendation: '未启用匹配评分（直接沟通）',
         isRecommended: true,
       }
     } else {
@@ -463,9 +463,9 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
     status: finishedByStop ? 'pause' : 'done',
     matchResults,
     message: finishedByStop
-      ? '已停止投递'
+      ? '已停止沟通'
       : (currentMode === 'batch'
-          ? `投递完成！成功 ${appliedCount}/${processedCount} 个岗位`
+          ? `沟通完成！成功 ${appliedCount}/${processedCount} 个岗位`
           : currentFilters.enableAiMatch
             ? `分析完成！发现 ${matchedCount} 个匹配岗位`
             : `筛选完成！共 ${matchedCount} 个岗位可直投`),
@@ -475,7 +475,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
   if (currentMode === 'batch') {
     showPanelToast(
       panelHost!,
-      appliedCount > 0 ? `投递完成！成功 ${appliedCount} 个` : '未完成任何投递，请检查岗位页面',
+      appliedCount > 0 ? `沟通完成！成功 ${appliedCount} 个` : '未完成任何沟通，请检查岗位页面',
       appliedCount > 0 ? 'success' : 'warning',
     )
   }
@@ -494,7 +494,7 @@ async function applyToJob(job: JobCard, match: MatchResult): Promise<boolean> {
   updatePanelContent(panelHost!, {
     mode: currentMode,
     status: 'applying',
-    message: `正在投递：${job.title} @ ${job.companyName}`,
+    message: `正在沟通：${job.title} @ ${job.companyName}`,
     filters: currentFilters,
   })
 
@@ -573,7 +573,7 @@ function stopApply(): void {
     updatePanelContent(panelHost!, {
       mode: currentMode,
       status: 'pause',
-      message: '已停止投递',
+      message: '已停止沟通',
       filters: currentFilters,
     })
     showPanelToast(panelHost!, '已停止', 'warning')

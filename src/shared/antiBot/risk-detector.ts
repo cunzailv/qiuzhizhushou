@@ -66,7 +66,7 @@ export function detectDailyCommunicationLimit(markers?: string[]): string | null
   for (const el of overlays) {
     const t = (el as HTMLElement).innerText || ''
     if (bossCheck(t)) return '今日沟通已达上限，已自动停止，请明天再来'
-    if (containsAny(t, markers)) return '今日沟通/投递已达上限，已自动停止'
+    if (containsAny(t, markers)) return '今日沟通次数已达上限，已自动停止'
   }
   return null
 }
