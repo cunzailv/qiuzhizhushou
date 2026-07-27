@@ -384,81 +384,48 @@ async function fillGreetingMessage(
   input.dispatchEvent(new Event('change', { bubbles: true }))
   await new Promise((r) => setTimeout(r, 500))
 
-  // 投简历模式：点「发简历」→ 点「立刻投递」→ 关闭弹窗
+  // 投简历模式：点「发简历」→ 点「立即投递」→ 关闭弹窗
   if (resumeMode) {
-    // 猎聘 DOM: <span class="im-ui-action-button action-resume">...<span>发简历</span></span>
-    // 优先按 class 精准定位，再兜底文字搜索
-    let sendBtn: HTMLElement | null =
-      q('.action-resume') as HTMLElement | null ||
-      q('[class*="action-resume"]') as HTMLElement | null ||
-      q('[class*="im-ui-action-button"][class*="resume"]') as HTMLElement | null
-    if (!sendBtn) {
-      // 兜底：搜索所有元素中包含「发简历」文字的，然后取父级 action button
-      const allEls = qa<HTMLElement>('span, div', document)
-      for (const el of allEls) {
-        if ((el.textContent || '').trim() === '发简历') {
-          sendBtn = el.closest('[class*="action"]') as HTMLElement | null || el
-          break
-        }
+    // 限定在弹窗内搜索（避免点到页面外同名元素导致跳转到 wow.liepin.com）
+    const modal = q('.ant-im-modal, [class*="im-dialog"], [class*="chat-modal"], [class*="ant-modal"]')
+    const searchRoot = (modal as ParentNode) || document
+
+    // 1. 找「发简历」— 必须在弹窗范围内
+    let sendBtn: HTMLElement | null = null
+    for (const el of qa<HTMLElement>('span', searchRoot)) {
+      if ((el.textContent || '').trim() === '发简历') {
+        sendBtn = el.closest('[class*="action"]') as HTMLElement | null || el
+        break
       }
     }
+
     if (sendBtn) {
-      // 拦截页面跳转（点击发简历可能触发 window.open 或 location 变化）
-      const originalOpen = window.open
-      let blockedUrl = ''
-      window.open = (...args: unknown[]) => {
-        blockedUrl = String(args[0] || '')
-        log('[liepin]', 'blocked window.open', blockedUrl)
-        return null as unknown as Window
-      }
-      // 也拦截 <a> 标签跳转
-      const anchor = sendBtn.closest('a')
-      const origHref = anchor?.getAttribute('href')
-      const origTarget = anchor?.getAttribute('target')
-      if (anchor) {
-        anchor.setAttribute('target', '_self')
-        anchor.removeAttribute('href')
-      }
+      // beforeunload 拦截所有页面跳转
+      const preventNav = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
+      window.addEventListener('beforeunload', preventNav)
 
-      sendBtn.click()
       sendBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+      log('[liepin]', 'fillGreetingMessage', 'Clicked 发简历')
+      await new Promise((r) => setTimeout(r, 2000))
+      window.removeEventListener('beforeunload', preventNav)
 
-      // 恢复
-      window.open = originalOpen
-      if (anchor) {
-        if (origHref) anchor.setAttribute('href', origHref)
-        if (origTarget) anchor.setAttribute('target', origTarget)
+      // 2. 找「立即投递」button
+      let confirmBtn: HTMLElement | null = null
+      for (const el of qa<HTMLElement>('button', document)) {
+        if ((el.textContent || '').trim() === '立即投递') { confirmBtn = el; break }
       }
 
-      log('[liepin]', 'fillGreetingMessage', `Clicked 发简历 (class=${sendBtn.className}, blockedUrl=${blockedUrl})`)
-      await new Promise((r) => setTimeout(r, 1500))
-
-      // 第二个弹窗：找「立即投递」
-      // DOM: <button class="ant-im-btn ant-im-btn-primary ant-im-teno-btn"><span>立即投递</span></button>
-      let confirmBtn: HTMLElement | null =
-        q('.ant-im-teno-btn') as HTMLElement | null ||
-        q('button.ant-im-btn-primary') as HTMLElement | null ||
-        q('[class*="im-btn-primary"]') as HTMLElement | null
-      if (!confirmBtn) {
-        const allEls2 = qa<HTMLElement>('button, span, div', document)
-        for (const el of allEls2) {
-          const text = (el.textContent || '').trim()
-          if (text === '立即投递' || text === '确认投递' || text.includes('立即投递')) {
-            confirmBtn = el.closest('button') as HTMLElement | null || el
-            break
-          }
-        }
-      }
       if (confirmBtn) {
-        confirmBtn.click()
+        window.addEventListener('beforeunload', preventNav)
         confirmBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
-        log('[liepin]', 'fillGreetingMessage', `Clicked 立刻投递 (class=${confirmBtn.className})`)
-        await new Promise((r) => setTimeout(r, 1000))
+        log('[liepin]', 'fillGreetingMessage', 'Clicked 立即投递')
+        await new Promise((r) => setTimeout(r, 1500))
+        window.removeEventListener('beforeunload', preventNav)
       } else {
-        log('[liepin]', 'fillGreetingMessage', '立刻投递 button not found')
+        log('[liepin]', 'fillGreetingMessage', '立即投递 not found')
       }
     } else {
-      log('[liepin]', 'fillGreetingMessage', '发简历 button not found')
+      log('[liepin]', 'fillGreetingMessage', '发简历 not found in modal')
     }
   }
 
