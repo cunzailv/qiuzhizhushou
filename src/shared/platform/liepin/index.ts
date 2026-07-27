@@ -350,9 +350,8 @@ export const liepinAdapter: PlatformAdapter = {
   name: '猎聘',
   icon: '🦁',
   homeUrl: 'https://www.liepin.com/',
-  // 匹配所有猎聘求职端域名（www / m / 裸域 / 其他子域）。
-  // 排除 c.liepin.com（企业端）。
-  matchesUrl: (url) => /liepin\.com/i.test(url) && !/c\.liepin\.com/i.test(url),
+  // 匹配所有猎聘求职端域名（www / m / c / 裸域 / 其他子域）。
+  matchesUrl: (url) => /liepin\.com/i.test(url),
   detectPageType,
   parseJobCardsFromSearchPage,
   parseJobDetailFromPage,

@@ -180,7 +180,7 @@ export default function App() {
           const url = tab.url
           if (/zhipin\.com/i.test(url)) {
             setPlatformName('Boss直聘')
-          } else if (/liepin\.com/i.test(url) && !/c\.liepin\.com/i.test(url)) {
+          } else if (/liepin\.com/i.test(url)) {
             setPlatformName('猎聘')
           } else if (getSupportedUrlPatterns().some((p) => {
             // 简单的 glob 风格匹配：将 * 替换为正则
