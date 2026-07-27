@@ -390,10 +390,22 @@ export function getChatContacts(): ChatContact[] {
 /** 点击联系人打开对话 */
 export async function clickContact(contact: ChatContact): Promise<boolean> {
   contact.element.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  await new Promise((r) => setTimeout(r, 400))
-  contact.element.click()
-  contact.element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
-  await new Promise((r) => setTimeout(r, 800))
+  await new Promise((r) => setTimeout(r, 600))
+
+  // 尝试多种点击方式
+  const el = contact.element
+  el.click()
+  el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+  el.dispatchEvent(new PointerEvent('click', { bubbles: true, cancelable: true, view: window }))
+
+  // 也尝试点击元素内的第一个链接或可交互子元素
+  const inner = el.querySelector('a, button, [class*="name"], [class*="title"]') as HTMLElement | null
+  if (inner) {
+    inner.click()
+    inner.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+  }
+
+  await new Promise((r) => setTimeout(r, 1000))
   return true
 }
 
