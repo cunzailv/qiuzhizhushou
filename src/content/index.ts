@@ -608,10 +608,13 @@ async function sendResumesOnChatPage(): Promise<void> {
   updatePanelContent(panelHost!, {
     mode: currentMode,
     status: 'scanning',
-    message: '正在读取联系人列表…',
+    message: '等待页面渲染…',
     resumeMode: liepinResumeMode, isChatPage: true,
     filters: currentFilters,
   })
+
+  // Boss 聊天页联系人列表可能是懒加载，等待几秒
+  await new Promise((r) => setTimeout(r, 2000))
 
   const contacts = getChatContacts()
   log(MOD, 'sendResumes', `Found ${contacts.length} contacts`)
