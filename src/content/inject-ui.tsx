@@ -421,7 +421,7 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
     </div>
     ${matchResults && matchResults.length > 0 ? buildMatchResults(matchResults) : ''}
     <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);font-size:9px;color:#5B5B7D;">
-      平台:${currentPlatformName} | 页面:${content.pageType || '?'} | 状态:${status}
+      平台:${currentPlatformName} | 聊天页:${content.isChatPage ? '是' : '否'} | 状态:${status}
     </div>
   `
 
