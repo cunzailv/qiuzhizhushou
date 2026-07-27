@@ -403,9 +403,34 @@ async function fillGreetingMessage(
       }
     }
     if (sendBtn) {
+      // 拦截页面跳转（点击发简历可能触发 window.open 或 location 变化）
+      const originalOpen = window.open
+      let blockedUrl = ''
+      window.open = (...args: unknown[]) => {
+        blockedUrl = String(args[0] || '')
+        log('[liepin]', 'blocked window.open', blockedUrl)
+        return null as unknown as Window
+      }
+      // 也拦截 <a> 标签跳转
+      const anchor = sendBtn.closest('a')
+      const origHref = anchor?.getAttribute('href')
+      const origTarget = anchor?.getAttribute('target')
+      if (anchor) {
+        anchor.setAttribute('target', '_self')
+        anchor.removeAttribute('href')
+      }
+
       sendBtn.click()
       sendBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
-      log('[liepin]', 'fillGreetingMessage', `Clicked 发简历 (class=${sendBtn.className})`)
+
+      // 恢复
+      window.open = originalOpen
+      if (anchor) {
+        if (origHref) anchor.setAttribute('href', origHref)
+        if (origTarget) anchor.setAttribute('target', origTarget)
+      }
+
+      log('[liepin]', 'fillGreetingMessage', `Clicked 发简历 (class=${sendBtn.className}, blockedUrl=${blockedUrl})`)
       await new Promise((r) => setTimeout(r, 1500))
 
       // 第二个弹窗：找「立即投递」
