@@ -473,50 +473,49 @@ export async function clickSendResume(): Promise<boolean> {
   return true
 }
 
-/** 在简历弹窗中选择默认简历并发送 */
+/** 在简历弹窗中选简历并点发送 */
 export async function selectAndSendResume(): Promise<boolean> {
   // 等待弹窗出现
-  await new Promise((r) => setTimeout(r, 800))
+  await new Promise((r) => setTimeout(r, 1000))
 
-  // Boss 简历弹窗：可能有"在线简历"/"附件简历"选择，以及"发送"按钮
-  // 先尝试选择第一个简历（如果有选择列表）
-  const resumeRadio = document.querySelector(
-    '[class*="resume-item"] input, [class*="resume-radio"], [class*="resume-select"] [type="radio"]'
-  ) as HTMLElement | null
-  if (resumeRadio) {
-    resumeRadio.click()
-    await new Promise((r) => setTimeout(r, 300))
-  }
+  // 收集弹窗内所有按钮文字供调试
+  const allBtns = document.querySelectorAll('button, [role="button"], [class*="btn"]')
+  const btnList = Array.from(allBtns).map(b => (b.textContent || '').trim()).filter(t => t.length >= 2 && t.length <= 10).join(',')
+  console.log('[selectAndSendResume] Buttons in dialog:', btnList || 'none')
 
-  // 找「发送」按钮
+  // 找并点击「发送」或「确定」按钮
+  const keywords = ['发送', '确定', '确认发送', '立刻投递', '立即投递', '投递']
   let sendBtn: HTMLElement | null = null
-  const sendSelectors = [
-    '[class*="dialog"] [class*="send"]',
-    '[class*="modal"] [class*="send"]',
-    '.dialog-container [class*="send"]',
-  ]
-  for (const sel of sendSelectors) {
-    sendBtn = document.querySelector(sel) as HTMLElement | null
-    if (sendBtn) break
+
+  // 优先在弹窗/modal 内搜索
+  const dialog = document.querySelector('[class*="dialog"], [class*="modal"], [class*="drawer"], [class*="popup"], .dialog-wrap')
+  const root = (dialog as ParentNode) || document
+  const all = root.querySelectorAll<HTMLElement>('button, span, a, div')
+  for (const el of all) {
+    const text = (el.textContent || '').trim()
+    if (keywords.includes(text)) {
+      sendBtn = el.closest('button') as HTMLElement | null || el
+      break
+    }
   }
+
+  // 全局兜底
   if (!sendBtn) {
-    // 文字兜底：限在弹窗内搜索
-    const dialog = document.querySelector('[class*="dialog"], [class*="modal"], .dialog-wrap')
-    const root = (dialog as ParentNode) || document
-    const all = root.querySelectorAll<HTMLElement>('button, span, div')
-    for (const el of all) {
-      const text = (el.textContent || '').trim()
-      if (text === '发送' || text === '确认发送' || text === '投递') {
-        // 优先用 button 父级
-        sendBtn = el.closest('button') as HTMLElement | null || el
-        break
+    for (const el of document.querySelectorAll<HTMLElement>('button')) {
+      if (keywords.includes((el.textContent || '').trim())) {
+        sendBtn = el; break
       }
     }
   }
-  if (!sendBtn) return false
+
+  if (!sendBtn) {
+    console.log('[selectAndSendResume] No send button found. All buttons:', btnList)
+    return false
+  }
 
   sendBtn.click()
   sendBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+  console.log('[selectAndSendResume] Clicked:', sendBtn.textContent?.trim())
   await new Promise((r) => setTimeout(r, 1500))
   return true
 }
