@@ -422,45 +422,14 @@ export function hasResumeSentInChat(): boolean {
 
 /** 在对话工具栏中找「发简历」按钮并点击 */
 export async function clickSendResume(): Promise<boolean> {
-  // 等待聊天区域加载
   await new Promise((r) => setTimeout(r, 1000))
 
-  // 先按 class 找
+  // 只搜 button，且文本精确等于「发简历」，排除「请求电话」等
   let btn: HTMLElement | null = null
-  const selectors = [
-    '[class*="send-resume"]',
-    '[class*="resume-btn"]',
-    '[class*="tool-bar"] [class*="resume"]',
-    '[class*="chat-footer"] [class*="resume"]',
-    '[class*="chat-toolbar"] [class*="resume"]',
-    '[class*="action-bar"] [class*="resume"]',
-  ]
-  for (const sel of selectors) {
-    btn = document.querySelector(sel) as HTMLElement | null
-    if (btn && btn.offsetParent !== null) break
-    btn = null
-  }
-
-  // 文字兜底 — 优先在聊天区域内搜索
-  if (!btn) {
-    const chatArea = document.querySelector('[class*="chat-content"], [class*="chat-right"], [class*="chat-main"], [class*="dialog"]')
-    const root = (chatArea as ParentNode) || document
-    const all = root.querySelectorAll<HTMLElement>('button, span, div, a')
-    for (const el of all) {
-      const text = (el.textContent || '').trim()
-      if (text === '发简历') {
-        btn = el.closest('button') as HTMLElement | null || el; break
-      }
-    }
-  }
-
-  // 全局兜底
-  if (!btn) {
-    const all = document.querySelectorAll<HTMLElement>('button, span, div')
-    for (const el of all) {
-      if ((el.textContent || '').trim() === '发简历') {
-        btn = el.closest('button') as HTMLElement | null || el; break
-      }
+  for (const b of document.querySelectorAll<HTMLElement>('button')) {
+    const t = (b.textContent || '').trim()
+    if (t === '发简历' || t.startsWith('发简历')) {
+      if (!t.includes('请求') && !t.includes('电话')) { btn = b; break }
     }
   }
 
@@ -469,28 +438,26 @@ export async function clickSendResume(): Promise<boolean> {
   btn.scrollIntoView({ block: 'center' })
   await new Promise((r) => setTimeout(r, 300))
 
-  // 用坐标模拟真实点击（React 合成事件需要正确的坐标）
   const rect = btn.getBoundingClientRect()
   const cx = rect.left + rect.width / 2
   const cy = rect.top + rect.height / 2
-
-  const clickInit: MouseEventInit = {
+  const init: MouseEventInit = {
     bubbles: true, cancelable: true, view: window,
     clientX: cx, clientY: cy, screenX: cx, screenY: cy, button: 0,
   }
 
-  btn.dispatchEvent(new PointerEvent('pointerdown', clickInit))
-  btn.dispatchEvent(new MouseEvent('mousedown', clickInit))
-  btn.dispatchEvent(new PointerEvent('pointerup', clickInit))
-  btn.dispatchEvent(new MouseEvent('mouseup', clickInit))
-  btn.dispatchEvent(new PointerEvent('click', clickInit))
-  btn.dispatchEvent(new MouseEvent('click', clickInit))
-
-  // 也尝试原生 click
+  btn.dispatchEvent(new PointerEvent('pointerdown', init))
+  btn.dispatchEvent(new MouseEvent('mousedown', init))
+  btn.dispatchEvent(new PointerEvent('pointerup', init))
+  btn.dispatchEvent(new MouseEvent('mouseup', init))
+  btn.dispatchEvent(new PointerEvent('click', init))
+  btn.dispatchEvent(new MouseEvent('click', init))
   btn.click()
 
   await new Promise((r) => setTimeout(r, 1500))
   return true
+}
+}
 
 /** 在简历弹窗中选简历并点发送 */
 export async function selectAndSendResume(): Promise<boolean> {
@@ -545,6 +512,7 @@ export async function selectAndSendResume(): Promise<boolean> {
   sendBtn.click()
   await new Promise((r) => setTimeout(r, 1500))
   return true
+}
 
 /** 关闭当前弹窗 */
 export async function closeChatDialog(): Promise<void> {
