@@ -89,7 +89,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     chrome.notifications.create({
       type: 'basic',
       iconUrl: 'icons/icon128.png',
-      title: 'Boss直聘求职助手',
+      title: '智能求职助手',
       message: message.payload?.message || '',
       priority: 1,
     })

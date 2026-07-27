@@ -1,6 +1,6 @@
 /**
- * Centralized logging utility for Boss Extension.
- * All logs prefixed with [Boss Assistant] for easy filtering in DevTools.
+ * Centralized logging utility.
+ * All logs prefixed with [求职助手] for easy filtering in DevTools.
  *
  * Usage:
  *   import { log, logError, logWarn, logGroup, logGroupEnd } from '../shared/utils/logger'
@@ -10,7 +10,7 @@
  *   logGroupEnd()
  */
 
-const PREFIX = '[Boss Assistant]'
+const PREFIX = '[求职助手]'
 
 function timestamp(): string {
   const d = new Date()
