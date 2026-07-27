@@ -276,33 +276,48 @@ async function activateJobCard(
   triggerHover(card as HTMLElement)
   await new Promise((r) => setTimeout(r, 1000))
 
-  // 在卡片内递归查找「聊一聊」按钮（可能隐藏，不检查可见性）
+  // 在卡片内查找「聊一聊」按钮
+  // 策略：先找 button/a，再用文字匹配 span/div，找不到就把所有元素检查一遍
   let btn: HTMLElement | null = null
-  const allBtns = qa<HTMLElement>('button, a, span, div', card)
-  for (const el of allBtns) {
-    const text = (el.textContent || '').trim()
-    if (text === '聊一聊' || text.includes('聊一聊')) {
-      btn = el
-      break
+
+  // 优先：button / a 标签 + 文字匹配
+  btn = findButtonByText(card, ['聊一聊'])
+  if (!btn) {
+    // 次选：搜索所有 span/div 的文字精确等于「聊一聊」
+    const allEls = qa<HTMLElement>('span, div, button, a', card)
+    for (const el of allEls) {
+      const text = (el.textContent || '').replace(/\s+/g, '')
+      if (text === '聊一聊') {
+        btn = el; break
+      }
     }
   }
-  // 兜底：用文本搜索
-  if (!btn) {
-    btn = findButtonByText(card, ['聊一聊'])
-  }
 
   if (!btn) {
-    log('[liepin]', 'activateJobCard', '聊一聊 button not found after hover — card skipped')
-    return null // 返回 null，让上层跳过这个岗位
+    log('[liepin]', 'activateJobCard', '聊一聊 not found after hover')
+    return null
   }
 
-  // 强制显示（可能被 CSS 隐藏），然后点击
-  ;(btn as HTMLElement).style.display = ''
-  ;(btn as HTMLElement).style.visibility = 'visible'
-  ;(btn as HTMLElement).style.opacity = '1'
-  ;(btn as HTMLElement).style.pointerEvents = 'auto'
-  btn.click()
-  log('[liepin]', 'activateJobCard', `Clicked 聊一聊: ${expectedTitle}`)
+  // 强制显示
+  ;(btn as HTMLElement).style.setProperty('display', 'inline-flex', 'important')
+  ;(btn as HTMLElement).style.setProperty('visibility', 'visible', 'important')
+  ;(btn as HTMLElement).style.setProperty('opacity', '1', 'important')
+  ;(btn as HTMLElement).style.setProperty('pointer-events', 'auto', 'important')
+
+  // 如果找到的是 span/div，往上找最近的 button/a
+  let clickTarget: HTMLElement = btn
+  if (!['BUTTON', 'A'].includes(btn.tagName)) {
+    const parentBtn = btn.closest('button') as HTMLElement | null
+    const parentA = btn.closest('a') as HTMLElement | null
+    clickTarget = parentBtn || parentA || btn
+  }
+
+  // 多种方式触发点击
+  clickTarget.click()
+  clickTarget.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+  clickTarget.dispatchEvent(new PointerEvent('click', { bubbles: true, cancelable: true, view: window }))
+
+  log('[liepin]', 'activateJobCard', `Clicked 聊一聊 (tag=${clickTarget.tagName}): ${expectedTitle}`)
   await new Promise((r) => setTimeout(r, 1500))
 
   return card as HTMLElement
