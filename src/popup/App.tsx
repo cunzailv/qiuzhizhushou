@@ -222,7 +222,15 @@ export default function App() {
       minMatchScore: filters.minMatchScore,
     })
 
-    const preferred = platformOverride !== 'auto' ? platformOverride : undefined
+    // 推断目标平台：手动选择优先，否则从检测到的平台名反查
+    const preferred =
+      platformOverride !== 'auto'
+        ? platformOverride
+        : effectivePlatformName === '猎聘'
+          ? 'liepin'
+          : effectivePlatformName === 'Boss直聘'
+            ? 'boss'
+            : undefined
     const platformLabel = effectivePlatformName || '招聘平台'
     showToast(`正在连接 ${platformLabel} 页面…`, 'info')
     try {
@@ -258,7 +266,14 @@ export default function App() {
   const handleStopApply = async () => {
     showToast('正在停止…', 'info')
     try {
-      const preferred = platformOverride !== 'auto' ? platformOverride : undefined
+      const preferred =
+        platformOverride !== 'auto'
+          ? platformOverride
+          : effectivePlatformName === '猎聘'
+            ? 'liepin'
+            : effectivePlatformName === 'Boss直聘'
+              ? 'boss'
+              : undefined
       const targetTab = await findSupportedBossTab(preferred)
       if (!targetTab?.id) throw new Error('未找到运行中的页面')
       await sendMessageWithRecovery(targetTab.id, { type: 'EXECUTE_STOP' })
