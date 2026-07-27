@@ -467,11 +467,30 @@ export async function clickSendResume(): Promise<boolean> {
   if (!btn) return false
 
   btn.scrollIntoView({ block: 'center' })
+  await new Promise((r) => setTimeout(r, 300))
+
+  // 用坐标模拟真实点击（React 合成事件需要正确的坐标）
+  const rect = btn.getBoundingClientRect()
+  const cx = rect.left + rect.width / 2
+  const cy = rect.top + rect.height / 2
+
+  const clickInit: MouseEventInit = {
+    bubbles: true, cancelable: true, view: window,
+    clientX: cx, clientY: cy, screenX: cx, screenY: cy, button: 0,
+  }
+
+  btn.dispatchEvent(new PointerEvent('pointerdown', clickInit))
+  btn.dispatchEvent(new MouseEvent('mousedown', clickInit))
+  btn.dispatchEvent(new PointerEvent('pointerup', clickInit))
+  btn.dispatchEvent(new MouseEvent('mouseup', clickInit))
+  btn.dispatchEvent(new PointerEvent('click', clickInit))
+  btn.dispatchEvent(new MouseEvent('click', clickInit))
+
+  // 也尝试原生 click
   btn.click()
-  btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+
   await new Promise((r) => setTimeout(r, 1500))
   return true
-}
 
 /** 在简历弹窗中选简历并点发送 */
 export async function selectAndSendResume(): Promise<boolean> {
@@ -508,17 +527,24 @@ export async function selectAndSendResume(): Promise<boolean> {
     }
   }
 
-  if (!sendBtn) {
-    console.log('[selectAndSendResume] No send button found. All buttons:', btnList)
-    return false
-  }
+  if (!sendBtn) return false
 
+  const rect = sendBtn.getBoundingClientRect()
+  const cx = rect.left + rect.width / 2
+  const cy = rect.top + rect.height / 2
+  const init: MouseEventInit = {
+    bubbles: true, cancelable: true, view: window,
+    clientX: cx, clientY: cy, screenX: cx, screenY: cy, button: 0,
+  }
+  sendBtn.dispatchEvent(new PointerEvent('pointerdown', init))
+  sendBtn.dispatchEvent(new MouseEvent('mousedown', init))
+  sendBtn.dispatchEvent(new PointerEvent('pointerup', init))
+  sendBtn.dispatchEvent(new MouseEvent('mouseup', init))
+  sendBtn.dispatchEvent(new PointerEvent('click', init))
+  sendBtn.dispatchEvent(new MouseEvent('click', init))
   sendBtn.click()
-  sendBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
-  console.log('[selectAndSendResume] Clicked:', sendBtn.textContent?.trim())
   await new Promise((r) => setTimeout(r, 1500))
   return true
-}
 
 /** 关闭当前弹窗 */
 export async function closeChatDialog(): Promise<void> {
