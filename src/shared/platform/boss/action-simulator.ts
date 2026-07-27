@@ -356,30 +356,25 @@ export function getChatContacts(): ChatContact[] {
   const container = document.querySelector('[class*="chat-user"]')
   if (!container) return contacts
 
-  // 联系人项是容器内的直接子 DIV（排除 filter/header）
+  // 联系人项是容器内的直接子 DIV
   const items = container.querySelectorAll(':scope > div, :scope > a, :scope > li')
   items.forEach((el, i) => {
     const text = (el.textContent || '').trim()
     if (!text || text.length < 5) return
 
-    // 排除筛选条件栏（仅沟通/有交换/有面试等）
-    if (text.includes('仅沟通') && text.includes('有交换') && text.length < 30) return
-    if (text === '全部' || text === '未读' || text === '新招呼') return
+    // 排除非联系人的 UI 元素
+    const excludeWords = ['全部未读', '新招呼', '仅沟通', '有交换', '有面试', '不感兴趣', 'AI筛选', '提交', '更多', '已读']
+    if (excludeWords.some(w => text === w || (text.includes(w) && text.length < 20))) return
 
-    // 提取时间 + 名称 + 公司（Boss 格式: "23:14赵越法本招聘经理Hello..."）
-    // 名称通常是中文字符，前面可能有时间戳
-    const timeMatch = text.match(/^(\d{1,2}:\d{2})/)
-    const time = timeMatch ? timeMatch[1] : ''
-    const rest = timeMatch ? text.slice(time.length) : text
+    // 必须有时间戳格式（HH:MM）或名称格式才是联系人
+    const hasTime = /\d{1,2}:\d{2}/.test(text.slice(0, 6))
+    if (!hasTime && text.length < 15) return
 
-    // 名称：取前几个中文字符作为名称
-    const nameMatch = rest.match(/^([一-龥]{2,4})/)
-    const name = nameMatch ? nameMatch[1] : rest.slice(0, 4)
-
-    // 公司/职位：名称后面的部分
-    const afterName = nameMatch ? rest.slice(nameMatch[1].length) : ''
-    const companyMatch = afterName.match(/^([一-龥]{2,6}(?:集团|科技|网络|信息|软件|数据|有限公司|公司)?)/)
-    const company = companyMatch ? companyMatch[1] : afterName.slice(0, 10)
+    // 提取名称（时间戳后面的中文字符）
+    const cleanText = text.replace(/^\d{1,2}:\d{2}/, '').trim()
+    const nameMatch = cleanText.match(/^([一-龥]{2,4})/)
+    const name = nameMatch ? nameMatch[1] : cleanText.slice(0, 5)
+    const company = cleanText.slice(name.length, name.length + 15).trim()
 
     contacts.push({
       id: el.getAttribute('data-id') || el.getAttribute('data-uid') || `chat-${i}`,
@@ -415,29 +410,51 @@ export function hasResumeSentInChat(): boolean {
 
 /** 在对话工具栏中找「发简历」按钮并点击 */
 export async function clickSendResume(): Promise<boolean> {
-  // 先按 class 找，再兜底文字搜索
+  // 等待聊天区域加载
+  await new Promise((r) => setTimeout(r, 1000))
+
+  // 先按 class 找
   let btn: HTMLElement | null = null
   const selectors = [
     '[class*="send-resume"]',
     '[class*="resume-btn"]',
     '[class*="tool-bar"] [class*="resume"]',
+    '[class*="chat-footer"] [class*="resume"]',
+    '[class*="chat-toolbar"] [class*="resume"]',
+    '[class*="action-bar"] [class*="resume"]',
   ]
   for (const sel of selectors) {
     btn = document.querySelector(sel) as HTMLElement | null
-    if (btn) break
+    if (btn && btn.offsetParent !== null) break
+    btn = null
   }
+
+  // 文字兜底 — 优先在聊天区域内搜索
   if (!btn) {
-    // 文字兜底
-    const all = document.querySelectorAll<HTMLElement>('button, span, div, a')
+    const chatArea = document.querySelector('[class*="chat-content"], [class*="chat-right"], [class*="chat-main"], [class*="dialog"]')
+    const root = (chatArea as ParentNode) || document
+    const all = root.querySelectorAll<HTMLElement>('button, span, div, a')
     for (const el of all) {
       const text = (el.textContent || '').trim()
-      if (text === '发简历' || text.includes('发简历')) {
-        btn = el; break
+      if (text === '发简历') {
+        btn = el.closest('button') as HTMLElement | null || el; break
       }
     }
   }
+
+  // 全局兜底
+  if (!btn) {
+    const all = document.querySelectorAll<HTMLElement>('button, span, div')
+    for (const el of all) {
+      if ((el.textContent || '').trim() === '发简历') {
+        btn = el.closest('button') as HTMLElement | null || el; break
+      }
+    }
+  }
+
   if (!btn) return false
 
+  btn.scrollIntoView({ block: 'center' })
   btn.click()
   btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
   await new Promise((r) => setTimeout(r, 1500))
