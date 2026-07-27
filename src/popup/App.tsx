@@ -148,22 +148,51 @@ export default function App() {
   }, [])
 
   // 探测当前活动标签页所属招聘平台，并在头部展示平台状态。
+  // 策略：先通过 content script 获取平台信息，失败时用 URL 兜底推断。
   useEffect(() => {
     (async () => {
       try {
+        // 查询当前活动标签页（不限制 URL，避免因 match pattern 遗漏导致检测失败）
         const [tab] = await chrome.tabs.query({
           active: true,
           currentWindow: true,
-          url: getSupportedUrlPatterns(),
         })
-        if (!tab?.id) {
+        if (!tab?.id || !tab.url) {
           setPlatformName('')
           return
         }
-        const info = await sendMessageWithRecovery(tab.id, { type: 'GET_PAGE_INFO' }) as {
-          platformName?: string
+
+        // 先尝试通过 content script 获取精确的平台信息
+        let detectedName = ''
+        try {
+          const info = await sendMessageWithRecovery(tab.id, { type: 'GET_PAGE_INFO' }) as {
+            platformName?: string
+          }
+          detectedName = info?.platformName ?? ''
+        } catch {
+          // content script 无响应，继续用 URL 兜底
         }
-        setPlatformName(info?.platformName ?? '')
+
+        // 兜底：如果 content script 返回了平台名则用；否则从 URL 推断
+        if (detectedName) {
+          setPlatformName(detectedName)
+        } else {
+          const url = tab.url
+          if (/zhipin\.com/i.test(url)) {
+            setPlatformName('Boss直聘')
+          } else if (/liepin\.com/i.test(url) && !/c\.liepin\.com/i.test(url)) {
+            setPlatformName('猎聘')
+          } else if (getSupportedUrlPatterns().some((p) => {
+            // 简单的 glob 风格匹配：将 * 替换为正则
+            const regex = new RegExp('^' + p.replace(/\*/g, '.*') + '$', 'i')
+            return regex.test(url)
+          })) {
+            // URL 匹配我们的支持列表但不是已知平台，留空让 content script 决定
+            setPlatformName('')
+          } else {
+            setPlatformName('')
+          }
+        }
       } catch {
         setPlatformName('')
       }
