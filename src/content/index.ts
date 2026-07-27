@@ -649,29 +649,23 @@ async function sendResumesOnChatPage(): Promise<void> {
   }
 
   let sent = 0
-  let skipped = 0
+  let skippedSent = 0
+  let skippedNoBtn = 0
+  let results: string[] = []
 
   for (let i = 0; i < contacts.length; i++) {
     if (!isApplying) break
     const contact = contacts[i]
 
-    updatePanelContent(panelHost!, {
-      mode: currentMode,
-      status: 'applying',
-      message: `[${i + 1}/${contacts.length}] ${contact.name || contact.company}`,
-      stats: { total: contacts.length, processed: i, matched: sent },
-      resumeMode: liepinResumeMode, isChatPage: true,
-      filters: currentFilters,
-    })
-
     // 点击联系人
     await clickContact(contact)
-    await randomDelay(500, 1000)
+    await randomDelay(800, 1500)
 
     // 检查是否已发过简历
     if (hasResumeSentInChat()) {
       log(MOD, 'sendResumes', `Skip (already sent): ${contact.name}`)
-      skipped++
+      skippedSent++
+      results.push(`⏭ ${contact.name}: 已发过`)
       continue
     }
 
@@ -679,7 +673,8 @@ async function sendResumesOnChatPage(): Promise<void> {
     const clicked = await clickSendResume()
     if (!clicked) {
       log(MOD, 'sendResumes', `发简历 button not found: ${contact.name}`)
-      skipped++
+      skippedNoBtn++
+      results.push(`❌ ${contact.name}: 无发简历按钮`)
       continue
     }
 
@@ -687,21 +682,32 @@ async function sendResumesOnChatPage(): Promise<void> {
     const sentOk = await selectAndSendResume()
     if (sentOk) {
       sent++
+      results.push(`✅ ${contact.name}: 已发送`)
       log(MOD, 'sendResumes', `Resume sent: ${contact.name}`)
     } else {
+      skippedNoBtn++
+      results.push(`❌ ${contact.name}: 发送失败`)
       log(MOD, 'sendResumes', `Send failed: ${contact.name}`)
     }
 
     // 关闭弹窗
     await closeChatDialog()
     await randomDelay(1000, 2500)
+
+    updatePanelContent(panelHost!, {
+      mode: currentMode, status: 'applying',
+      message: `[${i + 1}/${contacts.length}] ${contact.name}`,
+      stats: { total: contacts.length, processed: i + 1, matched: sent },
+      resumeMode: liepinResumeMode, isChatPage: true,
+      filters: currentFilters,
+    })
   }
 
   isApplying = false
+  const summary = results.slice(-5).join('\n')
   updatePanelContent(panelHost!, {
-    mode: currentMode,
-    status: 'done',
-    message: `完成！发送 ${sent} 份简历，跳过 ${skipped} 人`,
+    mode: currentMode, status: 'done',
+    message: `完成！发送${sent} 已发过${skippedSent} 无按钮${skippedNoBtn}\n${summary}`,
     stats: { total: contacts.length, processed: contacts.length, matched: sent },
     resumeMode: liepinResumeMode, isChatPage: true,
     filters: currentFilters,
