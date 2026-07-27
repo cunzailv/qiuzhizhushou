@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/cover.svg" alt="智能求职助手" width="100%">
+  <img src="docs/assets/cover.svg" alt="智能求职助手" width="100%">
 </p>
 
 ---
@@ -110,7 +110,7 @@ src/
 如果这个项目对你有帮助，欢迎请作者喝杯咖啡 ☕
 
 <p align="center">
-  <img src="docs/sponsor-qr.jpg" alt="微信收款码" width="280">
+  <img src="docs/assets/sponsor-qr.jpg" alt="微信收款码" width="280">
 </p>
 
 **微信**：`AQuan12070310`
