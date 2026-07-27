@@ -408,18 +408,18 @@ async function fillGreetingMessage(
       log('[liepin]', 'fillGreetingMessage', `Clicked 发简历 (class=${sendBtn.className})`)
       await new Promise((r) => setTimeout(r, 1500))
 
-      // 第二个弹窗：找「立刻投递」
+      // 第二个弹窗：找「立即投递」
+      // DOM: <button class="ant-im-btn ant-im-btn-primary ant-im-teno-btn"><span>立即投递</span></button>
       let confirmBtn: HTMLElement | null =
-        q('[class*="action-deliver"]') as HTMLElement | null ||
-        q('[class*="action-submit"]') as HTMLElement | null
+        q('.ant-im-teno-btn') as HTMLElement | null ||
+        q('button.ant-im-btn-primary') as HTMLElement | null ||
+        q('[class*="im-btn-primary"]') as HTMLElement | null
       if (!confirmBtn) {
-        const allEls2 = qa<HTMLElement>('span, div, button', document)
+        const allEls2 = qa<HTMLElement>('button, span, div', document)
         for (const el of allEls2) {
           const text = (el.textContent || '').trim()
-          if (text === '立刻投递' || text === '确认投递' || text.includes('立刻投递')) {
-            confirmBtn = el.closest('[class*="action"]') as HTMLElement | null
-              || el.closest('button') as HTMLElement | null
-              || el
+          if (text === '立即投递' || text === '确认投递' || text.includes('立即投递')) {
+            confirmBtn = el.closest('button') as HTMLElement | null || el
             break
           }
         }
