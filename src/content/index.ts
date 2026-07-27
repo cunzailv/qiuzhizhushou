@@ -661,7 +661,7 @@ async function sendResumesOnChatPage(): Promise<void> {
     await clickContact(contact)
     await randomDelay(1000, 1500)
 
-    // 调试：第一个联系人时收集页面上所有按钮文字（暂停5秒）
+    // DEBUG: 第一个联系人时展示按钮列表（2秒），然后正常继续
     if (i === 0) {
       const allBtns = document.querySelectorAll('button, [role="button"], [class*="btn"], span[class*="action"]')
       let btnTexts: string[] = []
@@ -671,13 +671,11 @@ async function sendResumesOnChatPage(): Promise<void> {
       })
       updatePanelContent(panelHost!, {
         mode: currentMode, status: 'applying',
-        message: `点击了 ${contact.name}，页面按钮:\n${btnTexts.slice(0, 15).join(' ') || '无'}\n(5秒后继续...)`,
-        stats: { total: contacts.length, processed: 0, matched: 0 },
+        message: `按钮: ${btnTexts.slice(0, 12).join(' ')}`,
+        stats: { total: contacts.length, processed: i, matched: 0 },
         resumeMode: liepinResumeMode, isChatPage: true,
         filters: currentFilters,
       })
-      await new Promise((r) => setTimeout(r, 5000))
-      if (!isApplying) return
     }
 
     // 检查是否已发过简历
