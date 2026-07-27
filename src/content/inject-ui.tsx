@@ -445,6 +445,7 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
     }, '*')
   })
   shadow.getElementById('btn-send-resumes')?.addEventListener('click', () => {
+    console.log('[求职助手] btn-send-resumes clicked, posting BOSS_ASSISTANT_SEND_RESUMES')
     window.postMessage({ type: 'BOSS_ASSISTANT_SEND_RESUMES' }, '*')
   })
   scoreFilter?.addEventListener('click', () => {

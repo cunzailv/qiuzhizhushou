@@ -212,6 +212,7 @@ window.addEventListener('message', (event) => {
     })
   }
   if (data?.type === 'BOSS_ASSISTANT_SEND_RESUMES') {
+    console.log('[求职助手] BOSS_ASSISTANT_SEND_RESUMES received')
     log(MOD, 'panelMessage', 'SEND_RESUMES')
     sendResumesOnChatPage()
   }
@@ -597,11 +598,12 @@ async function saveApplication(job: JobCard, match: MatchResult): Promise<boolea
 
 // ─── Boss 聊天页：批量发送简历 ───
 async function sendResumesOnChatPage(): Promise<void> {
-  if (isApplying) return
+  console.log('[求职助手] sendResumesOnChatPage called, isApplying=', isApplying)
+  if (isApplying) { console.log('[求职助手] Already applying, returning'); return }
   isApplying = true
   runStopped = false
 
-  if (!panelHost?.isConnected) panelHost = createFloatingPanel()
+  if (!panelHost?.isConnected) { console.log('[求职助手] Creating new panel'); panelHost = createFloatingPanel() }
   updatePanelContent(panelHost!, {
     mode: currentMode,
     status: 'scanning',
@@ -611,6 +613,7 @@ async function sendResumesOnChatPage(): Promise<void> {
   })
 
   const contacts = getChatContacts()
+  console.log(`[求职助手] sendResumes: Found ${contacts.length} contacts`)
   log(MOD, 'sendResumes', `Found ${contacts.length} contacts`)
 
   let sent = 0
