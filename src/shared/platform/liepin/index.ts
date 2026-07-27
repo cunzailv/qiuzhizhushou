@@ -10,6 +10,13 @@ import type { JobCard, MatchResult } from '../../types/job'
 import type { PlatformAdapter, PlatformRiskConfig, CollectOptions, PageType, CommunicationUiSnapshot } from '../types'
 import { log } from '../../utils/logger'
 
+// 猎聘专属：投简历模式开关（由 content script 在收到浮窗消息后调用）
+let resumeMode = false
+export function setLiepinResumeMode(enabled: boolean): void {
+  resumeMode = enabled
+  log('[liepin]', 'setLiepinResumeMode', enabled ? '投简历模式' : '仅沟通模式')
+}
+
 // 猎聘 PC 端 class 使用 CSS Modules（带随机后缀如 --ZWExZ），
 // 因此所有选择器用 [class*="..."] 做子串匹配。
 const JOB_CARD_SELECTOR = '[class*="job-list-item"]'
@@ -377,9 +384,31 @@ async function fillGreetingMessage(
   input.dispatchEvent(new Event('change', { bubbles: true }))
   await new Promise((r) => setTimeout(r, 500))
 
-  // 关闭模态框（右上角 X 按钮）
+  // 投简历模式：点「发简历」→ 点「立刻投递」→ 关闭弹窗
+  if (resumeMode) {
+    const sendBtn = findButtonByText(document, ['发简历', '发送简历'])
+    if (sendBtn) {
+      sendBtn.click()
+      log('[liepin]', 'fillGreetingMessage', 'Clicked 发简历')
+      await new Promise((r) => setTimeout(r, 1500))
+
+      // 第二个弹窗：找「立刻投递」并点击
+      const confirmBtn = findButtonByText(document, ['立刻投递', '确认投递'])
+      if (confirmBtn) {
+        confirmBtn.click()
+        log('[liepin]', 'fillGreetingMessage', 'Clicked 立刻投递')
+        await new Promise((r) => setTimeout(r, 1000))
+      } else {
+        log('[liepin]', 'fillGreetingMessage', '立刻投递 button not found')
+      }
+    } else {
+      log('[liepin]', 'fillGreetingMessage', '发简历 button not found')
+    }
+  }
+
+  // 关闭所有弹窗
   await closeAnyModal()
-  log('[liepin]', 'fillGreetingMessage', 'Greeting filled and modal closed')
+  log('[liepin]', 'fillGreetingMessage', resumeMode ? 'Resume submitted and modal closed' : 'Greeting filled and modal closed')
   return true
 }
 

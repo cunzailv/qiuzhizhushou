@@ -17,6 +17,7 @@ interface PanelContent {
   dailyRemaining?: number
   filters?: Partial<ApplyFilters>
   platformName?: string
+  resumeMode?: boolean
 }
 
 let isMinimized = false
@@ -392,6 +393,12 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
       <button class="score-btn ${effectiveFilters.enableAiMatch ? 'active' : ''}" id="score-filter" ${lockAttr}${lockHint}>⭐ 按分筛选</button>
       <button class="score-btn ${effectiveFilters.enableAiMatch ? '' : 'active direct'}" id="score-direct" ${lockAttr}${lockHint}>🚀 不评分沟通</button>
     </div>
+    ${currentPlatformName === '猎聘' ? `
+    <div class="resume-toggle">
+      <button class="resume-btn ${!content.resumeMode ? 'active' : ''}" id="resume-chat" ${lockAttr}${lockHint}>💬 仅沟通</button>
+      <button class="resume-btn ${content.resumeMode ? 'active' : ''}" id="resume-send" ${lockAttr}${lockHint}>📤 投简历</button>
+    </div>
+    ` : ''}
     <div class="btn-row">
       ${status === 'idle' ? `<button class="btn btn-primary" id="btn-start">🚀 开始智能沟通</button>` : ''}
       ${status === 'applying' ? `<button class="btn btn-danger" id="btn-stop">⏹ 停止</button>` : ''}
@@ -441,6 +448,13 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
       const newMode = btn.getAttribute('data-mode') as 'batch' | 'recommend'
       window.postMessage({ type: 'BOSS_ASSISTANT_CHANGE_MODE', mode: newMode }, '*')
     })
+  })
+
+  shadow.getElementById('resume-chat')?.addEventListener('click', () => {
+    window.postMessage({ type: 'BOSS_ASSISTANT_CHANGE_RESUME_MODE', enabled: false }, '*')
+  })
+  shadow.getElementById('resume-send')?.addEventListener('click', () => {
+    window.postMessage({ type: 'BOSS_ASSISTANT_CHANGE_RESUME_MODE', enabled: true }, '*')
   })
 
   shadow.getElementById('btn-copy-card')?.addEventListener('click', async () => {
@@ -774,6 +788,37 @@ function getStyles(): string {
 
     /* Mode / scoring toggles are locked while a run is active. */
     .mode-btn:disabled,
+    .resume-toggle {
+      display: flex;
+      gap: 4px;
+      padding: 3px;
+      margin: -2px 0 8px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.04);
+    }
+    .resume-btn {
+      flex: 1;
+      padding: 7px 6px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: #6B6B8D;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .resume-btn.active {
+      color: #6EE7B7;
+      border-color: rgba(16,185,129,0.25);
+      background: rgba(16,185,129,0.1);
+    }
+    .resume-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      pointer-events: none;
+      filter: grayscale(0.6);
+    }
+
     .score-btn:disabled {
       opacity: 0.4;
       cursor: not-allowed;

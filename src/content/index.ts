@@ -2,6 +2,7 @@
 import { getActivePlatform } from '../shared/platform'
 import type { PlatformAdapter } from '../shared/platform/types'
 import { setPlatformName } from './inject-ui'
+import { setLiepinResumeMode } from '../shared/platform/liepin'
 
 // 当前活动平台适配器（由 PlatformManager 按网址自动识别，或按设置手动覆盖）。
 let adapter: PlatformAdapter
@@ -33,6 +34,7 @@ let matchResults: Array<{
 let defaultResume: Resume | undefined = undefined
 let currentFilters: ApplyFilters = { ...DEFAULT_FILTERS }
 let lastRiskWarning = ''
+let liepinResumeMode = false
 
 // ------ Fetch full resume: try chrome.storage.local first, fallback to background ------
 async function fetchFullResume(): Promise<Resume | undefined> {
@@ -183,6 +185,17 @@ window.addEventListener('message', (event) => {
       mode: currentMode,
       status: 'idle',
       filters: currentFilters,
+      resumeMode: liepinResumeMode,
+    })
+  }
+  if (data?.type === 'BOSS_ASSISTANT_CHANGE_RESUME_MODE') {
+    liepinResumeMode = data.enabled === true
+    setLiepinResumeMode(liepinResumeMode)
+    updatePanelContent(panelHost!, {
+      mode: currentMode,
+      status: 'idle',
+      filters: currentFilters,
+      resumeMode: liepinResumeMode,
     })
   }
 })
