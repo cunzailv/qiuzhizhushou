@@ -46,18 +46,34 @@ function findButtonByText(root: ParentNode, texts: string[]): HTMLElement | null
 
 /**
  * 在元素上触发 hover 事件序列，使猎聘卡片中隐藏的「聊一聊」按钮出现。
- * 猎聘通过 JS 事件（而非 CSS :hover）控制按钮显隐，因此需要触发真实的
- * mouseenter / mouseover 事件。
+ * 猎聘使用 React 合成事件，需要 PointerEvent + MouseEvent 双管齐下，
+ * 并包含正确的坐标信息（clientX/Y 基于元素 bounding rect）。
  */
 function triggerHover(el: HTMLElement): void {
-  const events: Array<{ type: string; bubbles: boolean }> = [
-    { type: 'mouseenter', bubbles: false },
-    { type: 'mouseover', bubbles: true },
-    { type: 'mousemove', bubbles: true },
-  ]
-  for (const { type, bubbles } of events) {
-    el.dispatchEvent(new MouseEvent(type, { bubbles, cancelable: true, view: window }))
+  const rect = el.getBoundingClientRect()
+  const x = rect.left + rect.width / 2
+  const y = rect.top + rect.height / 2
+
+  const eventInit: MouseEventInit = {
+    bubbles: true,
+    cancelable: true,
+    view: window,
+    clientX: x,
+    clientY: y,
+    screenX: x,
+    screenY: y,
+    relatedTarget: document.body,
   }
+
+  // 先触发 pointer 事件（React 17+ 优先监听指针事件）
+  el.dispatchEvent(new PointerEvent('pointerover', eventInit))
+  el.dispatchEvent(new PointerEvent('pointerenter', { ...eventInit, bubbles: false }))
+  el.dispatchEvent(new PointerEvent('pointermove', eventInit))
+
+  // 再触发 mouse 事件（兼容传统监听）
+  el.dispatchEvent(new MouseEvent('mouseover', eventInit))
+  el.dispatchEvent(new MouseEvent('mouseenter', { ...eventInit, bubbles: false }))
+  el.dispatchEvent(new MouseEvent('mousemove', eventInit))
 }
 
 function extractId(url: string): string {
@@ -225,49 +241,68 @@ async function activateJobCard(
   // 在当前页面找到对应卡片（不跳转！猎聘所有操作都在当前页完成）
   let card: Element | null = null
 
-  // 按标题+公司名在所有卡片中匹配
   const cards = qa(JOB_CARD_SELECTOR)
   for (const el of cards) {
     const title = (q(TITLE_SELECTOR, el)?.textContent || '').trim()
     const company = (q(COMPANY_SELECTOR, el)?.textContent || '').trim()
     if (expectedTitle && expectedCompany && title === expectedTitle && company === expectedCompany) {
-      card = el
-      break
+      card = el; break
     }
     if (expectedTitle && title === expectedTitle) {
-      card = el
-      break
+      card = el; break
     }
-    // 模糊匹配：标题包含关键词
     if (expectedTitle && title.includes(expectedTitle)) {
-      card = el
-      break
+      card = el; break
     }
   }
 
   if (!card) {
-    log('[liepin]', 'activateJobCard', `Card not found: ${expectedTitle} @ ${expectedCompany}`)
+    log('[liepin]', 'activateJobCard', `Card not found: ${expectedTitle}`)
     return null
   }
 
   // 滚动卡片到可视区域
   ;(card as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'center' })
-  await new Promise((r) => setTimeout(r, 500))
+  await new Promise((r) => setTimeout(r, 600))
 
-  // hover 卡片以触发「聊一聊」按钮出现
+  // hover 招聘者区域（右侧头像+姓名，聊一聊按钮出现在这里）
+  const rightBox = q('[class*="job-card-right-box"]', card)
+    || q('[class*="recruiter-info-box"]', card)
+    || q('[class*="recruiter-photo"]', card)
+  if (rightBox) {
+    triggerHover(rightBox as HTMLElement)
+  }
+  // 也 hover 整个卡片
   triggerHover(card as HTMLElement)
-  await new Promise((r) => setTimeout(r, 800))
+  await new Promise((r) => setTimeout(r, 1000))
 
-  // 在卡片内查找「聊一聊」按钮（排除职位详情链接，避免跳转）
-  const btn = findButtonByText(card, APPLY_TEXTS)
-  if (!btn || btn.tagName === 'A') {
-    // 如果卡片内的按钮是链接或者是找不到的，跳过（避免页面跳转）
-    log('[liepin]', 'activateJobCard', 'Chat button is link or not found, skipping navigation')
-    return card as HTMLElement
+  // 在卡片内递归查找「聊一聊」按钮（可能隐藏，不检查可见性）
+  let btn: HTMLElement | null = null
+  const allBtns = qa<HTMLElement>('button, a, span, div', card)
+  for (const el of allBtns) {
+    const text = (el.textContent || '').trim()
+    if (text === '聊一聊' || text.includes('聊一聊')) {
+      btn = el
+      break
+    }
+  }
+  // 兜底：用文本搜索
+  if (!btn) {
+    btn = findButtonByText(card, ['聊一聊'])
   }
 
+  if (!btn) {
+    log('[liepin]', 'activateJobCard', '聊一聊 button not found after hover — card skipped')
+    return null // 返回 null，让上层跳过这个岗位
+  }
+
+  // 强制显示（可能被 CSS 隐藏），然后点击
+  ;(btn as HTMLElement).style.display = ''
+  ;(btn as HTMLElement).style.visibility = 'visible'
+  ;(btn as HTMLElement).style.opacity = '1'
+  ;(btn as HTMLElement).style.pointerEvents = 'auto'
   btn.click()
-  log('[liepin]', 'activateJobCard', 'Clicked 聊一聊, waiting for modal...')
+  log('[liepin]', 'activateJobCard', `Clicked 聊一聊: ${expectedTitle}`)
   await new Promise((r) => setTimeout(r, 1500))
 
   return card as HTMLElement
