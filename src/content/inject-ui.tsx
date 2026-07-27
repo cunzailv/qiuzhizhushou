@@ -18,6 +18,7 @@ interface PanelContent {
   filters?: Partial<ApplyFilters>
   platformName?: string
   resumeMode?: boolean
+  pageType?: string
 }
 
 let isMinimized = false
@@ -400,11 +401,17 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
     </div>
     ` : ''}
     <div class="btn-row">
-      ${status === 'idle' ? `<button class="btn btn-primary" id="btn-start">🚀 开始智能沟通</button>` : ''}
-      ${status === 'applying' ? `<button class="btn btn-danger" id="btn-stop">⏹ 停止</button>` : ''}
-      ${status === 'done' ? `<button class="btn btn-primary" id="btn-start">🔄 继续沟通</button>` : ''}
-      ${status === 'pause' ? `<button class="btn btn-primary" id="btn-resume">▶ 继续沟通</button>` : ''}
-      ${status === 'scanning' || status === 'matching' ? `<button class="btn btn-danger" id="btn-stop">⏹ 停止</button>` : ''}
+      ${currentPlatformName === 'Boss直聘' && content.pageType === 'chat' ? `
+        ${status === 'idle' ? `<button class="btn btn-primary" id="btn-send-resumes">📤 批量发简历</button>` : ''}
+        ${status === 'applying' ? `<button class="btn btn-danger" id="btn-stop">⏹ 停止</button>` : ''}
+        ${status === 'done' ? `<button class="btn btn-primary" id="btn-send-resumes">🔄 重新发送</button>` : ''}
+      ` : `
+        ${status === 'idle' ? `<button class="btn btn-primary" id="btn-start">🚀 开始智能沟通</button>` : ''}
+        ${status === 'applying' ? `<button class="btn btn-danger" id="btn-stop">⏹ 停止</button>` : ''}
+        ${status === 'done' ? `<button class="btn btn-primary" id="btn-start">🔄 继续沟通</button>` : ''}
+        ${status === 'pause' ? `<button class="btn btn-primary" id="btn-resume">▶ 继续沟通</button>` : ''}
+        ${status === 'scanning' || status === 'matching' ? `<button class="btn btn-danger" id="btn-stop">⏹ 停止</button>` : ''}
+      `}
     </div>
     <div class="debug-row">
       <button class="debug-btn" id="btn-copy-card" title="复制首张岗位卡片HTML，用于排查公司名/职位描述提取">🐞 复制卡片HTML</button>
@@ -436,6 +443,9 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
       mode,
       filters: effectiveFilters,
     }, '*')
+  })
+  shadow.getElementById('btn-send-resumes')?.addEventListener('click', () => {
+    window.postMessage({ type: 'BOSS_ASSISTANT_SEND_RESUMES' }, '*')
   })
   scoreFilter?.addEventListener('click', () => {
     window.postMessage({ type: 'BOSS_ASSISTANT_CHANGE_SCORING', enabled: true }, '*')

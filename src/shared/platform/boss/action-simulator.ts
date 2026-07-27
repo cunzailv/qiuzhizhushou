@@ -338,3 +338,158 @@ export function getJobSpecificGreeting(
     : '我的经历与该岗位方向较匹配，'
   return `您好，我是${resumeName}，看到${job.companyName}正在招聘“${job.title}”。${experience}希望能进一步沟通。`
 }
+
+// ─── 聊天页操作（/web/geek/chat）───
+
+export interface ChatContact {
+  id: string
+  name: string
+  company: string
+  element: HTMLElement
+}
+
+/** 获取聊天页左侧联系人列表 */
+export function getChatContacts(): ChatContact[] {
+  const contacts: ChatContact[] = []
+  // Boss 聊天页联系人选择器
+  const items = document.querySelectorAll(
+    '[class*="chat-item"], [class*="conversation-item"], [class*="contact-item"], [class*="user-item"], [class*="chat-list"] > li, [class*="chat-list"] > div'
+  )
+  items.forEach((el, i) => {
+    const text = (el.textContent || '').trim()
+    if (!text) return
+    // 提取名称和公司
+    const nameEl = el.querySelector('[class*="name"], [class*="title"], h3, h4, strong')
+    const companyEl = el.querySelector('[class*="company"], [class*="subtitle"], [class*="desc"]')
+    const name = (nameEl?.textContent || text.split(/\s+/)[0] || '').trim()
+    const company = (companyEl?.textContent || '').trim()
+    contacts.push({
+      id: el.getAttribute('data-id') || el.getAttribute('data-uid') || `contact-${i}`,
+      name: name || text.slice(0, 20),
+      company,
+      element: el as HTMLElement,
+    })
+  })
+  return contacts
+}
+
+/** 点击联系人打开对话 */
+export async function clickContact(contact: ChatContact): Promise<boolean> {
+  contact.element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  await new Promise((r) => setTimeout(r, 400))
+  contact.element.click()
+  contact.element.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+  await new Promise((r) => setTimeout(r, 800))
+  return true
+}
+
+/**
+ * 检查当前对话是否已发过简历。
+ * 在聊天记录中搜索已发送标记文本。
+ */
+export function hasResumeSentInChat(): boolean {
+  const markers = ['附件简历请求已发送', '简历已发送', '已发送简历', '附件简历已投递', '简历请求已发送']
+  const chatArea = document.querySelector('[class*="chat-content"], [class*="chat-message"], [class*="message-list"], [class*="chat-dialog"]')
+  const body = (chatArea?.textContent || document.body.textContent || '')
+  return markers.some((m) => body.includes(m))
+}
+
+/** 在对话工具栏中找「发简历」按钮并点击 */
+export async function clickSendResume(): Promise<boolean> {
+  // 先按 class 找，再兜底文字搜索
+  let btn: HTMLElement | null = null
+  const selectors = [
+    '[class*="send-resume"]',
+    '[class*="resume-btn"]',
+    '[class*="tool-bar"] [class*="resume"]',
+  ]
+  for (const sel of selectors) {
+    btn = document.querySelector(sel) as HTMLElement | null
+    if (btn) break
+  }
+  if (!btn) {
+    // 文字兜底
+    const all = document.querySelectorAll<HTMLElement>('button, span, div, a')
+    for (const el of all) {
+      const text = (el.textContent || '').trim()
+      if (text === '发简历' || text.includes('发简历')) {
+        btn = el; break
+      }
+    }
+  }
+  if (!btn) return false
+
+  btn.click()
+  btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+  await new Promise((r) => setTimeout(r, 1500))
+  return true
+}
+
+/** 在简历弹窗中选择默认简历并发送 */
+export async function selectAndSendResume(): Promise<boolean> {
+  // 等待弹窗出现
+  await new Promise((r) => setTimeout(r, 800))
+
+  // Boss 简历弹窗：可能有"在线简历"/"附件简历"选择，以及"发送"按钮
+  // 先尝试选择第一个简历（如果有选择列表）
+  const resumeRadio = document.querySelector(
+    '[class*="resume-item"] input, [class*="resume-radio"], [class*="resume-select"] [type="radio"]'
+  ) as HTMLElement | null
+  if (resumeRadio) {
+    resumeRadio.click()
+    await new Promise((r) => setTimeout(r, 300))
+  }
+
+  // 找「发送」按钮
+  let sendBtn: HTMLElement | null = null
+  const sendSelectors = [
+    '[class*="dialog"] [class*="send"]',
+    '[class*="modal"] [class*="send"]',
+    '.dialog-container [class*="send"]',
+  ]
+  for (const sel of sendSelectors) {
+    sendBtn = document.querySelector(sel) as HTMLElement | null
+    if (sendBtn) break
+  }
+  if (!sendBtn) {
+    // 文字兜底：限在弹窗内搜索
+    const dialog = document.querySelector('[class*="dialog"], [class*="modal"], .dialog-wrap')
+    const root = (dialog as ParentNode) || document
+    const all = root.querySelectorAll<HTMLElement>('button, span, div')
+    for (const el of all) {
+      const text = (el.textContent || '').trim()
+      if (text === '发送' || text === '确认发送' || text === '投递') {
+        // 优先用 button 父级
+        sendBtn = el.closest('button') as HTMLElement | null || el
+        break
+      }
+    }
+  }
+  if (!sendBtn) return false
+
+  sendBtn.click()
+  sendBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+  await new Promise((r) => setTimeout(r, 1500))
+  return true
+}
+
+/** 关闭当前弹窗 */
+export async function closeChatDialog(): Promise<void> {
+  const closeSelectors = [
+    '[class*="dialog"] [class*="close"]',
+    '[class*="modal"] [class*="close"]',
+    '.dialog-container [class*="close"]',
+    '[class*="dialog"] .icon-close',
+    '.ant-modal-close',
+  ]
+  for (const sel of closeSelectors) {
+    const btn = document.querySelector(sel) as HTMLElement | null
+    if (btn && btn.offsetParent !== null) {
+      btn.click()
+      await new Promise((r) => setTimeout(r, 300))
+      return
+    }
+  }
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  await new Promise((r) => setTimeout(r, 300))
+}

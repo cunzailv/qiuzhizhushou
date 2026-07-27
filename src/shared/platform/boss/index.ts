@@ -14,7 +14,14 @@ import {
   fillGreetingMessage,
   getJobSpecificGreeting,
   snapshotCommunicationUi,
+  getChatContacts,
+  clickContact,
+  hasResumeSentInChat,
+  clickSendResume,
+  selectAndSendResume,
+  closeChatDialog,
 } from './action-simulator'
+export type { ChatContact } from './action-simulator'
 import type { PlatformAdapter, PlatformRiskConfig } from '../types'
 
 const riskConfig: PlatformRiskConfig = {
@@ -49,4 +56,14 @@ export const bossAdapter: PlatformAdapter = {
   getJobSpecificGreeting,
   snapshotCommunicationUi,
   getRiskConfig: () => riskConfig,
+}
+
+// 聊天页专属操作（仅 Boss 平台有聊天页概念）
+export {
+  getChatContacts,
+  clickContact,
+  hasResumeSentInChat,
+  clickSendResume,
+  selectAndSendResume,
+  closeChatDialog,
 }

@@ -3,6 +3,14 @@ import { getActivePlatform } from '../shared/platform'
 import type { PlatformAdapter } from '../shared/platform/types'
 import { setPlatformName } from './inject-ui'
 import { setLiepinResumeMode } from '../shared/platform/liepin'
+import {
+  getChatContacts,
+  clickContact,
+  hasResumeSentInChat,
+  clickSendResume,
+  selectAndSendResume,
+  closeChatDialog,
+} from '../shared/platform/boss'
 
 // 当前活动平台适配器（由 PlatformManager 按网址自动识别，或按设置手动覆盖）。
 let adapter: PlatformAdapter
@@ -90,7 +98,7 @@ async function init(): Promise<void> {
   const pageType = adapter.detectPageType()
   log(MOD, 'init', `Platform: ${adapter.name} | Page type: ${pageType} | url: ${window.location.href}`)
 
-  if (pageType === 'search' || pageType === 'recommend' || pageType === 'detail') {
+  if (pageType === 'search' || pageType === 'recommend' || pageType === 'detail' || pageType === 'chat') {
     // Step 1: Quick check from chrome.storage.local — does a default resume exist?
     const summary = await getSharedResumeSummary()
     log(MOD, 'init', `Resume summary: ${summary ? `${summary.name} (id=${summary.id}, skills=${summary.skills.length})` : 'NOT FOUND'}`)
@@ -109,10 +117,12 @@ async function init(): Promise<void> {
     }
 
     panelHost = createFloatingPanel()
+    const initPageType = adapter.detectPageType()
     updatePanelContent(panelHost, {
       mode: currentMode,
       status: 'idle',
       filters: currentFilters, resumeMode: liepinResumeMode,
+      pageType: initPageType,
     })
     log(MOD, 'init', 'Floating panel created')
   } else {
@@ -134,6 +144,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
     log(MOD, 'onMessage', `EXECUTE_APPLY from popup, mode: ${mode}`, filters ? `filters: ${JSON.stringify(filters)}` : 'no filters')
     startApply(mode, filters)
+    sendResponse({ success: true })
+  }
+  if (message.type === 'EXECUTE_SEND_RESUMES') {
+    log(MOD, 'onMessage', 'EXECUTE_SEND_RESUMES from popup')
+    sendResumesOnChatPage()
     sendResponse({ success: true })
   }
   if (message.type === 'EXECUTE_STOP') {
@@ -195,6 +210,10 @@ window.addEventListener('message', (event) => {
       status: 'idle',
       filters: currentFilters, resumeMode: liepinResumeMode,
     })
+  }
+  if (data?.type === 'BOSS_ASSISTANT_SEND_RESUMES') {
+    log(MOD, 'panelMessage', 'SEND_RESUMES')
+    sendResumesOnChatPage()
   }
 })
 
@@ -573,6 +592,84 @@ async function saveApplication(job: JobCard, match: MatchResult): Promise<boolea
       }
       resolve(response?.success === true)
     })
+  })
+}
+
+// ─── Boss 聊天页：批量发送简历 ───
+async function sendResumesOnChatPage(): Promise<void> {
+  if (isApplying) return
+  isApplying = true
+  runStopped = false
+
+  if (!panelHost?.isConnected) panelHost = createFloatingPanel()
+  updatePanelContent(panelHost!, {
+    mode: currentMode,
+    status: 'scanning',
+    message: '正在读取联系人列表…',
+    resumeMode: liepinResumeMode,
+    filters: currentFilters,
+  })
+
+  const contacts = getChatContacts()
+  log(MOD, 'sendResumes', `Found ${contacts.length} contacts`)
+
+  let sent = 0
+  let skipped = 0
+
+  for (let i = 0; i < contacts.length; i++) {
+    if (!isApplying) break
+    const contact = contacts[i]
+
+    updatePanelContent(panelHost!, {
+      mode: currentMode,
+      status: 'applying',
+      message: `[${i + 1}/${contacts.length}] ${contact.name || contact.company}`,
+      stats: { total: contacts.length, processed: i, matched: sent },
+      resumeMode: liepinResumeMode,
+      filters: currentFilters,
+    })
+
+    // 点击联系人
+    await clickContact(contact)
+    await randomDelay(500, 1000)
+
+    // 检查是否已发过简历
+    if (hasResumeSentInChat()) {
+      log(MOD, 'sendResumes', `Skip (already sent): ${contact.name}`)
+      skipped++
+      continue
+    }
+
+    // 点击发简历
+    const clicked = await clickSendResume()
+    if (!clicked) {
+      log(MOD, 'sendResumes', `发简历 button not found: ${contact.name}`)
+      skipped++
+      continue
+    }
+
+    // 选择简历并发送
+    const sentOk = await selectAndSendResume()
+    if (sentOk) {
+      sent++
+      log(MOD, 'sendResumes', `Resume sent: ${contact.name}`)
+    } else {
+      log(MOD, 'sendResumes', `Send failed: ${contact.name}`)
+    }
+
+    // 关闭弹窗
+    await closeChatDialog()
+    await randomDelay(1000, 2500)
+  }
+
+  isApplying = false
+  updatePanelContent(panelHost!, {
+    mode: currentMode,
+    status: 'done',
+    message: `完成！发送 ${sent} 份简历，跳过 ${skipped} 人`,
+    stats: { total: contacts.length, processed: contacts.length, matched: sent },
+    resumeMode: liepinResumeMode,
+    filters: currentFilters,
   })
 }
 
