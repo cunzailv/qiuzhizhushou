@@ -10,16 +10,20 @@ import type { JobCard, MatchResult } from '../../types/job'
 import type { PlatformAdapter, PlatformRiskConfig, CollectOptions, PageType, CommunicationUiSnapshot } from '../types'
 import { log } from '../../utils/logger'
 
-const JOB_CARD_SELECTOR = '.job-list-box > li, .job-card, .job-list-item' // ✅ 已验证
-const TITLE_SELECTOR = '.job-title, .job-name, h3' // ✅ 已验证
-const COMPANY_SELECTOR = '.company-name, .company' // ✅ 已验证
-const SALARY_SELECTOR = '.salary, .job-salary' // ✅ 已验证
-const CITY_SELECTOR = '.city, .job-area, .job-location' // ✅ 已验证
-const DETAIL_LINK_SELECTOR = 'a.job-title, a.job-name, a[href*="job"]' // ✅ 已验证
-const DESC_SELECTOR = '.job-description, .description, .job-detail' // 需要验证
+// 猎聘 PC 端 class 使用 CSS Modules（带随机后缀如 --ZWExZ），
+// 因此所有选择器用 [class*="..."] 做子串匹配。
+const JOB_CARD_SELECTOR = '[class*="job-list-item"]'
+const TITLE_SELECTOR = '[class*="job-title-box"] [class*="ellipsis-1"]'
+const COMPANY_SELECTOR = '[class*="company-name"]'
+const SALARY_SELECTOR = '[class*="job-salary"]'
+const CITY_SELECTOR = '[class*="job-dq-box"] [class*="ellipsis-1"]'
+const DETAIL_LINK_SELECTOR = 'a[data-nick="job-detail-job-info"]'
+const LABELS_SELECTOR = '[class*="labels-tag"]'
+const RECRUITER_NAME_SELECTOR = '[class*="recruiter-name"]'
+const RECRUITER_TITLE_SELECTOR = '[class*="recruiter-title"]'
+const DESC_SELECTOR = '[class*="job-description"], [class*="job-detail"]'
 // 猎聘求职端与 HR 沟通的主按钮为「聊一聊」（hover 卡片后出现在头像下方）。
-// 备选文案按优先级递减排列。
-const APPLY_TEXTS = ['聊一聊', '立即沟通', '沟通', '投递简历', '投递', '立即投递', '申请'] // ✅ 已验证
+const APPLY_TEXTS = ['聊一聊', '立即沟通', '沟通', '投递简历', '投递', '立即投递', '申请']
 
 function q<T extends Element = HTMLElement>(sel: string, root: ParentNode = document): T | null {
   return root.querySelector<T>(sel)
@@ -57,7 +61,10 @@ function triggerHover(el: HTMLElement): void {
 }
 
 function extractId(url: string): string {
-  return url.match(/job\/([\w-]+)/)?.[1] || url
+  // 猎聘 URL 格式：/a/77558891.shtml 或 /job/xxxxx
+  return url.match(/\/a\/(\d+)\.shtml/)?.[1]
+    || url.match(/job\/([\w-]+)/)?.[1]
+    || url
 }
 
 function detectPageType(): PageType {
@@ -83,25 +90,56 @@ function parseJobCardsFromSearchPage(): JobCard[] {
     const titleEl = q(TITLE_SELECTOR, card)
     const title = (titleEl?.textContent || '').trim()
     if (!title) continue
+
     const linkEl = q<HTMLAnchorElement>(DETAIL_LINK_SELECTOR, card)
-    const url = linkEl?.href || location.href
-    const city = (q(CITY_SELECTOR, card)?.textContent || '').trim()
+    const url = linkEl?.href || ''
+
+    // 城市：从 [class*="job-dq-box"] 中提取，格式如 "深圳-南山区"
+    const cityRaw = (q(CITY_SELECTOR, card)?.textContent || '').trim()
+    const city = cityRaw.split('-')[0] || cityRaw
+
+    // 经验 & 学历：从 labels-tag 中提取
+    const labels = qa(LABELS_SELECTOR, card)
+    let experience = ''
+    let education = ''
+    for (const label of labels) {
+      const t = (label.textContent || '').trim()
+      if (t.includes('经验') || t.includes('年')) {
+        experience = t
+      } else if (t.includes('大专') || t.includes('本科') || t.includes('硕士') || t.includes('博士') || t.includes('学历')) {
+        education = t
+      }
+    }
+
+    // 公司 logo
+    const logoImg = q('img', card)
+    const companyLogo = logoImg?.src || ''
+
+    // 招聘者信息
+    const bossName = (q(RECRUITER_NAME_SELECTOR, card)?.textContent || '').trim()
+    const bossTitle = (q(RECRUITER_TITLE_SELECTOR, card)?.textContent || '').trim()
+    const bossOnline = bossTitle.includes('在线') || bossTitle.includes('刚刚')
+
+    // 公司标签
+    const tagEls = qa('[class*="company-tags-box"] span', card)
+    const tags = tagEls.map((el) => (el.textContent || '').trim()).filter(Boolean)
+
     result.push({
       id: extractId(url),
       title,
       companyName: (q(COMPANY_SELECTOR, card)?.textContent || '').trim(),
-      companyLogo: '',
+      companyLogo,
       salary: (q(SALARY_SELECTOR, card)?.textContent || '').trim(),
       location: city,
-      experience: '',
-      education: '',
-      tags: [],
+      experience,
+      education,
+      tags,
       jobDescription: '',
-      bossName: '',
-      bossTitle: '',
-      bossOnline: false,
+      bossName,
+      bossTitle,
+      bossOnline,
       publishedAt: '',
-      url,
+      url: url || location.href,
       platformId: 'liepin',
     })
   }

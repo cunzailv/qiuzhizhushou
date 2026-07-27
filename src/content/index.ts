@@ -311,7 +311,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
     updatePanelContent(panelHost!, {
       mode: currentMode,
       status: 'idle',
-      message: '未找到岗位卡片，请确保在Boss直聘搜索页或推荐页',
+      message: '未找到岗位卡片，请确保在招聘平台搜索页或推荐页',
       filters,
     })
     isApplying = false
