@@ -417,6 +417,9 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
       <button class="debug-btn" id="btn-copy-card" title="复制首张岗位卡片HTML，用于排查公司名/职位描述提取">🐞 复制卡片HTML</button>
     </div>
     ${matchResults && matchResults.length > 0 ? buildMatchResults(matchResults) : ''}
+    <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);font-size:9px;color:#5B5B7D;">
+      平台:${currentPlatformName} | 页面:${content.pageType || '?'} | 状态:${status}
+    </div>
   `
 
   // Button event listeners
