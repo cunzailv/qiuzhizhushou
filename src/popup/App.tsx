@@ -112,6 +112,7 @@ export default function App() {
   const [platformOverride, setPlatformOverride] = useState('auto')
   const [platforms, setPlatforms] = useState<Array<{ id: string; name: string; icon: string }>>([])
   const [applyRunning, setApplyRunning] = useState(false)
+  const [runningTabId, setRunningTabId] = useState<number | null>(null)
   const [toast, setToast] = useState<ToastState>({
     visible: false,
     message: '',
@@ -141,7 +142,10 @@ export default function App() {
   // 接收 content 脚本「运行结束」通知，复位「停止」按钮。
   useEffect(() => {
     const listener = (message: { type?: string; stopped?: boolean }) => {
-      if (message?.type === 'APPLY_ENDED') setApplyRunning(false)
+      if (message?.type === 'APPLY_ENDED') {
+        setApplyRunning(false)
+        setRunningTabId(null)
+      }
     }
     chrome.runtime.onMessage.addListener(listener)
     return () => chrome.runtime.onMessage.removeListener(listener)
@@ -250,6 +254,7 @@ export default function App() {
       }
       showToast(`已连接 ${platformLabel} 页面，开始扫描岗位`, 'success')
       setApplyRunning(true)
+      if (targetTab.id) setRunningTabId(targetTab.id)
       if (createdTarget) await chrome.tabs.update(targetTab.id, { active: true })
     } catch (error) {
       const message = error instanceof Error ? error.message : '未知错误'
@@ -266,22 +271,17 @@ export default function App() {
   const handleStopApply = async () => {
     showToast('正在停止…', 'info')
     try {
-      const preferred =
-        platformOverride !== 'auto'
-          ? platformOverride
-          : effectivePlatformName === '猎聘'
-            ? 'liepin'
-            : effectivePlatformName === 'Boss直聘'
-              ? 'boss'
-              : undefined
-      const targetTab = await findSupportedBossTab(preferred)
-      if (!targetTab?.id) throw new Error('未找到运行中的页面')
-      await sendMessageWithRecovery(targetTab.id, { type: 'EXECUTE_STOP' })
+      // 优先使用启动时记录的 tabId，避免重新查找时找不到
+      const tabId = runningTabId
+      if (!tabId) throw new Error('未找到运行中的页面')
+      await sendMessageWithRecovery(tabId, { type: 'EXECUTE_STOP' })
       showToast('已发送停止指令', 'success')
       setApplyRunning(false)
+      setRunningTabId(null)
     } catch (error) {
       const message = error instanceof Error ? error.message : '未知错误'
-      showToast(`停止失败：${message}`, 'error')
+      log(MOD, 'handleStopApply', 'Failed to stop', error)
+      showToast(`停止失败：${message}。如已停止请忽略`, 'error')
     }
   }
 

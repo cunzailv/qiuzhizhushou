@@ -125,8 +125,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const mode = message.payload?.mode || 'recommend'
     const filters = message.payload?.filters
     const pageType = adapter.detectPageType()
-    if (pageType === 'other' || pageType === 'chat') {
-      sendResponse({ success: false, error: '当前不是岗位列表或详情页' })
+    // 只排除纯聊天页；首页、搜索、推荐、详情均可启动
+    if (pageType === 'chat') {
+      sendResponse({ success: false, error: '当前是聊天页面，请切换到岗位列表或推荐页' })
       return true
     }
     log(MOD, 'onMessage', `EXECUTE_APPLY from popup, mode: ${mode}`, filters ? `filters: ${JSON.stringify(filters)}` : 'no filters')
