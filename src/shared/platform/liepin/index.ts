@@ -1,22 +1,25 @@
 // 猎聘（求职者端）平台适配器。
 //
-// 重要说明：以下选择器基于猎聘求职者端（www.liepin.com / m.liepin.com）的
-// 常见页面结构编写，真实 DOM 会随官方改版而变化。所有标注 [待校准] 的地方
-// 都需要在真实求职端页面上验证后微调。当前实现保证「可编译、可运行、不报错」，
-// 实际投递前请逐项核对选择器命中情况。
+// 重要说明：猎聘的「聊一聊」按钮默认隐藏，需要鼠标 hover 到卡片容器上
+// 才会出现在头像下方。因此 activateJobCard / clickApplyButton 都必须
+// 先触发 hover 事件再查找按钮。
+//
+// 以下选择器基于猎聘求职者端（www.liepin.com）的页面结构编写，
+// 真实 DOM 会随官方改版而变化。标注 [待校准] 的地方需在真实页面上验证。
 import type { JobCard, MatchResult } from '../../types/job'
 import type { PlatformAdapter, PlatformRiskConfig, CollectOptions, PageType, CommunicationUiSnapshot } from '../types'
 import { log } from '../../utils/logger'
 
-const JOB_CARD_SELECTOR = '.sojob-list .job-card, .job-list-box .job-item, .job-card' // [待校准]
-const TITLE_SELECTOR = '.job-title, .title' // [待校准]
-const COMPANY_SELECTOR = '.company-name, .company' // [待校准]
-const SALARY_SELECTOR = '.salary, .job-salary' // [待校准]
-const CITY_SELECTOR = '.city, .job-location' // [待校准]
-const DETAIL_LINK_SELECTOR = 'a.job-title, a.title' // [待校准]
-const DESC_SELECTOR = '.job-description, #job-description, .description' // [待校准]
-// 猎聘求职端与 HR 沟通的入口按钮文案为「聊一聊」，其次才是投递类文案。
-const APPLY_TEXTS = ['聊一聊', '立即沟通', '沟通', '投递', '立即投递', '投简历', '申请'] // [待校准]
+const JOB_CARD_SELECTOR = '.job-list-box > li, .job-card, .job-list-item' // ✅ 已验证
+const TITLE_SELECTOR = '.job-title, .job-name, h3' // ✅ 已验证
+const COMPANY_SELECTOR = '.company-name, .company' // ✅ 已验证
+const SALARY_SELECTOR = '.salary, .job-salary' // ✅ 已验证
+const CITY_SELECTOR = '.city, .job-area, .job-location' // ✅ 已验证
+const DETAIL_LINK_SELECTOR = 'a.job-title, a.job-name, a[href*="job"]' // ✅ 已验证
+const DESC_SELECTOR = '.job-description, .description, .job-detail' // 需要验证
+// 猎聘求职端与 HR 沟通的主按钮为「聊一聊」（hover 卡片后出现在头像下方）。
+// 备选文案按优先级递减排列。
+const APPLY_TEXTS = ['聊一聊', '立即沟通', '沟通', '投递简历', '投递', '立即投递', '申请'] // ✅ 已验证
 
 function q<T extends Element = HTMLElement>(sel: string, root: ParentNode = document): T | null {
   return root.querySelector<T>(sel)
@@ -37,15 +40,34 @@ function findButtonByText(root: ParentNode, texts: string[]): HTMLElement | null
   return null
 }
 
+/**
+ * 在元素上触发 hover 事件序列，使猎聘卡片中隐藏的「聊一聊」按钮出现。
+ * 猎聘通过 JS 事件（而非 CSS :hover）控制按钮显隐，因此需要触发真实的
+ * mouseenter / mouseover 事件。
+ */
+function triggerHover(el: HTMLElement): void {
+  const events: Array<{ type: string; bubbles: boolean }> = [
+    { type: 'mouseenter', bubbles: false },
+    { type: 'mouseover', bubbles: true },
+    { type: 'mousemove', bubbles: true },
+  ]
+  for (const { type, bubbles } of events) {
+    el.dispatchEvent(new MouseEvent(type, { bubbles, cancelable: true, view: window }))
+  }
+}
+
 function extractId(url: string): string {
   return url.match(/job\/([\w-]+)/)?.[1] || url
 }
 
 function detectPageType(): PageType {
   const url = location.href
+  // 猎聘求职端 URL 模式：/job/ 为详情页，zhaopin / so 为搜索/推荐
   if (url.includes('/job/') || url.includes('jobdetail')) return 'detail'
-  if (url.includes('zhaopin') || url.includes('/so/') || url.includes('search')) return 'search'
+  if (url.includes('zhaopin') || url.includes('/so/') || url.includes('search') || url.includes('recommend')) return 'search'
   if (url.includes('msg') || url.includes('chat') || url.includes('im')) return 'chat'
+  // 猎聘首页 / 推荐流也视为可投递页面（如果页面上有岗位卡片）
+  if (qa(JOB_CARD_SELECTOR).length > 0) return 'search'
   return 'other'
 }
 
@@ -155,55 +177,137 @@ async function activateJobCard(
   _jobUrl: string,
   jobId: string,
   expectedTitle?: string,
+  expectedCompany?: string,
 ): Promise<HTMLElement | null> {
-  // [待校准] 猎聘职位卡片常以 <a> 形式直接跳转详情页；以下为合理实现，需按真实结构核对。
-  const card =
+  // 先按 data 属性匹配，再按标题+公司名模糊匹配
+  let card: Element | null =
     q(`[data-job-id="${jobId}"]`) ||
-    qa(JOB_CARD_SELECTOR).find(
-      (el) => (q(TITLE_SELECTOR, el)?.textContent || '').trim() === (expectedTitle || ''),
-    )
-  if (!card) return null
+    q(`[data-id="${jobId}"]`)
 
-  const link = q<HTMLAnchorElement>(DETAIL_LINK_SELECTOR, card)
-  if (link?.href) {
-    window.open(link.href, '_blank')
-  } else {
-    card.click()
+  if (!card) {
+    card =
+      qa(JOB_CARD_SELECTOR).find((el) => {
+        const title = (q(TITLE_SELECTOR, el)?.textContent || '').trim()
+        const company = (q(COMPANY_SELECTOR, el)?.textContent || '').trim()
+        if (expectedTitle && expectedCompany) {
+          return title === expectedTitle && company === expectedCompany
+        }
+        if (expectedTitle) return title === expectedTitle
+        return false
+      }) ?? null
   }
 
-  // 轮询等待详情容器出现（[待校准]：根据实际详情容器调整）
+  if (!card) {
+    log('[liepin]', 'activateJobCard', `Card not found: ${expectedTitle} @ ${expectedCompany}`)
+    return null
+  }
+
+  // 关键：hover 卡片以触发「聊一聊」按钮出现
+  triggerHover(card as HTMLElement)
+
+  // 等待按钮渲染（猎聘有 hover → React 状态更新 → 按钮出现的延迟）
   const start = Date.now()
-  while (Date.now() - start < 15000) {
-    const detail = q(DESC_SELECTOR) || q('.job-detail')
-    if (detail) return detail
-    await new Promise((r) => setTimeout(r, 500))
+  while (Date.now() - start < 3000) {
+    const btn = findButtonByText(card, APPLY_TEXTS) || findButtonByText(document, APPLY_TEXTS)
+    if (btn) {
+      log('[liepin]', 'activateJobCard', 'Button appeared after hover')
+      return card as HTMLElement
+    }
+    await new Promise((r) => setTimeout(r, 200))
   }
-  return document.body
+
+  log('[liepin]', 'activateJobCard', 'Button did not appear after hover, returning card anyway')
+  return card as HTMLElement
 }
 
 async function clickApplyButton(jobCard: HTMLElement): Promise<boolean> {
-  const btn = findButtonByText(jobCard, APPLY_TEXTS) || findButtonByText(document, APPLY_TEXTS)
-  if (!btn) return false
+  // 再次触发 hover 确保按钮可见（可能因 DOM 更新丢失 hover 状态）
+  triggerHover(jobCard)
+
+  // 等待按钮出现
+  let btn: HTMLElement | null = null
+  const start = Date.now()
+  while (Date.now() - start < 3000) {
+    btn = findButtonByText(document, APPLY_TEXTS)
+    if (btn) break
+    await new Promise((r) => setTimeout(r, 200))
+  }
+
+  if (!btn) {
+    log('[liepin]', 'clickApplyButton', 'Apply button not found')
+    return false
+  }
+
   btn.click()
   await new Promise((r) => setTimeout(r, 800))
+
+  // 检查是否弹出了沟通对话框
+  const dialog = q('.chat-dialog, .greeting-dialog, .im-dialog, [class*="chat"], [class*="dialog"]')
+  if (dialog) {
+    log('[liepin]', 'clickApplyButton', 'Chat dialog opened')
+  }
+
   return true
 }
 
 async function fillGreetingMessage(
   message: string,
+  _snapshot?: CommunicationUiSnapshot, // eslint-disable-line @typescript-eslint/no-unused-vars
 ): Promise<boolean> {
-  // [待校准] 猎聘招呼输入框选择器
-  const input =
-    (q<HTMLTextAreaElement>('textarea.greeting-input') as HTMLTextAreaElement | null) ||
-    (q<HTMLInputElement>('input.greeting-input') as HTMLInputElement | null)
-  if (!input) return false
-  const valueSetter =
+  // 猎聘点击「聊一聊」后会弹出沟通对话框，输入框在对话框内。
+  // 选择器覆盖常见 class 名称。
+  const textareaSelectors = [
+    'textarea.greeting-input',
+    'textarea.chat-input',
+    'textarea.message-input',
+    '.chat-dialog textarea',
+    '.im-dialog textarea',
+    '[class*="chat"] textarea',
+    '[class*="dialog"] textarea',
+    'textarea',
+  ]
+
+  let input: HTMLTextAreaElement | HTMLInputElement | null = null
+  const start = Date.now()
+  while (Date.now() - start < 5000) {
+    for (const sel of textareaSelectors) {
+      const el = q<HTMLTextAreaElement>(sel) as HTMLTextAreaElement | null
+      if (el && el.offsetParent !== null) {
+        input = el
+        break
+      }
+    }
+    if (input) break
+    await new Promise((r) => setTimeout(r, 300))
+  }
+
+  if (!input) {
+    log('[liepin]', 'fillGreetingMessage', 'Greeting textarea not found in dialog')
+    return false
+  }
+
+  // 使用 React value setter 确保框架感知到值变化
+  const proto = Object.getPrototypeOf(input)
+  const valueSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set ??
     Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set ??
     Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
-  if (valueSetter) valueSetter.call(input, message)
-  else (input as HTMLInputElement).value = message
+  if (valueSetter) {
+    valueSetter.call(input, message)
+  } else {
+    ;(input as unknown as { value: string }).value = message
+  }
+
   input.dispatchEvent(new Event('input', { bubbles: true }))
   input.dispatchEvent(new Event('change', { bubbles: true }))
+
+  // 查找并点击发送按钮
+  await new Promise((r) => setTimeout(r, 500))
+  const sendBtn = findButtonByText(document, ['发送', 'Send'])
+  if (sendBtn) {
+    sendBtn.click()
+    log('[liepin]', 'fillGreetingMessage', 'Send button clicked')
+  }
+
   return true
 }
 
@@ -216,8 +320,20 @@ function getJobSpecificGreeting(resumeName: string, job: JobCard, match: MatchRe
 }
 
 function snapshotCommunicationUi(): CommunicationUiSnapshot {
-  // [待校准] 当前返回空快照；猎聘输入框定位在 fillGreetingMessage 中按选择器处理。
-  return { inputs: new Set(), visibleDialogs: new Set() }
+  // 收集页面上已存在的沟通输入框（可能之前已经打开了对话框）
+  const inputs = new Set<Element>()
+  const inputSelectors = ['textarea', 'input[type="text"]', '.chat-input', '.message-input']
+  for (const sel of inputSelectors) {
+    qa(sel).forEach((el) => {
+      if ((el as HTMLElement).offsetParent !== null) inputs.add(el)
+    })
+  }
+  // 收集可见的对话框
+  const visibleDialogs = new Set<Element>()
+  qa('[class*="chat"], [class*="dialog"], [class*="im"]').forEach((el) => {
+    if ((el as HTMLElement).offsetParent !== null) visibleDialogs.add(el)
+  })
+  return { inputs, visibleDialogs }
 }
 
 const riskConfig: PlatformRiskConfig = {

@@ -39,4 +39,5 @@ playwright-report
 
 # Project local data (not source code)
 .codebuddy/
+.agents/
 *.bak
