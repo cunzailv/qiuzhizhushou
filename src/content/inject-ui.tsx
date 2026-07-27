@@ -19,6 +19,7 @@ interface PanelContent {
   platformName?: string
   resumeMode?: boolean
   pageType?: string
+  isChatPage?: boolean
 }
 
 let isMinimized = false
@@ -394,14 +395,24 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
       <button class="score-btn ${effectiveFilters.enableAiMatch ? 'active' : ''}" id="score-filter" ${lockAttr}${lockHint}>⭐ 按分筛选</button>
       <button class="score-btn ${effectiveFilters.enableAiMatch ? '' : 'active direct'}" id="score-direct" ${lockAttr}${lockHint}>🚀 不评分沟通</button>
     </div>
+    ${content.isChatPage ? '' : `
+    <div class="mode-toggle">
+      <button class="mode-btn ${mode === 'batch' ? 'active' : ''}" data-mode="batch" ${lockAttr}${lockHint}>⚡ 批量沟通</button>
+      <button class="mode-btn ${mode === 'recommend' ? 'active' : ''}" data-mode="recommend" ${lockAttr}${lockHint}>🤔 AI推荐确认</button>
+    </div>
+    <div class="score-toggle">
+      <button class="score-btn ${effectiveFilters.enableAiMatch ? 'active' : ''}" id="score-filter" ${lockAttr}${lockHint}>⭐ 按分筛选</button>
+      <button class="score-btn ${effectiveFilters.enableAiMatch ? '' : 'active direct'}" id="score-direct" ${lockAttr}${lockHint}>🚀 不评分沟通</button>
+    </div>
     ${currentPlatformName === '猎聘' ? `
     <div class="resume-toggle">
       <button class="resume-btn ${!content.resumeMode ? 'active' : ''}" id="resume-chat" ${lockAttr}${lockHint}>💬 仅沟通</button>
       <button class="resume-btn ${content.resumeMode ? 'active' : ''}" id="resume-send" ${lockAttr}${lockHint}>📤 投简历</button>
     </div>
     ` : ''}
+    `}
     <div class="btn-row">
-      ${currentPlatformName === 'Boss直聘' && content.pageType === 'chat' ? `
+      ${content.isChatPage ? `
         ${status === 'idle' ? `<button class="btn btn-primary" id="btn-send-resumes">📤 批量发简历</button>` : ''}
         ${status === 'applying' ? `<button class="btn btn-danger" id="btn-stop">⏹ 停止</button>` : ''}
         ${status === 'done' ? `<button class="btn btn-primary" id="btn-send-resumes">🔄 重新发送</button>` : ''}

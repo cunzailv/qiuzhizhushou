@@ -123,6 +123,7 @@ async function init(): Promise<void> {
       status: 'idle',
       filters: currentFilters, resumeMode: liepinResumeMode,
       pageType: initPageType,
+      isChatPage: initPageType === 'chat',
     })
     log(MOD, 'init', 'Floating panel created')
   } else {
@@ -608,7 +609,7 @@ async function sendResumesOnChatPage(): Promise<void> {
     mode: currentMode,
     status: 'scanning',
     message: '正在读取联系人列表…',
-    resumeMode: liepinResumeMode,
+    resumeMode: liepinResumeMode, isChatPage: true,
     filters: currentFilters,
   })
 
@@ -628,7 +629,7 @@ async function sendResumesOnChatPage(): Promise<void> {
       status: 'applying',
       message: `[${i + 1}/${contacts.length}] ${contact.name || contact.company}`,
       stats: { total: contacts.length, processed: i, matched: sent },
-      resumeMode: liepinResumeMode,
+      resumeMode: liepinResumeMode, isChatPage: true,
       filters: currentFilters,
     })
 
@@ -671,7 +672,7 @@ async function sendResumesOnChatPage(): Promise<void> {
     status: 'done',
     message: `完成！发送 ${sent} 份简历，跳过 ${skipped} 人`,
     stats: { total: contacts.length, processed: contacts.length, matched: sent },
-    resumeMode: liepinResumeMode,
+    resumeMode: liepinResumeMode, isChatPage: true,
     filters: currentFilters,
   })
 }
