@@ -28,13 +28,13 @@ const riskConfig: PlatformRiskConfig = {
   id: 'boss',
   name: 'Boss直聘',
   dailyLimitMarkers: [
-    '位BOSS沟通',
-    '今日打招呼',
     '已达上限',
     '沟通次数已达上限',
-    '今日沟通次数',
+    '今日沟通次数已达上限',
+    '沟通次数已用完',
+    '明天再来',
   ],
-  rateLimitMarkers: ['操作太频繁', '频繁', '稍后再试', '请稍后', '重试'],
+  rateLimitMarkers: ['操作太频繁', '操作频繁', '请稍后再试', '稍后再试'],
   blockMarkers: ['账号异常', '账号已被封', '检测到异常', '当前账号', '暂时无法', '被限制'],
   captchaMarkers: ['请完成安全验证', '滑动验证', '验证码', '安全验证', '校验'],
 }

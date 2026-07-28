@@ -294,7 +294,11 @@ export async function fillGreetingMessage(
       document.querySelectorAll(COMMUNICATION_DIALOG_SELECTOR),
     ).filter((dialog) => isVisible(dialog) && !snapshot.visibleDialogs.has(dialog))
     for (const dialog of newDialogs.reverse()) {
-      if (await closeGreetingDialog(dialog)) return true
+      // Close pre-existing dialogs (stale from previous interactions) so
+      // they don't block the greeting flow, but do NOT return true — we
+      // haven't sent a greeting yet. Continue waiting for the textarea.
+      await closeGreetingDialog(dialog)
+      // Don't return — continue the while loop to find the textarea
     }
     await new Promise((resolve) => setTimeout(resolve, 100))
   }

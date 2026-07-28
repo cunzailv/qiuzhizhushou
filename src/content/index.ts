@@ -395,24 +395,36 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
   for (const job of jobs) {
     if (!isApplying) break
 
-    // Check risk. Most signals are non-fatal (just warn), but a `block`
-    // (account anomaly OR daily communication cap) is fatal — we must stop
-    // the whole run, otherwise we keep hammering a wall and risk the account.
+    // Check risk on every iteration — rate limits or captchas may appear
+    // mid-run after a few successful communications. When any risk is
+    // detected we stop the whole loop: non-block risks would cause every
+    // remaining job to be skipped anyway, and continuing one-by-one
+    // produces a misleading "0/0" result.
     const risk = scanRisk(adapter.getRiskConfig())
     if (risk) {
       if (risk.type === 'block') {
         showPanelToast(panelHost!, risk.message, 'error')
         logWarn(MOD, 'startApply', `Fatal risk — stopping run: ${risk.message}`)
+        updatePanelContent(panelHost!, {
+          mode: currentMode,
+          stats: { total: jobs.length, processed: processedCount, matched: matchedCount },
+          status: 'done',
+          matchResults,
+          message: `沟通中断：${risk.message}`,
+          filters: currentFilters, resumeMode: liepinResumeMode,
+        })
         isApplying = false
         logGroupEnd()
         return
       }
+      // Non-block risk (rate_limit / captcha): stop the loop instead of
+      // silently skipping every remaining job.
       if (risk.message !== lastRiskWarning) {
         lastRiskWarning = risk.message
         showPanelToast(panelHost!, risk.message, 'warning')
       }
-      log(MOD, 'startApply', `Risk signal (ignored, continuing): ${risk.message}`)
-      continue
+      logWarn(MOD, 'startApply', `Risk detected — stopping loop: ${risk.message}`)
+      break
     }
 
     // Check if already applied (via shared storage)
@@ -527,19 +539,25 @@ async function applyToJob(job: JobCard, match: MatchResult): Promise<boolean> {
   updatePanelContent(panelHost!, {
     mode: currentMode,
     status: 'applying',
-    message: `正在沟通：${job.title} @ ${job.companyName}`,
+    message: `🎯 正在沟通：${job.title} @ ${job.companyName}`,
     filters: currentFilters, resumeMode: liepinResumeMode,
   })
 
   const jobDetail = await adapter.activateJobCard(job.url, job.id, job.title, job.companyName)
   if (!jobDetail) {
+    // Show failure in panel — user can't open DevTools on Boss
+    const allLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="job_detail"]'))
+    const linkSample = allLinks.slice(0, 3).map(a => `…${a.href.slice(-25)}`).join(' | ')
+    updatePanelContent(panelHost!, {
+      mode: currentMode, status: 'applying',
+      message: `❌ 无法打开详情: ${job.title}\n链接数=${allLinks.length} | url=${job.url?.slice(-30)}`,
+      filters: currentFilters, resumeMode: liepinResumeMode,
+    })
     logWarn(MOD, 'applyToJob', `Could not activate job detail: ${job.title}`)
     return false
   }
 
-  // Backfill the full job description from the opened detail view so it gets
-  // persisted and exported. The JD block often renders a touch after the apply
-  // button, so give it a beat before reading.
+  // Backfill the full job description from the opened detail view
   await new Promise((r) => setTimeout(r, 350))
   const fullDesc = adapter.extractJobDescriptionFromDetail(jobDetail)
   if (fullDesc && fullDesc.length > (job.jobDescription || '').length) {
@@ -550,13 +568,13 @@ async function applyToJob(job: JobCard, match: MatchResult): Promise<boolean> {
   const communicationUiBeforeClick = adapter.snapshotCommunicationUi()
   const applied = await adapter.clickApplyButton(jobDetail)
   if (applied) {
-    // Fill greeting message
+    // Boss 点"立即沟通"后通常自动发送默认问候语，不需要手动填 textarea。
+    // fillGreetingMessage 是 best-effort：有 textarea 就填自定义语，没有也不阻断。
     const name = defaultResume?.structuredData?.name || '求职者'
     const greeting = adapter.getJobSpecificGreeting(name, job, match)
     const greetingSent = await adapter.fillGreetingMessage(greeting, communicationUiBeforeClick)
     if (!greetingSent) {
-      logWarn(MOD, 'applyToJob', `Greeting was not sent: ${job.title}`)
-      return false
+      log(MOD, 'applyToJob', `Greeting fill skipped (Boss auto-sent or no textarea): ${job.title}`)
     }
     await randomDelay(500, 1000)
 
@@ -571,6 +589,14 @@ async function applyToJob(job: JobCard, match: MatchResult): Promise<boolean> {
     log(MOD, 'applyToJob', `Applied & tracked: ${job.title} @ ${job.companyName}`)
     return true
   } else {
+    // Show button texts in panel so user can see what's available
+    const allBtns = Array.from(jobDetail.querySelectorAll('button, [role="button"], a.btn'))
+    const btnTexts = allBtns.map(b => (b.textContent || '').trim()).filter(t => t.length >= 2 && t.length <= 15)
+    updatePanelContent(panelHost!, {
+      mode: currentMode, status: 'applying',
+      message: `❌ 未找到沟通按钮: ${job.title}\n面板按钮: [${btnTexts.slice(0, 8).join(', ')}]`,
+      filters: currentFilters, resumeMode: liepinResumeMode,
+    })
     logWarn(MOD, 'applyToJob', `Apply button not found: ${job.title}`)
     return false
   }

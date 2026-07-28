@@ -49,9 +49,13 @@ export function detectBlock(markers?: string[]): boolean {
 // BOSS enforces a hard daily communication cap. When this pops up the session
 // can't send any more messages today, so the auto-apply must stop entirely.
 export function detectDailyCommunicationLimit(markers?: string[]): string | null {
+  // Only match when the LIMIT is actually REACHED — NOT the informational
+  // counter "今天已与N位BOSS沟通" that Boss shows after every communication.
   const bossCheck = (text: string): boolean =>
     text.includes('沟通上限') ||
-    (text.includes('位BOSS沟通') && (text.includes('今天') || text.includes('已与')))
+    text.includes('沟通次数已达上限') ||
+    text.includes('已达沟通上限') ||
+    (text.includes('已达上限') && text.includes('沟通'))
   const pageText = document.body?.innerText || ''
   if (bossCheck(pageText)) {
     return '今日沟通已达上限，已自动停止，请明天再来'

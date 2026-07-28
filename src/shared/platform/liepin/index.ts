@@ -19,16 +19,21 @@ export function setLiepinResumeMode(enabled: boolean): void {
 
 // 猎聘 PC 端 class 使用 CSS Modules（带随机后缀如 --ZWExZ），
 // 因此所有选择器用 [class*="..."] 做子串匹配。
-const JOB_CARD_SELECTOR = '[class*="job-list-item"]'
-const TITLE_SELECTOR = '[class*="job-title-box"] [class*="ellipsis-1"]'
-const COMPANY_SELECTOR = '[class*="company-name"]'
-const SALARY_SELECTOR = '[class*="job-salary"]'
-const CITY_SELECTOR = '[class*="job-dq-box"] [class*="ellipsis-1"]'
+// zhaopin 搜索页和旧版列表页使用不同的 CSS 类名，需要兼容两种。
+// data-nick 属性在两个版本中保持稳定，用作解析锚点。
+
+// 卡片容器：兼容旧版 job-list-item 和新版 zhaopin 页 job-card-pc-container
+const JOB_CARD_SELECTOR = '[class*="job-list-item"], [class*="job-card-pc-container"]'
+
+// 职位详情链接 — data-nick 属性在所有猎聘搜索页稳定
 const DETAIL_LINK_SELECTOR = 'a[data-nick="job-detail-job-info"]'
-const LABELS_SELECTOR = '[class*="labels-tag"]'
-const RECRUITER_NAME_SELECTOR = '[class*="recruiter-name"]'
-const RECRUITER_TITLE_SELECTOR = '[class*="recruiter-title"]'
+
+// 职位描述（详情页）
 const DESC_SELECTOR = '[class*="job-description"], [class*="job-detail"]'
+
+// 招聘者信息容器 — recruiter-info-box 类名在新旧页面均存在
+const RECRUITER_BOX_SELECTOR = '[class*="recruiter-info-box"]'
+
 // 猎聘求职端与 HR 沟通的主按钮为「聊一聊」（hover 卡片后出现在头像下方）。
 const APPLY_TEXTS = ['聊一聊', '立即沟通', '沟通', '投递简历', '投递', '立即投递', '申请']
 
@@ -110,54 +115,134 @@ function parseJobCardsFromSearchPage(): JobCard[] {
   const cards = qa(JOB_CARD_SELECTOR)
   const result: JobCard[] = []
   for (const card of cards) {
-    const titleEl = q(TITLE_SELECTOR, card)
-    const title = (titleEl?.textContent || '').trim()
-    if (!title) continue
-
     const linkEl = q<HTMLAnchorElement>(DETAIL_LINK_SELECTOR, card)
     const url = linkEl?.href || ''
 
-    // 城市：从 [class*="job-dq-box"] 中提取，格式如 "深圳-南山区"
-    const cityRaw = (q(CITY_SELECTOR, card)?.textContent || '').trim()
-    const city = cityRaw.split('-')[0] || cityRaw
+    // --- Title: first .ellipsis-1 with a title attr inside the detail link ---
+    // 新版 zhaopin 页：a[data-nick] > div > div > div.ellipsis-1[title]
+    // 旧版列表页：[class*="job-title-box"] [class*="ellipsis-1"]
+    let title = ''
+    const oldTitleEl = q('[class*="job-title-box"] [class*="ellipsis-1"]', card)
+    if (oldTitleEl) {
+      title = (oldTitleEl.textContent || '').trim()
+    } else if (linkEl) {
+      const ellipsisEls = qa('.ellipsis-1', linkEl)
+      const titled = ellipsisEls.find(el => el.hasAttribute('title'))
+      title = (titled?.getAttribute('title') || titled?.textContent || ellipsisEls[0]?.textContent || '').trim()
+    }
+    if (!title) continue
 
-    // 经验 & 学历：从 labels-tag 中提取
-    const labels = qa(LABELS_SELECTOR, card)
-    let experience = ''
-    let education = ''
-    for (const label of labels) {
-      const t = (label.textContent || '').trim()
-      if (t.includes('经验') || t.includes('年')) {
-        experience = t
-      } else if (t.includes('大专') || t.includes('本科') || t.includes('硕士') || t.includes('博士') || t.includes('学历')) {
-        education = t
+    // --- Salary: span with digit+k pattern ---
+    // 新版 zhaopin 页：a[data-nick] 内的 span，文本含数字+k
+    // 旧版列表页：[class*="job-salary"]
+    let salary = (q('[class*="job-salary"]', card)?.textContent || '').trim()
+    if (!salary && linkEl) {
+      const spans = qa('span', linkEl)
+      for (const s of spans) {
+        const t = (s.textContent || '').trim()
+        if (/\d/.test(t) && /[kK年月]/.test(t)) { salary = t; break }
       }
     }
 
-    // 公司 logo
-    const logoImg = q<HTMLImageElement>('img', card)
+    // --- City ---
+    // 旧版：[class*="job-dq-box"] [class*="ellipsis-1"]
+    // 新版：a[data-nick] 内的第二个 .ellipsis-1（在【 】之间）
+    let city = (q('[class*="job-dq-box"] [class*="ellipsis-1"]', card)?.textContent || '').trim()
+    if (!city && linkEl) {
+      const ellipsisEls = qa('.ellipsis-1', linkEl)
+      // 新版 zhaopin：第一个 ellipsis-1 是 title，第二个是城市
+      if (ellipsisEls.length >= 2) {
+        city = (ellipsisEls[1].textContent || '').trim()
+      }
+    }
+    // 从旧版 city 格式 "深圳-南山区" 提取城市名
+    if (city) city = city.split('-')[0]
+
+    // --- Experience & Education ---
+    // 旧版：[class*="labels-tag"]
+    // 新版：a[data-nick] 内或相邻 div 内的 span，文本含"年"或学历关键词
+    let experience = ''
+    let education = ''
+    const labelEls = qa('[class*="labels-tag"]', card)
+    for (const el of labelEls) {
+      const t = (el.textContent || '').trim()
+      if (t.includes('经验') || t.includes('年')) experience = t
+      else if (t.includes('大专') || t.includes('本科') || t.includes('硕士') || t.includes('博士') || t.includes('学历') || t.includes('统招')) education = t
+    }
+    // 新版 zhaopin：在卡片内搜索所有 span，按内容模式匹配
+    if (!experience || !education) {
+      // 新版页面的 span 在 detail link 相邻的 div（如 ._40108KeJJy）中
+      const allSpans = qa('span', card)
+      for (const s of allSpans) {
+        const t = (s.textContent || '').trim()
+        // 跳过纯数字、薪资、城市
+        if (!t || /\d+-\d+k/i.test(t) || t.startsWith('【') || t.length > 12) continue
+        if (!experience && (/^\d+[-\s]*\d*年|经验不限|应届/.test(t) || /经验/.test(t))) {
+          experience = t
+        } else if (!education && /大专|本科|硕士|博士|中专|高中|学历|统招|MBA/.test(t)) {
+          education = t
+        }
+      }
+    }
+
+    // --- Company name ---
+    // 旧版：[class*="company-name"]
+    // 新版：[data-nick="job-detail-company-info"] 内的第一个 span.ellipsis-1
+    let companyName = (q('[class*="company-name"]', card)?.textContent || '').trim()
+    if (!companyName) {
+      const companySection = q('[data-nick="job-detail-company-info"]', card)
+      if (companySection) {
+        companyName = (q('span.ellipsis-1', companySection)?.textContent || '').trim()
+      }
+    }
+
+    // --- Company logo ---
+    const logoImg = q<HTMLImageElement>('img[class*="logo"], .company-logo-white-bg', card)
     const companyLogo = logoImg?.src || ''
 
-    // 招聘者信息
-    const bossName = (q(RECRUITER_NAME_SELECTOR, card)?.textContent || '').trim()
-    const bossTitle = (q(RECRUITER_TITLE_SELECTOR, card)?.textContent || '').trim()
-    const bossOnline = bossTitle.includes('在线') || bossTitle.includes('刚刚')
+    // --- Recruiter info ---
+    // recruiter-info-box 类名在新旧页面均存在，但内部结构不同
+    let bossName = ''
+    let bossTitle = ''
+    let bossOnline = false
+    const recruiterBox = q(RECRUITER_BOX_SELECTOR, card)
+    if (recruiterBox) {
+      // 旧版：recruiter-name / recruiter-title 类名
+      bossName = (q('[class*="recruiter-name"]', recruiterBox)?.textContent || '').trim()
+      bossTitle = (q('[class*="recruiter-title"]', recruiterBox)?.textContent || '').trim()
+      // 新版：recruiter-info-box 内的 ellipsis-1 div
+      if (!bossName) {
+        const ellipsisDivs = qa('.ellipsis-1', recruiterBox)
+        bossName = (ellipsisDivs[0]?.textContent || '').trim() // 第一个是名字
+        bossTitle = (ellipsisDivs[1]?.textContent || '').trim() // 第二个是在线状态
+      }
+      bossOnline = !!bossTitle && (bossTitle.includes('在线') || bossTitle.includes('刚刚'))
+    }
 
-    // 公司标签
-    const tagEls = qa('[class*="company-tags-box"] span', card)
-    const tags = tagEls.map((el) => (el.textContent || '').trim()).filter(Boolean)
+    // --- Tags (company industry/size from zhaopin page) ---
+    let tags: string[] = []
+    const companySection = q('[data-nick="job-detail-company-info"]', card)
+    if (companySection) {
+      const tagEls = qa('div.ellipsis-1 span, span', companySection)
+      tags = tagEls.map(el => (el.textContent || '').trim()).filter(t => t.length >= 2 && t.length <= 20)
+    }
+    // 也收集旧版的标签
+    const oldTagEls = qa('[class*="company-tags-box"] span', card)
+    if (oldTagEls.length > 0) {
+      tags = oldTagEls.map(el => (el.textContent || '').trim()).filter(Boolean)
+    }
 
     result.push({
       id: extractId(url),
       title,
-      companyName: (q(COMPANY_SELECTOR, card)?.textContent || '').trim(),
+      companyName,
       companyLogo,
-      salary: (q(SALARY_SELECTOR, card)?.textContent || '').trim(),
+      salary,
       location: city,
       experience,
       education,
       tags,
-      jobDescription: '',
+      jobDescription: '', // JD 在详情页才填充
       bossName,
       bossTitle,
       bossOnline,
@@ -170,17 +255,21 @@ function parseJobCardsFromSearchPage(): JobCard[] {
 }
 
 function parseJobDetailFromPage(): JobCard | null {
-  const titleEl = q(TITLE_SELECTOR)
+  // 详情页：兼容新旧选择器
+  const titleEl = q('[class*="job-title-box"] [class*="ellipsis-1"]')
+    || q('.ellipsis-1[title]')
+    || q('h1')
   if (!titleEl) return null
   const title = (titleEl.textContent || '').trim()
   const url = location.href
-  const city = (q(CITY_SELECTOR)?.textContent || '').trim()
+  const cityRaw = (q('[class*="job-dq-box"] [class*="ellipsis-1"]')?.textContent || '').trim()
+  const city = cityRaw.split('-')[0] || cityRaw
   return {
     id: extractId(url),
     title,
-    companyName: (q(COMPANY_SELECTOR)?.textContent || '').trim(),
+    companyName: (q('[class*="company-name"]')?.textContent || '').trim(),
     companyLogo: '',
-    salary: (q(SALARY_SELECTOR)?.textContent || '').trim(),
+    salary: (q('[class*="job-salary"]')?.textContent || '').trim(),
     location: city,
     experience: '',
     education: '',
@@ -204,16 +293,24 @@ async function collectJobCards(
   readCurrentCards: () => JobCard[],
   options?: CollectOptions,
 ): Promise<JobCard[]> {
-  const maxPages = options?.maxPages ?? 5
   const maxJobs = options?.maxJobs && options.maxJobs > 0 ? options.maxJobs : Infinity
   const delayBetweenPages = options?.delayBetweenPages ?? 2000
   const onCountChange = options?.onCountChange
   const shouldCancel = options?.shouldCancel
   const collected: JobCard[] = []
   const seen = new Set<string>()
+
+  // zhaopin 页每页约 40 条，maxJobs（用户设置的「单次扫描数量」）控制总量即可
+  const isZhaopinPage = location.href.includes('zhaopin')
+  const maxPages = options?.maxPages ?? (isZhaopinPage ? 3 : 5)
+  const nextSelector = isZhaopinPage
+    ? '.ant-pagination-next:not(.ant-pagination-disabled) button'
+    : '.pagination .next:not(.disabled), a.next:not(.disabled), .sojob-pagination .next:not(.disabled)'
+
   for (let page = 0; page < maxPages; page++) {
     if (shouldCancel?.()) break
     if (collected.length >= maxJobs) break
+
     const cards = readCurrentCards()
     for (const c of cards) {
       if (collected.length >= maxJobs) break
@@ -223,18 +320,34 @@ async function collectJobCards(
       }
     }
     onCountChange?.(collected.length)
+
     if (collected.length >= maxJobs) break
-    if (page < maxPages - 1) {
-      const next = q('.pagination .next, a.next, .sojob-pagination .next') // [待校准]
-      if (next && !(next as HTMLElement).classList.contains('disabled')) {
-        ;(next as HTMLElement).click()
-      } else {
-        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })
+    if (page >= maxPages - 1) break
+
+    // 点击下一页
+    const next = q<HTMLElement>(nextSelector)
+    if (!next) {
+      // zhaopin 页兜底：尝试 Ant Design 分页的 li 元素
+      const nextLi = q<HTMLElement>('.ant-pagination-next:not(.ant-pagination-disabled)')
+      if (nextLi) {
+        // Ant Design 分页：点击 li 内的 button 或 a
+        const innerBtn = nextLi.querySelector('button, a') as HTMLElement | null
+        if (innerBtn) {
+          innerBtn.click()
+          await new Promise((r) => setTimeout(r, delayBetweenPages))
+          if (shouldCancel?.()) break
+          continue
+        }
       }
-      await new Promise((r) => setTimeout(r, delayBetweenPages))
-      if (shouldCancel?.()) break
+      log('[liepin]', 'collect', '分页按钮未找到，结束采集')
+      break
     }
+
+    next.click()
+    await new Promise((r) => setTimeout(r, delayBetweenPages))
+    if (shouldCancel?.()) break
   }
+
   log('[liepin]', 'collect', `已收集 ${collected.length} 个职位`)
   return collected
 }
@@ -250,8 +363,29 @@ async function activateJobCard(
 
   const cards = qa(JOB_CARD_SELECTOR)
   for (const el of cards) {
-    const title = (q(TITLE_SELECTOR, el)?.textContent || '').trim()
-    const company = (q(COMPANY_SELECTOR, el)?.textContent || '').trim()
+    // 提取标题：兼容新旧页面
+    let title = ''
+    const oldTitleEl = q('[class*="job-title-box"] [class*="ellipsis-1"]', el)
+    if (oldTitleEl) {
+      title = (oldTitleEl.textContent || '').trim()
+    } else {
+      const linkEl = q(DETAIL_LINK_SELECTOR, el)
+      if (linkEl) {
+        const ellipsisEls = qa('.ellipsis-1', linkEl)
+        const titled = ellipsisEls.find(e => e.hasAttribute('title'))
+        title = (titled?.getAttribute('title') || titled?.textContent || ellipsisEls[0]?.textContent || '').trim()
+      }
+    }
+
+    // 提取公司名：兼容新旧页面
+    let company = (q('[class*="company-name"]', el)?.textContent || '').trim()
+    if (!company) {
+      const companySection = q('[data-nick="job-detail-company-info"]', el)
+      if (companySection) {
+        company = (q('span.ellipsis-1', companySection)?.textContent || '').trim()
+      }
+    }
+
     if (expectedTitle && expectedCompany && title === expectedTitle && company === expectedCompany) {
       card = el; break
     }
