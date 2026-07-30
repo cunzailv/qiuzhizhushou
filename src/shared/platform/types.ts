@@ -70,4 +70,6 @@ export interface PlatformAdapter {
   snapshotCommunicationUi(): CommunicationUiSnapshot
   // 返回平台风控配置
   getRiskConfig(): PlatformRiskConfig
+  // 关闭已打开的详情面板（非推荐岗位释放资源）
+  closeDetailPanel?(): Promise<void>
 }

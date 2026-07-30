@@ -647,5 +647,6 @@ export const liepinAdapter: PlatformAdapter = {
   fillGreetingMessage,
   getJobSpecificGreeting,
   snapshotCommunicationUi,
+  closeDetailPanel: async () => { await closeAnyModal() },
   getRiskConfig: () => riskConfig,
 }

@@ -1,6 +1,7 @@
 import Dexie, { type Table } from 'dexie'
 import type { Resume } from '../types/resume'
 import type { Application } from '../types/application'
+import type { AgentSkill } from '../agent/types'
 
 export interface InterviewEvent {
   id: string
@@ -21,12 +22,33 @@ export interface BlacklistItem {
   addedAt: string
 }
 
+/** 岗位匹配分析记录 */
+export interface MatchAnalysisRecord {
+  id: string
+  resumeId: string
+  resumeName: string
+  jobDescription: string
+  jobTitle?: string
+  result: {
+    overallScore: number
+    skillMatch: string[]
+    skillGap: string[]
+    strengths: string[]
+    weaknesses: string[]
+    improvementSuggestions: string[]
+    recommendation: string
+  }
+  createdAt: string
+}
+
 export class BossZhipinDB extends Dexie {
   resumes!: Table<Resume, string>
   applications!: Table<Application, string>
   blacklist!: Table<BlacklistItem, string>
   interviewEvents!: Table<InterviewEvent, string>
   settings!: Table<{ key: string; value: unknown }, string>
+  matchAnalyses!: Table<MatchAnalysisRecord, string>
+  agentSkills!: Table<AgentSkill, string>
 
   constructor() {
     super('BossZhipinAssistant')
@@ -37,6 +59,14 @@ export class BossZhipinDB extends Dexie {
       blacklist: 'id, companyName',
       interviewEvents: 'id, applicationId, interviewDate',
       settings: 'key',
+    })
+
+    this.version(2).stores({
+      matchAnalyses: 'id, resumeId, createdAt',
+    })
+
+    this.version(3).stores({
+      agentSkills: 'id, platform, pageType, goal, [platform+pageType+goal], lastUsedAt, expiresAt',
     })
   }
 }

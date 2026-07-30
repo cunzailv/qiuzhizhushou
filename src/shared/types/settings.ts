@@ -39,7 +39,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   maxDelay: 8000,
   scrollDelay: 1500,
   maxScanCount: 50,
-  applyMode: 'recommend',
+  applyMode: 'batch',
   enableAiMatch: true,
   interviewReminder: true,
   reminderMinutes: 30,

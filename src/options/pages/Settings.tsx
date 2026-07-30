@@ -3,11 +3,12 @@ import { Card } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
 import { Toast } from '../../components/ui/toast'
 import { getSetting, setSetting, getAllSettings } from '../../shared/db/settings-store'
-import { testAIConnection, BUILTIN_MODELS, getPresetById } from '../../shared/ai'
+import { testAIConnection, BUILTIN_MODELS, getPresetById, getCustomModels, saveCustomModels, generateCustomModelId } from '../../shared/ai'
+import type { ModelPreset } from '../../shared/ai'
 import type { PluginSettings } from '../../shared/types/settings'
 import { DEFAULT_SETTINGS } from '../../shared/types/settings'
 import { getPlatformsMeta } from '../../shared/platform'
-import { Key, Zap, Shield, ChevronDown, ExternalLink, AlertTriangle, Globe } from 'lucide-react'
+import { Key, Zap, Shield, ChevronDown, ExternalLink, AlertTriangle, Globe, Plus, X } from 'lucide-react'
 
 export default function Settings() {
   const [settings, setLocalSettings] = useState<PluginSettings>(DEFAULT_SETTINGS)
@@ -16,8 +17,12 @@ export default function Settings() {
   const [showModelDropdown, setShowModelDropdown] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const [platformOverride, setPlatformOverride] = useState('auto')
+  const [customModels, setCustomModels] = useState<ModelPreset[]>([])
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [newModel, setNewModel] = useState({ name: '', provider: '', baseUrl: '', modelName: '' })
 
-  const selectedPreset = getPresetById(settings.modelPreset)
+  const allModels = [...BUILTIN_MODELS, ...customModels]
+  const selectedPreset = allModels.find(m => m.id === settings.modelPreset)
   const isCustom = settings.modelPreset === 'custom'
 
   useEffect(() => {
@@ -36,6 +41,8 @@ export default function Settings() {
     setLocalSettings({ ...DEFAULT_SETTINGS, ...all } as PluginSettings)
     const override = await getSetting<string>('platformOverride', 'auto')
     setPlatformOverride(override)
+    const cm = await getCustomModels()
+    setCustomModels(cm)
   }
 
   async function handlePlatformOverrideChange(value: string) {
@@ -52,17 +59,54 @@ export default function Settings() {
     }
   }
 
-  async function handleSelectPreset(presetId: string) {
+  async function handleSelectPreset(presetId: string, preset?: ModelPreset) {
     setShowModelDropdown(false)
-    const preset = getPresetById(presetId)
-    if (!preset) return
+    const p = preset || getPresetById(presetId) || customModels.find(m => m.id === presetId)
+    if (!p) return
 
     const updates: Partial<PluginSettings> = {
       modelPreset: presetId,
-      apiBaseUrl: preset.baseUrl,
-      modelName: preset.modelName,
+      apiBaseUrl: p.baseUrl,
+      modelName: p.modelName,
     }
     await handleSave(updates)
+  }
+
+  async function handleAddCustomModel() {
+    const { name, provider, baseUrl, modelName } = newModel
+    if (!name.trim() || !baseUrl.trim() || !modelName.trim()) {
+      showToast('请填写模型名称、API 地址和模型名', 'warning')
+      return
+    }
+    const newPreset: ModelPreset = {
+      id: generateCustomModelId(),
+      name: name.trim(),
+      provider: provider.trim() || '自定义',
+      baseUrl: baseUrl.trim(),
+      modelName: modelName.trim(),
+      description: `${provider || '自定义'} - ${modelName}`,
+      free: false,
+      docsUrl: '',
+      isCustom: true,
+    }
+    const updated = [...customModels, newPreset]
+    await saveCustomModels(updated)
+    setCustomModels(updated)
+    setNewModel({ name: '', provider: '', baseUrl: '', modelName: '' })
+    setShowAddForm(false)
+    await handleSelectPreset(newPreset.id, newPreset)
+    showToast('自定义模型已添加', 'success')
+  }
+
+  async function handleDeleteCustomModel(id: string) {
+    const updated = customModels.filter(m => m.id !== id)
+    await saveCustomModels(updated)
+    setCustomModels(updated)
+    if (settings.modelPreset === id) {
+      const defaultPreset = BUILTIN_MODELS[0]
+      await handleSelectPreset(defaultPreset.id, defaultPreset)
+    }
+    showToast('已删除', 'info')
   }
 
   async function handleTestAPI() {
@@ -125,19 +169,16 @@ export default function Settings() {
                 <div className="flex items-center gap-3">
                   <span className="text-sm font-medium">{selectedPreset?.name || '选择模型'}</span>
                   <span className="text-xs text-text-muted">{selectedPreset?.provider}</span>
-                  {selectedPreset?.free && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-success/10 text-success">免费额度</span>
-                  )}
                 </div>
                 <ChevronDown className={`w-4 h-4 text-text-muted transition-transform ${showModelDropdown ? 'rotate-180' : ''}`} />
               </button>
 
               {showModelDropdown && (
                 <div className="absolute top-full left-0 right-0 mt-1 p-2 rounded-xl bg-surface-dark border border-white/10 shadow-2xl z-50 max-h-[320px] overflow-y-auto">
-                  {BUILTIN_MODELS.map((model) => (
+                  {allModels.map((model) => (
                     <button
                       key={model.id}
-                      onClick={() => handleSelectPreset(model.id)}
+                      onClick={() => handleSelectPreset(model.id, model)}
                       className={`w-full px-3 py-2.5 rounded-lg text-left transition-colors hover:bg-white/5 ${
                         settings.modelPreset === model.id ? 'bg-primary/10 ring-1 ring-primary/30' : ''
                       }`}
@@ -145,9 +186,17 @@ export default function Settings() {
                       <div className="flex items-center justify-between mb-0.5">
                         <span className="text-sm font-medium text-text-primary">{model.name}</span>
                         <div className="flex items-center gap-2">
-                          {model.free && <span className="text-[10px] px-1.5 py-0.5 rounded bg-success/10 text-success">免费</span>}
-                          {settings.modelPreset === model.id && (
+                        {settings.modelPreset === model.id && (
                             <div className="w-2 h-2 rounded-full bg-primary-light" />
+                          )}
+                          {model.isCustom && (
+                            <span
+                              onClick={(e) => { e.stopPropagation(); handleDeleteCustomModel(model.id) }}
+                              className="p-0.5 rounded hover:bg-red-500/20 text-text-muted hover:text-red-400 cursor-pointer"
+                              title="删除此模型"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </span>
                           )}
                         </div>
                       </div>
@@ -159,6 +208,76 @@ export default function Settings() {
                 </div>
               )}
             </div>
+
+            {/* Add custom model */}
+            {!showAddForm ? (
+              <button
+                onClick={() => setShowAddForm(true)}
+                className="inline-flex items-center gap-1.5 text-xs text-text-muted hover:text-primary-light transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                添加自定义模型
+              </button>
+            ) : (
+              <div className="p-3 rounded-xl bg-surface-darkest/50 border border-white/5 space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-text-muted mb-1 block">显示名称</label>
+                    <input
+                      type="text"
+                      value={newModel.name}
+                      onChange={(e) => setNewModel({ ...newModel, name: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-white/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
+                      placeholder="如 GPT-4o"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-text-muted mb-1 block">厂商</label>
+                    <input
+                      type="text"
+                      value={newModel.provider}
+                      onChange={(e) => setNewModel({ ...newModel, provider: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-white/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
+                      placeholder="如 OpenAI"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-text-muted mb-1 block">API 地址</label>
+                    <input
+                      type="text"
+                      value={newModel.baseUrl}
+                      onChange={(e) => setNewModel({ ...newModel, baseUrl: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-white/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
+                      placeholder="https://api.openai.com/v1"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-text-muted mb-1 block">模型名</label>
+                    <input
+                      type="text"
+                      value={newModel.modelName}
+                      onChange={(e) => setNewModel({ ...newModel, modelName: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-white/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
+                      placeholder="gpt-4o"
+                    />
+                  </div>
+                </div>
+                <div className="flex gap-2 justify-end">
+                  <button
+                    onClick={() => { setShowAddForm(false); setNewModel({ name: '', provider: '', baseUrl: '', modelName: '' }) }}
+                    className="px-3 py-1.5 rounded-lg bg-surface-darkest text-text-muted text-sm hover:text-text-secondary transition-colors"
+                  >
+                    取消
+                  </button>
+                  <button
+                    onClick={handleAddCustomModel}
+                    className="px-3 py-1.5 rounded-lg bg-primary/20 text-primary-light text-sm hover:bg-primary/30 transition-colors"
+                  >
+                    保存
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* API Key */}

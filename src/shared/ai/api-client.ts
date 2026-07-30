@@ -72,6 +72,14 @@ export async function chatCompletion(
   return data.choices?.[0]?.message?.content || ''
 }
 
+/** 检查 AI 是否已配置（仅验证 key/url 是否存在，不发网络请求） */
+export async function checkAIConfigured(): Promise<{ configured: boolean; reason: string }> {
+  const { apiKey, baseUrl } = await resolveAISettings()
+  if (!apiKey) return { configured: false, reason: '请先在设置中配置 API Key' }
+  if (!baseUrl) return { configured: false, reason: '请先选择或配置 AI 模型' }
+  return { configured: true, reason: '' }
+}
+
 export async function testAIConnection(): Promise<{ success: boolean; message: string }> {
   const { baseUrl, apiKey, modelName } = await resolveAISettings()
   if (!apiKey) return { success: false, message: '请先配置 API Key' }
@@ -87,4 +95,91 @@ export async function testAIConnection(): Promise<{ success: boolean; message: s
     return { success: true, message: `模型 ${modelName} 连接成功` }
   }
   return { success: false, message: '连接失败，请检查 API Key 和网络' }
+}
+
+/**
+ * 流式 AI 对话（SSE），每个文本块通过 onChunk 回调输出。
+ * 返回完整的累积文本。
+ * @param signal 用于取消请求的 AbortSignal
+ */
+export async function chatCompletionStream(
+  systemPrompt: string,
+  userMessage: string,
+  onChunk: (text: string) => void,
+  temperature = 0.3,
+  signal?: AbortSignal
+): Promise<string> {
+  const { baseUrl, apiKey, modelName } = await resolveAISettings()
+
+  if (!apiKey || !baseUrl) {
+    throw new Error('AI 未配置：请先在设置中填写 API Key 和选择模型')
+  }
+
+  const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`
+
+  const body = JSON.stringify({
+    model: modelName,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMessage },
+    ],
+    temperature,
+    max_tokens: 2500,
+    stream: true,
+  })
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body,
+    signal,
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(`AI API 错误 (${response.status}): ${errorText.slice(0, 200)}`)
+  }
+
+  const reader = response.body?.getReader()
+  if (!reader) throw new Error('浏览器不支持流式响应')
+
+  const decoder = new TextDecoder()
+  let fullText = ''
+  let buffer = ''
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed || !trimmed.startsWith('data: ')) continue
+        const data = trimmed.slice(6)
+        if (data === '[DONE]') continue
+
+        try {
+          const parsed = JSON.parse(data)
+          const content = parsed.choices?.[0]?.delta?.content
+          if (content) {
+            fullText += content
+            onChunk(content)
+          }
+        } catch {
+          // skip unparseable SSE lines
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  return fullText
 }

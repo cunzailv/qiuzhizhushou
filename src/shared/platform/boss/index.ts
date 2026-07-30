@@ -14,6 +14,7 @@ import {
   fillGreetingMessage,
   getJobSpecificGreeting,
   snapshotCommunicationUi,
+  closeDetailPanel,
   getChatContacts,
   clickContact,
   hasResumeSentInChat,
@@ -55,6 +56,7 @@ export const bossAdapter: PlatformAdapter = {
   fillGreetingMessage,
   getJobSpecificGreeting,
   snapshotCommunicationUi,
+  closeDetailPanel,
   getRiskConfig: () => riskConfig,
 }
 

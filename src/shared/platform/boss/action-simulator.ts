@@ -490,6 +490,22 @@ export async function selectAndSendResume(): Promise<boolean> {
   return true
 }
 
+/** 关闭详情侧边面板（非推荐岗位释放资源） */
+export async function closeDetailPanel(): Promise<void> {
+  // Boss 详情面板关闭方式多样：点 X 按钮 / 点遮罩 / ESC
+  const closeBtn = document.querySelector(
+    '.job-detail-container [class*="close"], .job-detail-box [class*="close"], [class*="detail-close"]'
+  ) as HTMLElement | null
+  if (closeBtn && closeBtn.offsetParent !== null) {
+    closeBtn.click()
+    await new Promise((r) => setTimeout(r, 300))
+    return
+  }
+  // 兜底：ESC
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+  await new Promise((r) => setTimeout(r, 300))
+}
+
 /** 关闭当前弹窗 */
 export async function closeChatDialog(): Promise<void> {
   const closeSelectors = [

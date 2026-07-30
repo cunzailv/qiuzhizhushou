@@ -8,13 +8,16 @@ import { Toast } from '../../components/ui/toast'
 import { getAllResumes, saveResume, deleteResume, setDefaultResume, getResumeById } from '../../shared/db/resume-store'
 import { setSharedResumeSummary, clearSharedResumeSummary } from '../../shared/db/shared-state'
 import { parsePDF, parseWord, extractStructuredData } from '../../shared/parser'
-import { analyzeResumeQuality } from '../../shared/ai'
+import { analyzeResumeQuality, analyzeJobMatch, checkAIConfigured } from '../../shared/ai'
+import type { JobMatchAnalysis } from '../../shared/ai'
 import { log, logError, logGroup, logGroupEnd } from '../../shared/utils/logger'
 import type { Resume } from '../../shared/types/resume'
 import { formatDate } from '../../shared/utils/date'
+import { saveMatchAnalysis, getAllMatchAnalyses, deleteMatchAnalysis } from '../../shared/db/match-analysis-store'
+import type { MatchAnalysisRecord } from '../../shared/db'
 import {
   Upload, FileText, Star, Trash2, Eye, CheckCircle, AlertCircle,
-  Code,
+  Code, Search, XCircle, Bot, ChevronDown, Clock, TrendingUp,
 } from 'lucide-react'
 
 export default function Resumes() {
@@ -24,9 +27,28 @@ export default function Resumes() {
   const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'warning' | 'info' }>({ visible: false, message: '', type: 'info' })
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // ------ 岗位匹配分析 state ------
+  const [jdText, setJdText] = useState('')
+  const [matchResumeId, setMatchResumeId] = useState('')
+  const [streaming, setStreaming] = useState(false)
+  const [streamText, setStreamText] = useState('')
+  const [matchResult, setMatchResult] = useState<JobMatchAnalysis | null>(null)
+  const [matchError, setMatchError] = useState('')
+  const abortRef = useRef<AbortController | null>(null)
+  const streamEndRef = useRef<HTMLDivElement>(null)
+
+  // 历史分析记录
+  const [history, setHistory] = useState<MatchAnalysisRecord[]>([])
+
   useEffect(() => {
     loadResumes()
+    loadHistory()
   }, [])
+
+  async function loadHistory() {
+    const records = await getAllMatchAnalyses()
+    setHistory(records)
+  }
 
   const MOD = 'Popup:Resumes'
 
@@ -209,6 +231,77 @@ export default function Resumes() {
     setTimeout(() => setToast({ visible: false, message: '', type: 'info' }), 3000)
   }
 
+  async function handleJobMatch() {
+    // 校验
+    if (!matchResumeId) { showToast('请先选择一份简历', 'warning'); return }
+    if (!jdText.trim()) { showToast('请填写职位描述', 'warning'); return }
+
+    // 检查 AI 配置
+    const conn = await checkAIConfigured()
+    if (!conn.configured) {
+      showToast(`AI 未配置：${conn.reason}`, 'error')
+      return
+    }
+
+    const resume = resumes.find(r => r.id === matchResumeId)
+    if (!resume) { showToast('未找到选中的简历', 'error'); return }
+
+    // 重置状态
+    setMatchError('')
+    setMatchResult(null)
+    setStreamText('')
+    setStreaming(true)
+
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    // 构建简历文本
+    const sd = resume.structuredData
+    const resumeText = [
+      sd.summary,
+      ...sd.workExperience.map(w => `${w.position}@${w.company}: ${w.description}`),
+      ...sd.education.map(e => `${e.degree} ${e.major} @${e.school}`),
+      ...sd.projects.map(p => `${p.name}(${p.role}): ${p.description}`),
+    ].filter(Boolean).join('\n')
+
+    try {
+      const result = await analyzeJobMatch(
+        resumeText,
+        sd.skills,
+        jdText.trim(),
+        (chunk) => { setStreamText(prev => prev + chunk) },
+        controller.signal
+      )
+      setMatchResult(result)
+      // 保存到数据库
+      await saveMatchAnalysis({
+        resumeId: resume.id,
+        resumeName: resume.name,
+        jobDescription: jdText.trim(),
+        jobTitle: jdText.trim().split('\n')[0].slice(0, 30) || undefined,
+        result,
+      })
+      await loadHistory()
+      showToast('分析完成！', 'success')
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        setStreamText(prev => prev + '\n\n[已取消]')
+      } else {
+        const msg = err?.message || '分析失败'
+        setMatchError(msg)
+        showToast(msg, 'error')
+      }
+    } finally {
+      setStreaming(false)
+      abortRef.current = null
+    }
+  }
+
+  function handleCancelMatch() {
+    abortRef.current?.abort()
+    setStreaming(false)
+  }
+
   function getScoreColor(score: number) {
     if (score >= 80) return '#10B981'
     if (score >= 60) return '#F59E0B'
@@ -295,6 +388,240 @@ export default function Resumes() {
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* ====== 岗位匹配分析 ====== */}
+      <div className="border-t border-white/5 pt-4 space-y-3">
+        <h2 className="text-lg font-bold gradient-text flex items-center gap-2">
+          <Search className="w-4 h-4" />
+          岗位匹配分析
+        </h2>
+        <p className="text-[11px] text-text-muted">
+          填写职位描述，选择简历，AI 将分析匹配度并给出改进建议
+        </p>
+
+        {/* Resume selector */}
+        {resumes.length > 0 ? (
+          <div className="relative">
+            <select
+              value={matchResumeId}
+              onChange={(e) => setMatchResumeId(e.target.value)}
+              className="w-full rounded-xl bg-surface-dark border border-white/5 px-3 py-2 text-sm text-text-primary appearance-none cursor-pointer focus:outline-none focus:border-primary/30"
+            >
+              <option value="">选择要匹配的简历...</option>
+              {resumes.map(r => (
+                <option key={r.id} value={r.id}>
+                  {r.name} {r.isDefault ? '(默认)' : ''} — {r.structuredData.skills.length}个技能
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-text-muted pointer-events-none" />
+          </div>
+        ) : (
+          <p className="text-xs text-text-muted">请先上传简历</p>
+        )}
+
+        {/* JD textarea */}
+        <textarea
+          placeholder="在此粘贴职位描述（JD），包括职位要求、技能要求、工作职责等..."
+          value={jdText}
+          onChange={(e) => setJdText(e.target.value)}
+          rows={5}
+          className="w-full rounded-xl bg-surface-dark border border-white/5 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-primary/30"
+        />
+
+        {/* Buttons */}
+        <div className="flex gap-2">
+          {!streaming ? (
+            <Button
+              size="sm"
+              className="flex-1"
+              onClick={handleJobMatch}
+              disabled={!matchResumeId || !jdText.trim()}
+            >
+              <Bot className="w-3.5 h-3.5" />
+              AI 分析匹配度
+            </Button>
+          ) : (
+            <Button size="sm" className="flex-1" onClick={handleCancelMatch}>
+              <XCircle className="w-3.5 h-3.5" />
+              取消分析
+            </Button>
+          )}
+        </div>
+
+        {/* Match error */}
+        {matchError && (
+          <Card className="p-3 border-danger/20">
+            <p className="text-xs text-danger flex items-start gap-1">
+              <AlertCircle className="w-3 h-3 mt-0.5 shrink-0" />
+              {matchError}
+            </p>
+          </Card>
+        )}
+
+        {/* Streaming text */}
+        {streaming && streamText && (
+          <Card className="p-3 max-h-[250px] overflow-y-auto">
+            <p className="text-xs text-text-secondary whitespace-pre-wrap leading-relaxed">
+              {streamText}
+              <span className="inline-block w-1.5 h-4 bg-primary-light animate-pulse ml-0.5 align-middle" />
+            </p>
+            <div ref={streamEndRef} />
+          </Card>
+        )}
+
+        {/* Structured result */}
+        {matchResult && !streaming && (
+          <Card className="p-4 space-y-4">
+            {/* Score */}
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-semibold text-text-primary">匹配评分</span>
+              <span className="text-2xl font-bold" style={{ color: getScoreColor(matchResult.overallScore) }}>
+                {matchResult.overallScore}
+                <span className="text-sm font-normal text-text-muted ml-1">分</span>
+              </span>
+            </div>
+            <Progress value={matchResult.overallScore} color={getScoreColor(matchResult.overallScore)} />
+
+            {/* Recommendation */}
+            {matchResult.recommendation && (
+              <p className="text-xs text-text-secondary leading-relaxed">
+                {matchResult.recommendation}
+              </p>
+            )}
+
+            {/* Skill Match */}
+            {matchResult.skillMatch.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-success mb-1.5 flex items-center gap-1">
+                  <CheckCircle className="w-3 h-3" /> 匹配技能
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {matchResult.skillMatch.map((s, i) => (
+                    <Badge key={i} variant="success">{s}</Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Skill Gap */}
+            {matchResult.skillGap.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-warning mb-1.5 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3" /> 技能差距
+                </p>
+                <div className="flex flex-wrap gap-1">
+                  {matchResult.skillGap.map((s, i) => (
+                    <Badge key={i} variant="warning">{s}</Badge>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Strengths */}
+            {matchResult.strengths.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-success mb-1.5">优势</p>
+                {matchResult.strengths.map((s, i) => (
+                  <p key={i} className="text-xs text-text-secondary flex items-start gap-1 mb-0.5">
+                    <CheckCircle className="w-3 h-3 text-success mt-0.5 shrink-0" /> {s}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {/* Weaknesses */}
+            {matchResult.weaknesses.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-danger mb-1.5">劣势</p>
+                {matchResult.weaknesses.map((s, i) => (
+                  <p key={i} className="text-xs text-text-secondary flex items-start gap-1 mb-0.5">
+                    <AlertCircle className="w-3 h-3 text-danger mt-0.5 shrink-0" /> {s}
+                  </p>
+                ))}
+              </div>
+            )}
+
+            {/* Improvement suggestions */}
+            {matchResult.improvementSuggestions.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-primary-light mb-1.5">改进建议</p>
+                {matchResult.improvementSuggestions.map((s, i) => (
+                  <p key={i} className="text-xs text-text-secondary flex items-start gap-1 mb-0.5">
+                    <span className="w-4 h-4 rounded-full bg-primary/10 text-primary-light flex items-center justify-center text-[10px] shrink-0 mt-0.5">{i + 1}</span>
+                    {s}
+                  </p>
+                ))}
+              </div>
+            )}
+          </Card>
+        )}
+      </div>
+
+      {/* ====== 分析历史 ====== */}
+      {history.length > 0 && (
+        <div className="border-t border-white/5 pt-4 space-y-2">
+          <h2 className="text-sm font-bold gradient-text flex items-center gap-2">
+            <Clock className="w-3.5 h-3.5" />
+            分析历史
+          </h2>
+          {history.slice(0, 10).map((record) => (
+            <Card key={record.id} className="p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 min-w-0">
+                  <TrendingUp className="w-3.5 h-3.5 text-primary-light shrink-0" />
+                  <span className="text-xs text-text-primary truncate">
+                    {record.jobTitle || '未命名岗位'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-xs font-bold" style={{ color: getScoreColor(record.result.overallScore) }}>
+                    {record.result.overallScore}分
+                  </span>
+                  <button
+                    onClick={async () => { await deleteMatchAnalysis(record.id); await loadHistory() }}
+                    className="p-0.5 text-text-muted hover:text-danger"
+                    title="删除"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-[10px] text-text-muted">
+                <span>{record.resumeName}</span>
+                <span>·</span>
+                <span>{formatDate(record.createdAt)}</span>
+              </div>
+              {/* 点击展开详情 */}
+              <details className="group">
+                <summary className="text-[10px] text-primary-light cursor-pointer hover:text-primary-lighter">
+                  查看详情
+                </summary>
+                <div className="mt-2 space-y-2 text-[10px]">
+                  <p className="text-text-secondary line-clamp-3 whitespace-pre-wrap">
+                    {record.jobDescription.slice(0, 300)}
+                  </p>
+                  {record.result.skillMatch.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {record.result.skillMatch.map(s => (
+                        <Badge key={s} variant="success">{s}</Badge>
+                      ))}
+                    </div>
+                  )}
+                  {record.result.skillGap.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {record.result.skillGap.map(s => (
+                        <Badge key={s} variant="warning">{s}</Badge>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-text-secondary">{record.result.recommendation}</p>
+                </div>
+              </details>
             </Card>
           ))}
         </div>

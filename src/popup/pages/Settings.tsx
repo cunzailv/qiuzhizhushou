@@ -3,7 +3,8 @@ import { Card } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
 import { Toast } from '../../components/ui/toast'
 import { setSetting, getAllSettings } from '../../shared/db/settings-store'
-import { testAIConnection, BUILTIN_MODELS, getPresetById } from '../../shared/ai'
+import { testAIConnection, BUILTIN_MODELS, getPresetById, getCustomModels, saveCustomModels, generateCustomModelId } from '../../shared/ai'
+import type { ModelPreset } from '../../shared/ai'
 import { getBlacklist } from '../../shared/db/blacklist-store'
 import { exportApplications } from '../../shared/export'
 import { getAllApplications } from '../../shared/db/application-store'
@@ -11,7 +12,7 @@ import type { PluginSettings } from '../../shared/types/settings'
 import { DEFAULT_SETTINGS } from '../../shared/types/settings'
 import {
   Key, Zap, Shield, Download, AlertTriangle,
-  ChevronDown, ExternalLink,
+  ChevronDown, ExternalLink, Plus, X,
 } from 'lucide-react'
 
 export default function Settings() {
@@ -21,8 +22,12 @@ export default function Settings() {
   const [blacklistCount, setBlacklistCount] = useState(0)
   const [showModelDropdown, setShowModelDropdown] = useState(false)
   const dropdownRef = useRef<HTMLDivElement>(null)
+  const [customModels, setCustomModels] = useState<ModelPreset[]>([])
+  const [showAddForm, setShowAddForm] = useState(false)
+  const [newModel, setNewModel] = useState({ name: '', provider: '', baseUrl: '', modelName: '' })
 
-  const selectedPreset = getPresetById(settings.modelPreset)
+  const allModels = [...BUILTIN_MODELS, ...customModels]
+  const selectedPreset = allModels.find(m => m.id === settings.modelPreset)
   const isCustom = settings.modelPreset === 'custom'
 
   useEffect(() => {
@@ -41,6 +46,9 @@ export default function Settings() {
     const merged = { ...DEFAULT_SETTINGS, ...all } as PluginSettings
     setLocalSettings(merged)
 
+    const cm = await getCustomModels()
+    setCustomModels(cm)
+
     const bl = await getBlacklist()
     setBlacklistCount(bl.length)
   }
@@ -53,25 +61,56 @@ export default function Settings() {
     }
   }
 
-  async function handleSelectPreset(presetId: string) {
+  async function handleSelectPreset(presetId: string, preset?: ModelPreset) {
     setShowModelDropdown(false)
-    const preset = getPresetById(presetId)
-    if (!preset) return
+    const p = preset || getPresetById(presetId) || customModels.find(m => m.id === presetId)
+    if (!p) return
 
-    const updates: Partial<PluginSettings> = { modelPreset: presetId }
-
-    if (presetId !== 'custom') {
-      // 内置模型：自动填入预设的 Base URL 和模型名
-      updates.apiBaseUrl = preset.baseUrl
-      updates.modelName = preset.modelName
+    const updates: Partial<PluginSettings> = {
+      modelPreset: presetId,
+      apiBaseUrl: p.baseUrl,
+      modelName: p.modelName,
     }
-    // 自定义模式：清空让用户自己填
-    if (presetId === 'custom') {
-      updates.apiBaseUrl = 'https://api.openai.com/v1'
-      updates.modelName = 'gpt-4o-mini'
-    }
-
     await handleSave(updates)
+  }
+
+  async function handleAddCustomModel() {
+    const { name, provider, baseUrl, modelName } = newModel
+    if (!name.trim() || !baseUrl.trim() || !modelName.trim()) {
+      showToast('请填写模型名称、API 地址和模型名', 'warning')
+      return
+    }
+    const newPreset: ModelPreset = {
+      id: generateCustomModelId(),
+      name: name.trim(),
+      provider: provider.trim() || '自定义',
+      baseUrl: baseUrl.trim(),
+      modelName: modelName.trim(),
+      description: `${provider || '自定义'} - ${modelName}`,
+      free: false,
+      docsUrl: '',
+      isCustom: true,
+    }
+    const updated = [...customModels, newPreset]
+    await saveCustomModels(updated)
+    setCustomModels(updated)
+    setNewModel({ name: '', provider: '', baseUrl: '', modelName: '' })
+    setShowAddForm(false)
+    // 自动选中新添加的模型
+    await handleSelectPreset(newPreset.id, newPreset)
+    showToast('自定义模型已添加', 'success')
+  }
+
+  async function handleDeleteCustomModel(id: string) {
+    const updated = customModels.filter(m => m.id !== id)
+    await saveCustomModels(updated)
+    setCustomModels(updated)
+    // 如果当前选中的是被删除的模型，切回默认
+    if (settings.modelPreset === id) {
+      const defaultPreset = BUILTIN_MODELS[0]
+      await handleSelectPreset(defaultPreset.id, defaultPreset)
+    }
+    showToast('已删除', 'info')
   }
 
   async function handleTestAPI() {
@@ -122,32 +161,37 @@ export default function Settings() {
                   <span className="text-[10px] text-text-muted truncate">
                     {selectedPreset?.provider}
                   </span>
-                  {selectedPreset?.free && (
-                    <span className="shrink-0 text-[9px] px-1.5 py-0.5 rounded-full bg-success/10 text-success">免费</span>
-                  )}
                 </div>
                 <ChevronDown className={`w-3.5 h-3.5 text-text-muted shrink-0 transition-transform ${showModelDropdown ? 'rotate-180' : ''}`} />
               </button>
 
               {showModelDropdown && (
                 <div className="absolute top-full left-0 right-0 mt-1 p-1 rounded-xl bg-surface-dark border border-white/10 shadow-xl z-50 max-h-[260px] overflow-y-auto">
-                  {BUILTIN_MODELS.map((model) => (
+                  {allModels.map((model) => (
                     <button
                       key={model.id}
-                      onClick={() => handleSelectPreset(model.id)}
+                      onClick={() => handleSelectPreset(model.id, model)}
                       className={`w-full px-3 py-2 rounded-lg text-left transition-colors hover:bg-white/5 ${
                         settings.modelPreset === model.id ? 'bg-primary/10' : ''
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <div className="text-xs font-medium text-text-primary truncate">{model.name}</div>
                           <div className="text-[10px] text-text-muted">{model.provider} · {model.description.substring(0, 20)}</div>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
-                          {model.free && <span className="text-[9px] px-1 py-0.5 rounded bg-success/10 text-success">免费</span>}
                           {settings.modelPreset === model.id && (
                             <div className="w-2 h-2 rounded-full bg-primary-light" />
+                          )}
+                          {model.isCustom && (
+                            <span
+                              onClick={(e) => { e.stopPropagation(); handleDeleteCustomModel(model.id) }}
+                              className="p-0.5 rounded hover:bg-red-500/20 text-text-muted hover:text-red-400"
+                              title="删除此模型"
+                            >
+                              <X className="w-3 h-3" />
+                            </span>
                           )}
                         </div>
                       </div>
@@ -156,6 +200,62 @@ export default function Settings() {
                 </div>
               )}
             </div>
+
+            {/* Add custom model button */}
+            {!showAddForm ? (
+              <button
+                onClick={() => setShowAddForm(true)}
+                className="flex items-center gap-1 text-[10px] text-text-muted hover:text-primary-light transition-colors mt-1"
+              >
+                <Plus className="w-3 h-3" />
+                添加自定义模型
+              </button>
+            ) : (
+              <div className="mt-2 p-2 rounded-lg bg-surface-darkest/50 border border-white/5 space-y-1.5">
+                <input
+                  type="text"
+                  value={newModel.name}
+                  onChange={(e) => setNewModel({ ...newModel, name: e.target.value })}
+                  className="input-field text-xs"
+                  placeholder="显示名称，如 GPT-4o"
+                />
+                <input
+                  type="text"
+                  value={newModel.provider}
+                  onChange={(e) => setNewModel({ ...newModel, provider: e.target.value })}
+                  className="input-field text-xs"
+                  placeholder="厂商，如 OpenAI"
+                />
+                <input
+                  type="text"
+                  value={newModel.baseUrl}
+                  onChange={(e) => setNewModel({ ...newModel, baseUrl: e.target.value })}
+                  className="input-field text-xs"
+                  placeholder="API 地址，如 https://api.openai.com/v1"
+                />
+                <input
+                  type="text"
+                  value={newModel.modelName}
+                  onChange={(e) => setNewModel({ ...newModel, modelName: e.target.value })}
+                  className="input-field text-xs"
+                  placeholder="模型名，如 gpt-4o"
+                />
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleAddCustomModel}
+                    className="flex-1 px-2 py-1 rounded bg-primary/20 text-primary-light text-xs hover:bg-primary/30 transition-colors"
+                  >
+                    保存
+                  </button>
+                  <button
+                    onClick={() => { setShowAddForm(false); setNewModel({ name: '', provider: '', baseUrl: '', modelName: '' }) }}
+                    className="px-2 py-1 rounded bg-surface-darkest text-text-muted text-xs hover:text-text-secondary transition-colors"
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* API Key Input */}

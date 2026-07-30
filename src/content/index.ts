@@ -17,6 +17,7 @@ let adapter: PlatformAdapter
 import { createFloatingPanel, updatePanelContent, showPanelToast } from './inject-ui'
 import { randomDelay, scanRisk, checkDailyLimit, incrementCounter } from '../shared/antiBot'
 import { matchResumeToJob } from '../shared/ai'
+import { reactLoop } from '../shared/agent'
 import { getSharedResumeSummary, getSharedFullResume, getSharedAppliedJobIds, addSharedAppliedJobId } from '../shared/db/shared-state'
 import { log, logWarn, logError, logGroup, logGroupEnd } from '../shared/utils/logger'
 import { getSetting } from '../shared/db/settings-store'
@@ -444,6 +445,8 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
 
     const scoreBypassed = filters?.enableAiMatch === false
     let evaluatedMatch: MatchResult
+    let preOpenedDetail: HTMLElement | null = null  // 批量模式下预打开的详情面板
+
     if (scoreBypassed) {
       log(MOD, 'startApply', `Direct apply without scoring: ${job.title} @ ${job.companyName}`)
       evaluatedMatch = {
@@ -457,11 +460,32 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
       }
     } else {
       log(MOD, 'startApply', `Matching: ${job.title} @ ${job.companyName} (${job.salary})`)
+
+      // 批量模式：先打开详情面板获取真实 JD，再做 AI 匹配评分。
+      // 搜索页的 jobDescription 只是标题+薪资的拼凑文本，真实 JD 在详情面板中。
+      if (currentMode === 'batch') {
+        preOpenedDetail = await adapter.activateJobCard(job.url, job.id, job.title, job.companyName)
+        if (preOpenedDetail) {
+          await new Promise((r) => setTimeout(r, 400))
+          const fullDesc = adapter.extractJobDescriptionFromDetail(preOpenedDetail)
+          if (fullDesc && fullDesc.length > (job.jobDescription || '').length) {
+            job.jobDescription = fullDesc
+            log(MOD, 'startApply', `Real JD extracted (${fullDesc.length} chars) for scoring`)
+          }
+        }
+      }
+
       const match = await matchResumeToJob(defaultResume, job)
       const isRecommended = filters
         ? match.score >= filters.minMatchScore
         : match.isRecommended
       evaluatedMatch = { ...match, isRecommended }
+
+      // 非推荐且已打开详情面板 → 关闭节省资源
+      if (!evaluatedMatch.isRecommended && preOpenedDetail) {
+        await adapter.closeDetailPanel?.()
+        preOpenedDetail = null
+      }
     }
     processedCount++
     matchResults.push({
@@ -485,12 +509,16 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
       filters: currentFilters, resumeMode: liepinResumeMode,
     })
 
-    // Apply if batch mode + recommended
-    if (currentMode === 'batch' && evaluatedMatch.isRecommended) {
-      const applied = await applyToJob(job, evaluatedMatch)
-      if (applied) {
-        appliedCount++
-        await incrementCounter()
+    // Apply if batch mode + recommended  OR  AI自动确认 mode
+    if (evaluatedMatch.isRecommended) {
+      if (currentMode === 'batch') {
+        // 批量沟通：走固定选择器（快）
+        const applied = await applyToJob(job, evaluatedMatch, preOpenedDetail)
+        if (applied) { appliedCount++; await incrementCounter() }
+      } else {
+        // AI自动确认：智能体观察→推理→执行→沉淀
+        const applied = await agentApplyToJob(job, evaluatedMatch)
+        if (applied) { appliedCount++; await incrementCounter() }
       }
     }
 
@@ -533,7 +561,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
   logGroupEnd()
 }
 
-async function applyToJob(job: JobCard, match: MatchResult): Promise<boolean> {
+async function applyToJob(job: JobCard, match: MatchResult, preOpenedDetail?: HTMLElement | null): Promise<boolean> {
   log(MOD, 'applyToJob', `Applying: ${job.title} @ ${job.companyName} (score=${match.score})`)
 
   updatePanelContent(panelHost!, {
@@ -543,11 +571,9 @@ async function applyToJob(job: JobCard, match: MatchResult): Promise<boolean> {
     filters: currentFilters, resumeMode: liepinResumeMode,
   })
 
-  const jobDetail = await adapter.activateJobCard(job.url, job.id, job.title, job.companyName)
+  const jobDetail = preOpenedDetail || await adapter.activateJobCard(job.url, job.id, job.title, job.companyName)
   if (!jobDetail) {
-    // Show failure in panel — user can't open DevTools on Boss
     const allLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="job_detail"]'))
-    const linkSample = allLinks.slice(0, 3).map(a => `…${a.href.slice(-25)}`).join(' | ')
     updatePanelContent(panelHost!, {
       mode: currentMode, status: 'applying',
       message: `❌ 无法打开详情: ${job.title}\n链接数=${allLinks.length} | url=${job.url?.slice(-30)}`,
@@ -557,11 +583,13 @@ async function applyToJob(job: JobCard, match: MatchResult): Promise<boolean> {
     return false
   }
 
-  // Backfill the full job description from the opened detail view
-  await new Promise((r) => setTimeout(r, 350))
-  const fullDesc = adapter.extractJobDescriptionFromDetail(jobDetail)
-  if (fullDesc && fullDesc.length > (job.jobDescription || '').length) {
-    job.jobDescription = fullDesc
+  // 如果详情是新打开的（非预打开），补充提取 JD
+  if (!preOpenedDetail) {
+    await new Promise((r) => setTimeout(r, 350))
+    const fullDesc = adapter.extractJobDescriptionFromDetail(jobDetail)
+    if (fullDesc && fullDesc.length > (job.jobDescription || '').length) {
+      job.jobDescription = fullDesc
+    }
   }
 
   // Click apply button
@@ -600,6 +628,110 @@ async function applyToJob(job: JobCard, match: MatchResult): Promise<boolean> {
     logWarn(MOD, 'applyToJob', `Apply button not found: ${job.title}`)
     return false
   }
+}
+
+/** AI自动确认模式：智能体观察页面、推理操作、沉淀技能 */
+async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolean> {
+  const pageType = adapter.detectPageType()
+  const platformId = adapter.id
+
+  // Goal 1: 打开详情 — 优先用固定选择器，失败则 AI 接管
+  let detailEl: HTMLElement | null = null
+  const fixedDetail = await adapter.activateJobCard(job.url, job.id, job.title, job.companyName)
+  if (fixedDetail) {
+    detailEl = fixedDetail
+    log(MOD, 'agentApplyToJob', `Fixed selector opened detail: ${job.title}`)
+  } else {
+    log(MOD, 'agentApplyToJob', `Fixed selector failed, delegating to AI agent...`)
+    updatePanelContent(panelHost!, {
+      mode: 'recommend', status: 'applying',
+      message: `🤖 AI思考中: 打开详情 "${job.title}"`,
+      filters: currentFilters, resumeMode: liepinResumeMode,
+    })
+    const r1 = await reactLoop(platformId, pageType, 'open_detail', {
+      title: job.title,
+      company: job.companyName,
+      url: job.url,
+    }, (thinking) => {
+      updatePanelContent(panelHost!, {
+        mode: 'recommend', status: 'applying',
+        message: `🤖 ${thinking}`,
+        filters: currentFilters, resumeMode: liepinResumeMode,
+      })
+    })
+    if (!r1.success) {
+      logWarn(MOD, 'agentApplyToJob', `Agent failed goal 1: ${r1.error}`)
+      updatePanelContent(panelHost!, {
+        mode: 'recommend', status: 'applying',
+        message: `❌ AI无法打开详情: ${job.title}`,
+        filters: currentFilters, resumeMode: liepinResumeMode,
+      })
+      return false
+    }
+    log(MOD, 'agentApplyToJob', `Agent opened detail in ${r1.attempts} steps (cached=${r1.usedCachedSkill})`)
+  }
+  await randomDelay(400, 800)
+
+  if (detailEl) {
+    const desc = adapter.extractJobDescriptionFromDetail(detailEl)
+    if (desc && desc.length > (job.jobDescription || '').length) {
+      job.jobDescription = desc
+    }
+  }
+
+  // Goal 2: 点击沟通/发简历
+  const commUiBefore = adapter.snapshotCommunicationUi()
+  const fixedClick = await adapter.clickApplyButton(detailEl || job as any)
+  if (fixedClick) {
+    log(MOD, 'agentApplyToJob', `Fixed selector clicked apply: ${job.title}`)
+  } else {
+    log(MOD, 'agentApplyToJob', `Fixed click failed, delegating to AI...`)
+    updatePanelContent(panelHost!, {
+      mode: 'recommend', status: 'applying',
+      message: `🤖 AI思考中: 发起沟通 "${job.title}"`,
+      filters: currentFilters, resumeMode: liepinResumeMode,
+    })
+    const r2 = await reactLoop(platformId, pageType, 'click_chat', {
+      title: job.title,
+      company: job.companyName,
+    }, (thinking) => {
+      updatePanelContent(panelHost!, {
+        mode: 'recommend', status: 'applying',
+        message: `🤖 ${thinking}`,
+        filters: currentFilters, resumeMode: liepinResumeMode,
+      })
+    })
+    if (!r2.success) {
+      logWarn(MOD, 'agentApplyToJob', `Agent failed goal 2: ${r2.error}`)
+      updatePanelContent(panelHost!, {
+        mode: 'recommend', status: 'applying',
+        message: `❌ AI无法发起沟通: ${job.title}`,
+        filters: currentFilters, resumeMode: liepinResumeMode,
+      })
+      return false
+    }
+    log(MOD, 'agentApplyToJob', `Agent clicked chat in ${r2.attempts} steps (cached=${r2.usedCachedSkill})`)
+  }
+  await randomDelay(500, 1000)
+
+  // Goal 3: 发送问候语（best effort）
+  const name = defaultResume?.structuredData?.name || '求职者'
+  const greeting = adapter.getJobSpecificGreeting(name, job, match)
+  const greetingSent = await adapter.fillGreetingMessage(greeting, commUiBefore)
+  if (!greetingSent) {
+    log(MOD, 'agentApplyToJob', `Greeting fill skipped (auto-sent or no textarea)`)
+  }
+  await randomDelay(500, 1000)
+
+  // 保存
+  const saved = await saveApplication(job, match)
+  if (!saved) {
+    logWarn(MOD, 'agentApplyToJob', `Application was sent but could not be persisted: ${job.title}`)
+    return false
+  }
+  await addSharedAppliedJobId(job.id)
+  log(MOD, 'agentApplyToJob', `Done: ${job.title}`)
+  return true
 }
 
 async function saveApplication(job: JobCard, match: MatchResult): Promise<boolean> {

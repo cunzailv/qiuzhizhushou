@@ -80,37 +80,50 @@ function analyzeLocally(resume: Resume): ResumeAnalysis {
 }
 
 async function tryAIAnalysis(resume: Resume): Promise<ResumeAnalysis | null> {
-  const systemPrompt = `你是一个资深HR和简历优化专家。分析求职者的简历并给出具体优化建议。
+  const systemPrompt = `你是资深HR和职业顾问Agent。请像专业顾问一样，逐步分析求职者简历，输出分析报告。
 
-请严格按照以下JSON格式返回：
+请按以下思维流程分析：
+1. 先快速浏览整体结构（格式、完整性、篇幅）
+2. 逐一审视各维度：教育背景 → 工作经历 → 技能 → 成果量化
+3. 找出3-5个最突出的优势
+4. 找出3-5个最关键的不足（按重要性排序）
+5. 给出3-5条具体可操作的改进建议（不说空话，每条建议带具体做法）
+
+评分维度：
+- education: 学历层次、专业匹配度（知名大学/硕士以上加分）
+- experience: 工作年限、公司知名度、职责描述质量、成果量化
+- skills: 技能数量、深度、是否与目标岗位匹配、是否有稀缺技能
+- format: 排版逻辑、信息密度、联系方式完整性、是否有明显错误
+
+最后，在分析文本末尾附上 JSON 代码块：
+\`\`\`json
 {
-  "overallScore": 0-100综合评分,
-  "strengths": ["优势1", "优势2", "优势3"],
-  "weaknesses": ["不足1", "不足2", "不足3"],
-  "suggestions": ["建议1", "建议2", "建议3"],
-  "sectionScores": {
-    "education": 教育背景0-100分,
-    "experience": 工作经历0-100分,
-    "skills": 技能0-100分,
-    "format": 格式规范0-100分
-  }
-}`
+  "overallScore": 综合评分0-100,
+  "strengths": ["优势"],
+  "weaknesses": ["不足"],
+  "suggestions": ["建议"],
+  "sectionScores": { "education": 分数, "experience": 分数, "skills": 分数, "format": 分数 }
+}
+\`\`\``
 
-  const userMessage = JSON.stringify({
-    name: resume.structuredData.name,
-    education: resume.structuredData.education,
-    experience: resume.structuredData.workExperience,
-    skills: resume.structuredData.skills,
-    summary: resume.structuredData.summary.substring(0, 1500),
-  })
+  const userMessage = `【求职者简历】
+姓名: ${resume.structuredData.name || '未填写'}
+教育: ${JSON.stringify(resume.structuredData.education)}
+工作经历: ${JSON.stringify(resume.structuredData.workExperience)}
+技能: ${resume.structuredData.skills.join('、')}
+项目: ${JSON.stringify(resume.structuredData.projects)}
+概述: ${resume.structuredData.summary.substring(0, 1500)}
+
+请按 Agent 思维流程逐步分析。`
 
   const result = await chatCompletion(systemPrompt, userMessage, 0.5)
   if (!result) return null
 
   try {
-    const jsonMatch = result.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0])
+    const fenced = result.match(/```json\s*\n?([\s\S]*?)```/)
+    const jsonStr = fenced ? fenced[1].trim() : result.match(/\{[\s\S]*\}/)?.[0]
+    if (jsonStr) {
+      const parsed = JSON.parse(jsonStr)
       return {
         overallScore: parsed.overallScore || 60,
         strengths: parsed.strengths || [],
