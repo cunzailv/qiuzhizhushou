@@ -8,6 +8,7 @@ import { getApplicationByJobId, saveApplication } from '../shared/db/application
 import { setSharedResumeSummary } from '../shared/db/shared-state'
 import { resetDailyCounter } from '../shared/antiBot'
 import { log, logError, logGroup, logGroupEnd } from '../shared/utils/logger'
+import { butlerRunDaily, getActiveFollowUps } from '../shared/agent/butler'
 import type { JobCard, MatchResult } from '../shared/types/job'
 
 const MOD = 'Background'
@@ -25,7 +26,12 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create('interview-check', {
     periodInMinutes: 30,
   })
-  log(MOD, 'installed', 'Alarms created: daily-reset (24h), interview-check (30min)')
+
+  // Set up butler daily scan alarm (every 24 hours)
+  chrome.alarms.create('butler-daily', {
+    periodInMinutes: 1440,
+  })
+  log(MOD, 'installed', 'Alarms created: daily-reset (24h), interview-check (30min), butler-daily (24h)')
 })
 
 // Handle alarms
@@ -41,7 +47,35 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     log(MOD, 'alarm', 'Checking upcoming interviews...')
     await checkUpcomingInterviews()
   }
+
+  if (alarm.name === 'butler-daily') {
+    log(MOD, 'alarm', 'Running butler daily scan...')
+    await runButlerScan()
+  }
 })
+
+/** 管家每日扫描：跟进建议生成 → 通知（建议+确认，不自动发送） */
+async function runButlerScan(): Promise<{ success: boolean; data?: unknown; error?: string }> {
+  try {
+    const result = await butlerRunDaily()
+    const followUps = await getActiveFollowUps()
+    log(MOD, 'butler-daily', `Scan done: ${followUps.length} follow-ups, report: ${result.reportSummary.slice(0, 60)}`)
+    if (followUps.length > 0) {
+      const first = followUps[0]
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: '求职管家 · 跟进提醒',
+        message: `${followUps.length} 条跟进建议，如「${first.companyName} - ${first.jobTitle}」投递 ${first.daysSince} 天未回复`,
+        priority: 1,
+      })
+    }
+    return { success: true, data: result }
+  } catch (error) {
+    logError(MOD, 'butler-daily', error, 'Butler scan failed')
+    return { success: false, error: String(error) }
+  }
+}
 
 // Check for upcoming interviews and send notifications
 async function checkUpcomingInterviews(): Promise<void> {
@@ -96,6 +130,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true })
   }
 
+  // 管家扫描（popup「管家」页手动触发 / 测试触发；与 butler-daily alarm 同逻辑）
+  if (message.type === 'BUTLER_SCAN') {
+    log(MOD, 'BUTLER_SCAN', 'Running butler scan from popup')
+    runButlerScan().then((result) => sendResponse(result))
+    return true // Keep channel open for async response
+  }
+
   // Content script requests default resume from extension's IndexedDB
   if (message.type === 'GET_DEFAULT_RESUME') {
     logGroup(MOD, 'GET_DEFAULT_RESUME')
@@ -144,8 +185,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       match?: MatchResult
       resumeId?: string
       platformId?: string
+      appliedAt?: string
     }
-    const { job, match, resumeId, platformId } = payload
+    const { job, match, resumeId, platformId, appliedAt } = payload
     if (!job || !match || !resumeId) {
       sendResponse({ success: false, error: 'Invalid application payload' })
       return false
@@ -171,6 +213,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           bossName: job.bossName,
           bossTitle: job.bossTitle,
           platformId: platformId || job.platformId || 'unknown',
+          appliedAt,
         })
       })
       .then((application) => sendResponse({ success: true, data: application }))

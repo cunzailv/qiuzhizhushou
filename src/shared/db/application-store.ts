@@ -18,7 +18,7 @@ export async function getApplicationByJobId(jobId: string): Promise<Application 
 }
 
 export async function saveApplication(
-  data: Omit<Application, 'id' | 'appliedAt' | 'updatedAt' | 'status' | 'notes'>
+  data: Omit<Application, 'id' | 'appliedAt' | 'updatedAt' | 'status' | 'notes'> & { appliedAt?: string }
 ): Promise<Application> {
   const now = new Date().toISOString()
   const app: Application = {
@@ -26,7 +26,7 @@ export async function saveApplication(
     id: generateId(),
     status: 'applied',
     notes: '',
-    appliedAt: now,
+    appliedAt: data.appliedAt ?? now,
     updatedAt: now,
   }
   await db.applications.add(app)

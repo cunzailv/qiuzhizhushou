@@ -10,11 +10,12 @@ import {
   getPlatformById,
 } from '../shared/platform'
 import {
-  LayoutDashboard, FileText, ListChecks, Settings2,
+  LayoutDashboard, FileText, ListChecks, Settings2, Bot,
 } from 'lucide-react'
 
 const MOD = 'Popup:App'
 const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Butler = lazy(() => import('./pages/Butler'))
 const Resumes = lazy(() => import('./pages/Resumes'))
 const Tracker = lazy(() => import('./pages/Tracker'))
 const Settings = lazy(() => import('./pages/Settings'))
@@ -100,6 +101,7 @@ async function createSupportedBossTab(platformId?: string): Promise<chrome.tabs.
 
 const TABS = [
   { id: 'dashboard', label: '概览', icon: <LayoutDashboard className="w-3.5 h-3.5" /> },
+  { id: 'butler', label: '管家', icon: <Bot className="w-3.5 h-3.5" /> },
   { id: 'resumes', label: '简历', icon: <FileText className="w-3.5 h-3.5" /> },
   { id: 'tracker', label: '追踪', icon: <ListChecks className="w-3.5 h-3.5" /> },
   { id: 'settings', label: '设置', icon: <Settings2 className="w-3.5 h-3.5" /> },
@@ -350,6 +352,7 @@ export default function App() {
             applyRunning={applyRunning}
           />
         )}
+        {activeTab === 'butler' && <Butler />}
         {activeTab === 'resumes' && <Resumes />}
         {activeTab === 'tracker' && <Tracker />}
         {activeTab === 'settings' && <Settings />}

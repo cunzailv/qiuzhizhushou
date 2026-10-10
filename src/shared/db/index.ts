@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie'
 import type { Resume } from '../types/resume'
 import type { Application } from '../types/application'
 import type { AgentSkill } from '../agent/types'
+import type { CompanyMemory, DecisionLog, FollowUpSuggestion } from '../types/butler'
 
 export interface InterviewEvent {
   id: string
@@ -49,6 +50,9 @@ export class BossZhipinDB extends Dexie {
   settings!: Table<{ key: string; value: unknown }, string>
   matchAnalyses!: Table<MatchAnalysisRecord, string>
   agentSkills!: Table<AgentSkill, string>
+  companyMemories!: Table<CompanyMemory, string>
+  decisionLogs!: Table<DecisionLog, string>
+  followUps!: Table<FollowUpSuggestion, string>
 
   constructor() {
     super('BossZhipinAssistant')
@@ -67,6 +71,12 @@ export class BossZhipinDB extends Dexie {
 
     this.version(3).stores({
       agentSkills: 'id, platform, pageType, goal, [platform+pageType+goal], lastUsedAt, expiresAt',
+    })
+
+    this.version(4).stores({
+      companyMemories: 'id, companyName, jobTitle, updatedAt',
+      decisionLogs: 'id, source, subject, createdAt',
+      followUps: 'id, applicationId, companyName, createdAt, dismissed',
     })
   }
 }
