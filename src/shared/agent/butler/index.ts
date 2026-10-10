@@ -1,9 +1,11 @@
 // B 层 · 求职管家 Agent 总入口
 // butlerRunDaily：B1 策略 → B4 跟进扫描 → B6 记忆回流 → 决策留痕 → 汇总。
+// C2 复盘：扫描时附加周期复盘与权重校准建议。
 import { getAllApplications } from '../../db/application-store'
 import { getCompanyMemory, logDecision, saveFollowUps, clearFollowUpsFor } from '../../db/butler-store'
 import { buildStrategy, buildDailyReport, DEFAULT_DAILY_QUOTA } from './butler-planner'
 import { buildFollowUpSuggestions } from './followup-planner'
+import { buildReview } from './review-planner'
 import type { ButlerScanResult, UserJobProfile } from '../../types/butler'
 import type { CompanyMemory } from '../../types/butler'
 
@@ -33,13 +35,16 @@ export async function butlerRunDaily(
   // B1：日报
   const report = buildDailyReport(applications, saved, strategy)
 
+  // C2：周期复盘 + 权重校准建议
+  const review = buildReview(applications)
+
   // 留痕
   await logDecision({
     source: 'butler',
     subject: '每日管家扫描',
-    context: `应用 ${applications.length} 条，跟进候选 ${suggestions.length} 条`,
-    thinking: '规则扫描：投递状态未推进且超时 → 生成跟进建议；日报统计漏斗与建议',
-    decision: JSON.stringify({ reportSummary: report.summary, followUps: saved.length }),
+    context: `应用 ${applications.length} 条，跟进候选 ${suggestions.length} 条，复盘命中率 ${review.replyRate}%`,
+    thinking: '规则扫描：投递状态未推进且超时 → 生成跟进建议；日报统计漏斗与建议；复盘命中率与权重校准',
+    decision: JSON.stringify({ reportSummary: report.summary, followUps: saved.length, review: review.period }),
   })
 
   return {
@@ -54,6 +59,7 @@ export { buildStrategy, planDailySchedule, buildDailyReport } from './butler-pla
 export { evaluateJobWorth, selectTopJobs, TIER_LABELS, SELECTOR_WEIGHTS, TIER_THRESHOLDS } from './job-selector'
 export { generatePersonalizedGreeting, respondToQuestion, matchQuestionType } from './chat'
 export { scanFollowUps, generateFollowUpMessage, daysSinceApplied } from './followup-planner'
+export { buildReview } from './review-planner'
 export { learnFromApplication, logDecision, getActiveFollowUps, dismissFollowUp, getRecentDecisions } from '../../db/butler-store'
 export { getCompanyMemory } from '../../db/butler-store'
 export type { ButlerScanResult, ButlerStrategy, JobEvaluation, FollowUpSuggestion, UserJobProfile } from '../../types/butler'

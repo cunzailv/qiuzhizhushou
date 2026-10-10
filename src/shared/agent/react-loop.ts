@@ -1,4 +1,4 @@
-import { chatCompletion } from '../ai/api-client'
+import { chatCompletion, chatCompletionStream } from '../ai/api-client'
 import { capturePageState } from './page-observer'
 import { executeAction } from './action-executor'
 import { findBestSkill, upsertSkill, computeSignature, recordSkillFail } from './skill-memory'
@@ -7,6 +7,23 @@ import type { AgentGoalResult, AgentStep, PageState } from './types'
 import { randomDelay } from '../antiBot'
 
 const MAX_ATTEMPTS = 5
+
+/** C3：AI 思考流式输出（默认关闭，保持原行为；开启时逐块输出思考文本） */
+async function think(
+  systemPrompt: string,
+  userPrompt: string,
+  temperature: number,
+  useStreaming: boolean,
+  onThinking?: (text: string) => void,
+): Promise<string> {
+  if (!useStreaming) return chatCompletion(systemPrompt, userPrompt, temperature)
+  try {
+    return await chatCompletionStream(systemPrompt, userPrompt, (chunk) => onThinking?.(chunk), temperature)
+  } catch {
+    // 流式失败（如未配置 AI）回退普通调用；普通调用无 key 时返回空串
+    return chatCompletion(systemPrompt, userPrompt, temperature)
+  }
+}
 
 function verifyGoal(goal: string, _before: PageState, after: PageState): boolean {
   switch (goal) {
@@ -52,7 +69,8 @@ export async function reactLoop(
   pageType: string,
   goal: string,
   context: Record<string, string>,
-  onThinking?: (text: string) => void
+  onThinking?: (text: string) => void,
+  options: { useStreaming?: boolean } = {},
 ): Promise<AgentGoalResult> {
   // 1. 查 Skill 缓存
   const cachedSkill = await findBestSkill(platform, pageType, goal)
@@ -93,7 +111,7 @@ export async function reactLoop(
 
     // 调 AI
     onThinking?.(`AI思考中 (${attempt + 1}/${MAX_ATTEMPTS})...`)
-    const rawResponse = await chatCompletion(SYSTEM_PROMPT, userPrompt, 0.1)
+    const rawResponse = await think(SYSTEM_PROMPT, userPrompt, 0.1, options.useStreaming ?? false, onThinking)
 
     // 解析
     const step = parseAIResponse(rawResponse)

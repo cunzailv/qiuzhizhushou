@@ -1,5 +1,6 @@
 import { getSetting } from '../db/settings-store'
 import { getPresetById } from './model-presets'
+import { consumeAiCall } from './ai-budget'
 interface ChatCompletionResponse {
   choices: Array<{ message: { content: string } }>
 }
@@ -32,6 +33,13 @@ export async function chatCompletion(
   const { baseUrl, apiKey, modelName } = await resolveAISettings()
 
   if (!apiKey || !baseUrl) {
+    return ''
+  }
+
+  // C4：每日 AI 预算护栏——超限直接返回空串，由调用方回退本地逻辑
+  const remaining = await consumeAiCall()
+  if (remaining < 0) {
+    console.warn(`[AI-BUDGET] 今日 AI 调用已超预算（剩余 ${remaining}），本次调用跳过，回退本地逻辑`)
     return ''
   }
 

@@ -1,11 +1,14 @@
 import React, { useCallback, useEffect, useState } from 'react'
-import { Bot, RefreshCw, CheckCircle2, Sparkles } from 'lucide-react'
+import { Bot, RefreshCw, CheckCircle2, Sparkles, BarChart3 } from 'lucide-react'
 import { buildStrategy, DEFAULT_DAILY_QUOTA } from '../../shared/agent/butler/butler-planner'
+import { buildReview } from '../../shared/agent/butler/review-planner'
 import { getActiveFollowUps, getRecentDecisions } from '../../shared/db/butler-store'
+import { getAllApplications } from '../../shared/db/application-store'
 import { getSetting } from '../../shared/db/settings-store'
 import { log } from '../../shared/utils/logger'
 import type { ButlerStrategy, FollowUpSuggestion, DecisionLog } from '../../shared/types/butler'
 import type { ApplyFilters } from '../../shared/types/filters'
+import type { ReviewResult } from '../../shared/agent/butler/review-planner'
 
 const MOD = 'ButlerTab'
 
@@ -22,6 +25,7 @@ export default function Butler() {
   const [strategy, setStrategy] = useState<ButlerStrategy | null>(null)
   const [followUps, setFollowUps] = useState<FollowUpSuggestion[]>([])
   const [decisions, setDecisions] = useState<DecisionLog[]>([])
+  const [review, setReview] = useState<ReviewResult | null>(null)
   const [scanning, setScanning] = useState(false)
 
   const refresh = useCallback(async () => {
@@ -35,6 +39,7 @@ export default function Butler() {
     }))
     setFollowUps(await getActiveFollowUps())
     setDecisions(await getRecentDecisions(5))
+    setReview(buildReview(await getAllApplications()))
   }, [])
 
   useEffect(() => {
@@ -88,6 +93,28 @@ export default function Butler() {
             {strategy.priorities.map((priority, index) => (
               <li key={index} className="flex gap-1.5"><span className="text-primary-light">·</span>{priority}</li>
             ))}
+          </ul>
+        </div>
+      )}
+
+      {review && (
+        <div className="rounded-xl border border-white/5 bg-white/[0.03] p-3 space-y-2">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-text-primary">
+            <BarChart3 className="w-3.5 h-3.5 text-primary-light" />
+            周期复盘（{review.period}）
+          </div>
+          <div className="flex flex-wrap gap-1.5 text-[11px]">
+            <span className="px-2 py-0.5 rounded-full bg-white/[0.05]">投递 {review.total}</span>
+            <span className="px-2 py-0.5 rounded-full bg-white/[0.05]">已读 {review.funnel.read}</span>
+            <span className="px-2 py-0.5 rounded-full bg-white/[0.05]">沟通 {review.funnel.communicating}</span>
+            <span className="px-2 py-0.5 rounded-full bg-white/[0.05]">面试 {review.funnel.interview}</span>
+            <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300">回复率 {review.replyRate}%</span>
+          </div>
+          <ul className="text-[11px] text-text-muted space-y-1">
+            {review.suggestions.slice(0, 3).map((suggestion, index) => (
+              <li key={index} className="flex gap-1.5"><span className="text-primary-light">·</span>{suggestion}</li>
+            ))}
+            <li className="flex gap-1.5"><span className="text-primary-light">·</span>{review.calibration.message}</li>
           </ul>
         </div>
       )}

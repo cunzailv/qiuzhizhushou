@@ -88,6 +88,10 @@ describe('butler agent flow', () => {
     // 决策留痕出现：butler 每日管家扫描
     await expect.poll(async () => await popup.getByText(/butler.*每日管家扫描/).count(), { timeout: 10_000 }).toBeGreaterThan(0)
 
+    // C2：周期复盘卡片出现（投递 1、回复率 0%）
+    await expect.poll(async () => await popup.getByText(/周期复盘（近 2 周（14 天））/).count(), { timeout: 10_000 }).toBeGreaterThan(0)
+    await expect.poll(async () => await popup.getByText(/投递 1/).count(), { timeout: 10_000 }).toBeGreaterThan(0)
+
     // 清理：标记已处理 → 建议消失
     await popup.getByRole('button', { name: '已处理' }).click()
     await expect.poll(async () => await popup.getByText('管家测试科技 · 管家测试工程师').count(), { timeout: 10_000 }).toBe(0)

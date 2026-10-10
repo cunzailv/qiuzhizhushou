@@ -26,6 +26,9 @@ export interface PluginSettings {
   // Notification settings
   interviewReminder: boolean
   reminderMinutes: number
+
+  // C4: AI 每日调用预算上限（超限自动回退本地）
+  aiDailyBudget: number
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
@@ -43,4 +46,5 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   enableAiMatch: true,
   interviewReminder: true,
   reminderMinutes: 30,
+  aiDailyBudget: 50,
 }

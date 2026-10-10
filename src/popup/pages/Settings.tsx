@@ -327,6 +327,22 @@ export default function Settings() {
               测试连接
             </Button>
           </div>
+
+          {/* C4: AI 每日预算护栏 */}
+          <div>
+            <label className="text-[11px] text-text-muted mb-1 block">
+              每日 AI 调用预算上限: {settings.aiDailyBudget ?? 50} 次（超限自动回退本地）
+            </label>
+            <input
+              type="range"
+              min={5}
+              max={200}
+              step={5}
+              value={settings.aiDailyBudget ?? 50}
+              onChange={(e) => handleSave({ aiDailyBudget: parseInt(e.target.value) })}
+              className="w-full accent-primary"
+            />
+          </div>
         </div>
       </Card>
 

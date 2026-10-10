@@ -1,13 +1,8 @@
 import { ALL_SKILLS } from '../parser/skills-dict'
+import { semanticSimilarity } from './semantic-refine'
+import { ROLE_KEYWORDS } from './role-keywords'
 import type { MatchResult, JobCard, MatchDimensions, JdRequirements } from '../types/job'
 import type { Resume } from '../types/resume'
-
-const ROLE_KEYWORDS = [
-  '人工智能', 'AI', '前端', '后端', '全栈', '算法', '数据', '测试', '运维',
-  '产品', '设计', '财务', '会计', '销售', '运营', '市场', '人力', '行政',
-  'Java', 'PHP', 'Python', 'Golang', 'Node.js', 'React', 'Vue',
-  'TypeScript', 'JavaScript', '开发',
-]
 
 // 维度满分：skills 45 / similarity 15 / direction 20 / experience 12 / education 8 = 100
 const DIM_SCORE = { skills: 45, similarity: 15, direction: 20, experience: 12, education: 8 } as const
@@ -92,41 +87,9 @@ function computeMissingSkills(resumeSkills: string[], jobDescription: string): s
   return missing.slice(0, 8)
 }
 
-function tokenize(text: string): Set<string> {
-  const tokens = new Set<string>()
-  const normalized = text.toLowerCase()
-
-  for (const match of normalized.matchAll(/[a-z0-9]+(?:[.+#/-][a-z0-9+#]+)*/g)) {
-    if (match[0].length > 1) tokens.add(match[0])
-  }
-
-  for (const match of normalized.matchAll(/[\u3400-\u9fff]+/g)) {
-    const sequence = match[0]
-    if (sequence.length === 1) {
-      tokens.add(sequence)
-      continue
-    }
-    for (let index = 0; index < sequence.length - 1; index++) {
-      tokens.add(sequence.slice(index, index + 2))
-    }
-  }
-
-  return tokens
-}
-
 function textSimilarity(text1: string, text2: string): number {
-  const words1 = tokenize(text1)
-  const words2 = tokenize(text2)
-  if (words1.size === 0 && words2.size === 0) return 0
-
-  let intersection = 0
-  for (const w of words1) {
-    if (words2.has(w)) intersection++
-  }
-
-  const union = words1.size + words2.size - intersection
-  if (union === 0) return 0
-  return intersection / union
+  // C1：语义精筛（别名归一 + 词元 Jaccard + 方向词强化）
+  return semanticSimilarity(text1, text2)
 }
 
 function roleAlignment(resumeText: string, jobTitle: string): number {
