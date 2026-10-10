@@ -1,4 +1,16 @@
 import { chatCompletionStream } from './api-client'
+import type { MatchDimensions } from '../types/job'
+
+// ─── A4: 差距→行动清单 ───
+
+export interface MatchGapAction {
+  /** 差距项（如"缺少 Kubernetes 经验"） */
+  gap: string
+  /** 具体行动：简历改写点或学习路径（如"简历补充：在项目描述中加入K8s部署细节"） */
+  action: string
+  /** 建议类型：rewrite=改写简历 / learn=学习补充 / experience=经历补充 / info=信息完善 */
+  type: 'rewrite' | 'learn' | 'experience' | 'info'
+}
 
 export interface JobMatchAnalysis {
   overallScore: number
@@ -8,6 +20,12 @@ export interface JobMatchAnalysis {
   weaknesses: string[]
   improvementSuggestions: string[]
   recommendation: string
+  /** A4: 分维度得分（0-100 拆分） */
+  dimensions?: MatchDimensions
+  /** A4: 每条差距对应的具体行动 */
+  gapActions?: MatchGapAction[]
+  /** A4: 针对该 JD 的简历改写要点（复用 JD 原词、量化成果） */
+  resumeTailoringPoints?: string[]
 }
 
 const SYSTEM_PROMPT = `你是资深职业规划Agent。请像专业顾问一样，逐步分析候选人与岗位的匹配度。
@@ -26,6 +44,11 @@ const SYSTEM_PROMPT = `你是资深职业规划Agent。请像专业顾问一样�
 **第四步：综合评分与建议**
 给出 0-100 分，并针对不足之处给出具体学习路径（如"花2周学React官方教程+做1个demo项目"），而非笼统说"建议学习XX"。
 
+**第五步：可解释拆解**
+1. dimensions：把总分拆成五维（skills 0-45 / similarity 0-15 / direction 0-20 / experience 0-12 / education 0-8），合计约等于总分
+2. gapActions：逐条列出主要差距（最多5条），每条给"具体行动"并标注类型（rewrite=改简历/learn=学习/experience=补经历/info=完善信息）
+3. resumeTailoringPoints：给出3-5条针对该 JD 的简历改写要点（复用 JD 原词、把成果量化，如"把'负责订单系统'改为'重构订单中台，支撑双11峰值，QPS提升40%'"）
+
 最后在文末附 JSON 代码块：
 \`\`\`json
 {
@@ -35,7 +58,10 @@ const SYSTEM_PROMPT = `你是资深职业规划Agent。请像专业顾问一样�
   "strengths": ["核心优势"],
   "weaknesses": ["主要不足"],
   "improvementSuggestions": ["具体可行的提升路径"],
-  "recommendation": "100字内综合推荐语"
+  "recommendation": "100字内综合推荐语",
+  "dimensions": {"skills":0,"similarity":0,"direction":0,"experience":0,"education":0},
+  "gapActions": [{"gap":"差距项","action":"具体行动","type":"rewrite|learn|experience|info"}],
+  "resumeTailoringPoints": ["改写要点1"]
 }
 \`\`\`
 
@@ -82,6 +108,34 @@ ${jobDescription.slice(0, 2000)}
     }
     if (jsonStr) {
       const parsed = JSON.parse(jsonStr) as JobMatchAnalysis
+
+      // A4: 安全解析新增字段
+      const dims = parsed.dimensions as Partial<MatchDimensions> | undefined
+      const dimensions: MatchDimensions | undefined = dims && typeof dims === 'object'
+        ? {
+            skills: typeof dims.skills === 'number' ? Math.max(0, Math.min(45, dims.skills)) : 0,
+            similarity: typeof dims.similarity === 'number' ? Math.max(0, Math.min(15, dims.similarity)) : 0,
+            direction: typeof dims.direction === 'number' ? Math.max(0, Math.min(20, dims.direction)) : 0,
+            experience: typeof dims.experience === 'number' ? Math.max(0, Math.min(12, dims.experience)) : 0,
+            education: typeof dims.education === 'number' ? Math.max(0, Math.min(8, dims.education)) : 0,
+          }
+        : undefined
+
+      const gapActions: MatchGapAction[] | undefined = Array.isArray(parsed.gapActions)
+        ? parsed.gapActions
+            .filter((g) => g && typeof g.gap === 'string' && typeof g.action === 'string')
+            .slice(0, 5)
+            .map((g) => ({
+              gap: g.gap,
+              action: g.action,
+              type: ['rewrite', 'learn', 'experience', 'info'].includes(g.type) ? g.type : 'learn',
+            }))
+        : undefined
+
+      const resumeTailoringPoints: string[] | undefined = Array.isArray(parsed.resumeTailoringPoints)
+        ? parsed.resumeTailoringPoints.filter((p) => typeof p === 'string').slice(0, 5)
+        : undefined
+
       return {
         overallScore: parsed.overallScore ?? 0,
         skillMatch: Array.isArray(parsed.skillMatch) ? parsed.skillMatch : [],
@@ -90,6 +144,9 @@ ${jobDescription.slice(0, 2000)}
         weaknesses: Array.isArray(parsed.weaknesses) ? parsed.weaknesses : [],
         improvementSuggestions: Array.isArray(parsed.improvementSuggestions) ? parsed.improvementSuggestions : [],
         recommendation: parsed.recommendation || '分析完成，请查看详细结果',
+        dimensions,
+        gapActions,
+        resumeTailoringPoints,
       }
     }
   } catch {
