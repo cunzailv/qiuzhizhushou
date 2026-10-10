@@ -24,6 +24,29 @@ export interface Project {
   technologies: string[]
 }
 
+// ─── A1: AI 简历画像（Resume Profile） ───
+
+export type SkillLevel = 'expert' | 'proficient' | 'familiar' | 'basic' | 'unknown'
+
+export interface SkillLevelEntry {
+  skill: string
+  level: SkillLevel
+}
+
+export interface ResumeProfile {
+  /** 真实工作年限（本地日期推算 + AI 补全） */
+  yearsOfExperience: number
+  /** 技能分级清单（精通/熟练/熟悉/了解） */
+  skillLevels: SkillLevelEntry[]
+  /** 一句话画像：X年Y方向经验 + 核心技能 + 代表成果 */
+  profile: string
+  /** 成果亮点（优先量化数字） */
+  achievementHighlights: string[]
+  /** 数据来源：local=纯本地解析，ai=AI 补全，hybrid=本地+AI 融合 */
+  source: 'local' | 'ai' | 'hybrid'
+  generatedAt: string
+}
+
 export interface Resume {
   id: string
   name: string
@@ -44,6 +67,8 @@ export interface Resume {
     summary: string
   }
   aiAnalysis: ResumeAnalysis | null
+  /** A1: AI 简历画像（由 enrichResumeProfile 生成） */
+  profile?: ResumeProfile | null
   isDefault: boolean
   createdAt: string
   updatedAt: string
