@@ -1,5 +1,6 @@
 import { ALL_SKILLS } from '../parser/skills-dict'
 import { chatCompletion } from './api-client'
+import { getSetting } from '../db/settings-store'
 import type { JobCard, JdRequirements, JdSkill } from '../types/job'
 
 // ─── 本地解析工具（可单测） ───
@@ -203,7 +204,10 @@ ${job.jobDescription || ''}
 export async function analyzeJd(job: JobCard): Promise<JdRequirements> {
   const local = analyzeJdLocally(job)
   const parsedAt = new Date().toISOString()
-  const ai = await tryAIAnalyze(job)
+
+  // 尊重用户开关：AI 未启用时纯本地结构化（不产生任何 AI 调用）
+  const aiEnabled = await getSetting<boolean>('aiEnabled', false)
+  const ai = aiEnabled ? await tryAIAnalyze(job) : null
   if (!ai) return { ...local, source: 'local', parsedAt }
 
   return {

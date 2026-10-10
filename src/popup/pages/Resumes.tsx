@@ -10,8 +10,8 @@ import { setSharedResumeSummary, clearSharedResumeSummary } from '../../shared/d
 import { parsePDF, parseWord, extractStructuredData } from '../../shared/parser'
 import { analyzeResumeQuality, analyzeJobMatch, checkAIConfigured } from '../../shared/ai'
 import type { JobMatchAnalysis } from '../../shared/ai'
-import { log, logError, logGroup, logGroupEnd } from '../../shared/utils/logger'
-import type { Resume } from '../../shared/types/resume'
+import { log, logWarn, logError, logGroup, logGroupEnd } from '../../shared/utils/logger'
+import type { Resume, ResumeProfile } from '../../shared/types/resume'
 import { formatDate } from '../../shared/utils/date'
 import { saveMatchAnalysis, getAllMatchAnalyses, deleteMatchAnalysis } from '../../shared/db/match-analysis-store'
 import type { MatchAnalysisRecord } from '../../shared/db'
@@ -115,6 +115,19 @@ export default function Resumes() {
       const structuredData = extractStructuredData(rawText)
       log(MOD, 'upload', `Structured data: name=${structuredData.name || 'unknown'}, skills=${structuredData.skills.length}, education=${structuredData.education.length}, work=${structuredData.workExperience.length}`)
 
+      // A1: 生成 AI 简历画像（本地年限/技能分级/成果 + AI 补全），失败不阻断上传
+      let profile: ResumeProfile | undefined
+      try {
+        const { enrichResumeProfile } = await import('../../shared/ai/resume-enricher')
+        profile = await enrichResumeProfile(
+          { name: '', fileName: file.name, fileType, rawText, structuredData, aiAnalysis: null, isDefault: false } as Resume,
+          rawText,
+        )
+        log(MOD, 'upload', `Resume profile: years=${profile.yearsOfExperience}, skills=${profile.skillLevels.length}, source=${profile.source}`)
+      } catch (error) {
+        logWarn(MOD, 'upload', 'Resume profile enrichment skipped', error)
+      }
+
       const fileData = await file.arrayBuffer()
 
       const resume = await saveResume({
@@ -124,6 +137,7 @@ export default function Resumes() {
         fileData,
         rawText,
         structuredData,
+        profile,
         aiAnalysis: null,
         isDefault: resumes.length === 0,
       })

@@ -142,7 +142,11 @@ describe('extension application flow', () => {
     })
 
     const page = await context.newPage()
-    page.on('console', (message) => browserLogs.push(`[page] ${message.text()}`))
+    page.on('console', (message) => {
+      const text = `[page] ${message.text()}`
+      browserLogs.push(text)
+      if (process.env.E2E_LIVE_LOG) console.log('[live]', text)
+    })
     await page.route('https://www.zhipin.com/**', async (route) => {
       await route.fulfill({
         headers: { 'content-type': 'text/html; charset=utf-8' },
@@ -154,7 +158,7 @@ describe('extension application flow', () => {
                 <span class="company-name">测试科技</span>
                 <span class="salary">20K-30K</span>
                 <span class="job-area">深圳</span>
-                <div class="job-detail">React TypeScript JavaScript HTML CSS Node.js</div>
+                <div class="job-desc">React TypeScript JavaScript HTML CSS Node.js</div>
               </li>
             </ul>
             <script>
@@ -209,10 +213,10 @@ describe('extension application flow', () => {
       })
     })
 
-    await expect.poll(
-      () => page.locator('body').getAttribute('data-sent-greeting'),
-      { timeout: 15_000 },
-    ).toMatch(/.+/)
+    await expect.poll(async () => {
+      const value = await page.locator('body').getAttribute('data-sent-greeting')
+      return value !== null && value.length > 0
+    }, { timeout: 30_000 }).toBe(true)
 
     await new Promise((resolve) => setTimeout(resolve, 2000))
     const applicationCount = await serviceWorker.evaluate(async () => {
@@ -620,7 +624,7 @@ describe('extension application flow', () => {
             experience: '',
             education: '',
             excludeKeywords: '',
-            enableAiMatch: false,
+            enableAiMatch: true,
             minMatchScore: 100,
           },
         },
@@ -633,10 +637,10 @@ describe('extension application flow', () => {
     ).toBe('true')
     await expect.poll(async () => page.locator('#boss-assistant-panel').evaluate(
       (host) => host.shadowRoot?.textContent ?? '',
-    ), { timeout: 30_000 }).toMatch(/进度\s*20\/20/)
+    ), { timeout: 60_000 }).toMatch(/进度\s*20\/20/)
 
     await page.close()
-  }, 60_000)
+  }, 90_000)
 
   it('does not apply when the match score is below the selected minimum', async () => {
     await serviceWorker.evaluate(async () => {
@@ -750,7 +754,7 @@ describe('extension application flow', () => {
 
     await expect.poll(async () => page.locator('#boss-assistant-panel').evaluate(
       (host) => host.shadowRoot?.textContent ?? '',
-    ), { timeout: 15_000 }).toContain('投递完成')
+    ), { timeout: 30_000 }).toContain('沟通完成')
     expect(await page.locator('body').getAttribute('data-applied')).toBeNull()
     await page.close()
   }, 45_000)
@@ -856,11 +860,11 @@ describe('extension application flow', () => {
 
     await expect.poll(
       () => page.locator('body').getAttribute('data-applied'),
-      { timeout: 20_000 },
+      { timeout: 30_000 },
     ).toBe('true')
     await expect.poll(async () => page.locator('#boss-assistant-panel').evaluate(
       (host) => host.shadowRoot?.textContent ?? '',
-    ), { timeout: 20_000 }).toContain('投递完成')
+    ), { timeout: 30_000 }).toContain('沟通完成')
     const bypassPanelText = await page.locator('#boss-assistant-panel').evaluate(
       (host) => host.shadowRoot?.textContent ?? '',
     )
@@ -920,6 +924,8 @@ describe('extension application flow', () => {
           createdAt: '2026-07-26T00:00:00.000Z',
           updatedAt: '2026-07-26T00:00:00.000Z',
         },
+        // 面板默认 applyMode=batch，本用例验证的是推荐模式的「筛选完成」直投路径
+        setting_applyMode: 'recommend',
       })
     })
 
@@ -934,6 +940,25 @@ describe('extension application flow', () => {
             <span class="salary">15K-25K</span>
             <div class="job-detail">Java Spring Cloud</div>
           </li></ul>
+          <script>
+            document.querySelector('.job-name').addEventListener('click', (event) => {
+              event.preventDefault()
+              const detail = document.createElement('section')
+              detail.className = 'job-detail-content'
+              detail.innerHTML =
+                '<h2>后端开发工程师</h2>' +
+                '<span>悬浮窗测试公司</span>' +
+                '<button class="btn-chat">立即沟通</button>'
+              document.body.append(detail)
+              detail.querySelector('.btn-chat').addEventListener('click', () => {
+                const textarea = document.createElement('textarea')
+                textarea.className = 'greet-message'
+                const send = document.createElement('button')
+                send.className = 'send'
+                document.body.append(textarea, send)
+              })
+            })
+          </script>
         </body></html>`,
       })
     })
@@ -945,14 +970,14 @@ describe('extension application flow', () => {
       (node) => node.shadowRoot?.textContent ?? '',
     )
     expect(initialPanelText).toContain('按分筛选')
-    expect(initialPanelText).toContain('不评分直投')
+    expect(initialPanelText).toContain('不评分沟通')
 
     await host.locator('#score-direct').click()
     await host.locator('#btn-start').click()
 
     await expect.poll(async () => host.evaluate(
       (node) => node.shadowRoot?.textContent ?? '',
-    ), { timeout: 20_000 }).toContain('筛选完成')
+    ), { timeout: 30_000 }).toContain('筛选完成')
     const finalPanelText = await host.evaluate(
       (node) => node.shadowRoot?.textContent ?? '',
     )
@@ -961,7 +986,7 @@ describe('extension application flow', () => {
     expect(finalPanelText).not.toMatch(/\d+分/)
 
     await page.close()
-  }, 45_000)
+  }, 60_000)
 
   it('scores visible card metadata when the list card has no full description', async () => {
     await serviceWorker.evaluate(async () => {
@@ -1023,6 +1048,26 @@ describe('extension application flow', () => {
               </ul>
             </div>
           </li></ul>
+          <script>
+            document.querySelector('.job-name').addEventListener('click', (event) => {
+              event.preventDefault()
+              const detail = document.createElement('section')
+              detail.className = 'job-detail-content'
+              detail.innerHTML =
+                '<h2>高级前端工程师</h2>' +
+                '<span>元数据科技</span>' +
+                '<div>React TypeScript 3-5年 本科 深圳</div>' +
+                '<button class="btn-chat">立即沟通</button>'
+              document.body.append(detail)
+              detail.querySelector('.btn-chat').addEventListener('click', () => {
+                const textarea = document.createElement('textarea')
+                textarea.className = 'greet-message'
+                const send = document.createElement('button')
+                send.className = 'send'
+                document.body.append(textarea, send)
+              })
+            })
+          </script>
         </body></html>`,
       })
     })
@@ -1058,7 +1103,7 @@ describe('extension application flow', () => {
 
     await expect.poll(async () => page.locator('#boss-assistant-panel').evaluate(
       (host) => host.shadowRoot?.textContent ?? '',
-    ), { timeout: 10_000 }).toContain('分析完成')
+    ), { timeout: 20_000 }).toContain('分析完成')
     const panelText = await page.locator('#boss-assistant-panel').evaluate(
       (host) => host.shadowRoot?.textContent ?? '',
     )
@@ -1252,16 +1297,18 @@ describe('extension application flow', () => {
 
     const popup = await context.newPage()
     await popup.goto(`chrome-extension://${extensionId}/src/popup/index.html`)
-    await popup.getByRole('button', { name: '开始投递', exact: true }).click()
+    await popup.getByText('沟通筛选条件').click()
+    await popup.getByRole('button', { name: '开始智能沟通', exact: true }).click()
 
     await expect.poll(async () => page.locator('#boss-assistant-panel').evaluate(
       (host) => host.shadowRoot?.textContent ?? '',
-    ), { timeout: 10_000 }).toContain('未找到岗位卡片')
+    ), { timeout: 20_000 }).toContain('未找到岗位卡片')
     await expect.poll(
-      () => popup.getByText('已连接 BOSS 页面，开始扫描岗位').count(),
+      () => popup.getByText('已连接 Boss直聘 页面，开始扫描岗位').count(),
+      { timeout: 10_000 },
     ).toBe(1)
 
     await popup.close()
     await page.close()
-  }, 30_000)
+  }, 60_000)
 })

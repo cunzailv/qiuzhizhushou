@@ -243,6 +243,7 @@ export default function App() {
     showToast(`正在连接 ${platformLabel} 页面…`, 'info')
     try {
       // 优先使用 popup 检测到的当前活动 tab（用户在哪个平台就操作哪个平台）
+      // 注意：扩展 popup 页自身也可能被识别为「活动 tab」，必须跳过非 http(s) 页面
       let targetTab: chrome.tabs.Tab | undefined
       let createdTarget = false
 
@@ -254,8 +255,8 @@ export default function App() {
         }
       }
 
-      // 如果当前 tab 不是目标平台，再查找其他 tab
-      if (!targetTab?.id) {
+      // 如果当前 tab 不是目标平台（或本身就是扩展页），再查找其他 tab
+      if (!targetTab?.id || !/^https?:/i.test(targetTab.url ?? '')) {
         targetTab = await findSupportedBossTab(preferred)
       }
 
@@ -273,7 +274,13 @@ export default function App() {
       if (!response?.success) {
         throw new Error(response?.error || '页面未确认启动')
       }
-      showToast(`已连接 ${platformLabel} 页面，开始扫描岗位`, 'success')
+      // 成功连接后，用目标 tab 的实际 URL 推断平台名（popup 自身是扩展页时更准确）
+      const resolvedPlatformLabel = targetTab.url && /zhipin\.com/i.test(targetTab.url)
+        ? 'Boss直聘'
+        : targetTab.url && /liepin\.com/i.test(targetTab.url)
+          ? '猎聘'
+          : platformLabel
+      showToast(`已连接 ${resolvedPlatformLabel} 页面，开始扫描岗位`, 'success')
       setApplyRunning(true)
       if (targetTab.id) setRunningTabId(targetTab.id)
       if (createdTarget) await chrome.tabs.update(targetTab.id, { active: true })

@@ -12,6 +12,11 @@ vi.mock('../src/shared/ai/api-client', () => ({
   chatCompletion: vi.fn(),
 }))
 
+// analyzeJd 尊重 aiEnabled 开关，单测里默认开启 AI 路径
+vi.mock('../src/shared/db/settings-store', () => ({
+  getSetting: vi.fn(async () => true),
+}))
+
 import { chatCompletion } from '../src/shared/ai/api-client'
 const mockChat = chatCompletion as unknown as ReturnType<typeof vi.fn>
 

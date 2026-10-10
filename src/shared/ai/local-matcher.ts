@@ -142,7 +142,10 @@ function roleAlignment(resumeText: string, jobTitle: string): number {
 /** JD 中"必须技能"数量：优先用 A2 结构化的 required 技能，缺省回退词典扫描 */
 function requiredSkillCount(jobDescription: string, requirements?: JdRequirements): number {
   if (requirements && requirements.skills.length > 0) {
-    return requirements.skills.filter((s) => s.required).length
+    const required = requirements.skills.filter((s) => s.required).length
+    // JD 未标注"必须/加分"区分（常见于搜索卡片文本）时全部按加分项识别，
+    // 此时以识别出的技能总数作为基准，避免技能维度被算成 0。
+    return required > 0 ? required : requirements.skills.length
   }
   return new Set(ALL_SKILLS.filter((skill) => containsSkill(jobDescription, skill))).size
 }
