@@ -50,6 +50,21 @@ export interface JdRequirements {
   parsedAt: string
 }
 
+// ─── A3: 可解释匹配结果 ───
+
+export interface MatchDimensions {
+  /** 技能匹配 0-45 */
+  skills: number
+  /** 文本相似度 0-15 */
+  similarity: number
+  /** 方向对齐（岗位标题 vs 简历方向） 0-20 */
+  direction: number
+  /** 经验对齐（简历年限 vs 岗位年限下限） 0-12 */
+  experience: number
+  /** 学历对齐（简历最高学历 vs 岗位学历下限） 0-8 */
+  education: number
+}
+
 export interface MatchResult {
   jobId: string
   score: number
@@ -58,4 +73,8 @@ export interface MatchResult {
   skillGap: string[]
   recommendation: string
   isRecommended: boolean
+  /** A3: 硬门槛拦截结果（学历/年限不达标） */
+  hardGate?: { passed: boolean; reasons: string[] }
+  /** A3: 可解释分维度得分 */
+  dimensions?: MatchDimensions
 }
