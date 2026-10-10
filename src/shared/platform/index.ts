@@ -3,12 +3,21 @@
 // - 支持 storage 中的手动覆盖（设置页可选），满足「自动识别 + 手动可选」
 import { bossAdapter } from './boss'
 import { liepinAdapter } from './liepin'
+import { job51Adapter } from './51job'
+import { zhaopinAdapter } from './zhaopin'
+import { maimaiAdapter } from './maimai'
 import { getSetting } from '../db/settings-store'
 import type { PlatformAdapter } from './types'
 
-export const PLATFORMS: PlatformAdapter[] = [bossAdapter, liepinAdapter]
+export const PLATFORMS: PlatformAdapter[] = [
+  bossAdapter,
+  liepinAdapter,
+  job51Adapter,
+  zhaopinAdapter,
+  maimaiAdapter,
+]
 
-// 手动覆盖策略的 storage key；值为 'auto' 或某个平台 id（如 'boss' / 'liepin'）。
+// 手动覆盖策略的 storage key；值为 'auto' 或某个平台 id（如 'boss' / '51job'）。
 export const PLATFORM_OVERRIDE_KEY = 'platformOverride'
 
 export function detectPlatformByUrl(url: string): PlatformAdapter | null {
@@ -46,5 +55,11 @@ export function getSupportedUrlPatterns(): string[] {
     'https://www.liepin.com/*',
     'https://liepin.com/*',
     'https://*.liepin.com/*',
+    'https://*.51job.com/*',
+    'https://51job.com/*',
+    'https://*.zhaopin.com/*',
+    'https://zhaopin.com/*',
+    'https://*.maimai.cn/*',
+    'https://maimai.cn/*',
   ]
 }

@@ -28,7 +28,13 @@
         "https://www.zhipin.com/*",
         "https://zhipin.com/*",
         "*://*.liepin.com/*",
-        "*://liepin.com/*"
+        "*://liepin.com/*",
+        "*://*.51job.com/*",
+        "*://51job.com/*",
+        "*://*.zhaopin.com/*",
+        "*://zhaopin.com/*",
+        "*://*.maimai.cn/*",
+        "*://maimai.cn/*"
       ],
       "js": ["src/content/index.ts"],
       "run_at": "document_end"
@@ -45,12 +51,29 @@
     "https://www.zhipin.com/*",
     "https://zhipin.com/*",
     "*://*.liepin.com/*",
-    "*://liepin.com/*"
+    "*://liepin.com/*",
+    "*://*.51job.com/*",
+    "*://51job.com/*",
+    "*://*.zhaopin.com/*",
+    "*://zhaopin.com/*",
+    "*://*.maimai.cn/*",
+    "*://maimai.cn/*"
   ],
   "web_accessible_resources": [
     {
       "resources": ["src/assets/*"],
-      "matches": ["https://www.zhipin.com/*", "https://zhipin.com/*", "*://*.liepin.com/*", "*://liepin.com/*"]
+      "matches": [
+        "https://www.zhipin.com/*",
+        "https://zhipin.com/*",
+        "*://*.liepin.com/*",
+        "*://liepin.com/*",
+        "*://*.51job.com/*",
+        "*://51job.com/*",
+        "*://*.zhaopin.com/*",
+        "*://zhaopin.com/*",
+        "*://*.maimai.cn/*",
+        "*://maimai.cn/*"
+      ]
     }
   ]
 }

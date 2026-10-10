@@ -6,6 +6,11 @@ import type { JobCard, MatchResult } from '../../types/job'
 export interface CommunicationUiSnapshot {
   inputs: Set<Element>
   visibleDialogs: Set<Element>
+  // 扩展字段（新平台适配器使用；Boss 保留默认空值）
+  hasInput?: boolean
+  inputSelector?: string
+  sendButton?: string
+  applyButtons?: number
 }
 
 const APPLY_SELECTOR = [

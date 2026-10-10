@@ -30,6 +30,31 @@ const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resol
 // 默认用于「没有可用标签页时自动打开」的目标平台（当前以 Boss 推荐页为默认入口）。
 const DEFAULT_TARGET_URL = 'https://www.zhipin.com/web/geek/job-recommend'
 
+// 平台 id → URL 关键词映射（用于 findSupportedBossTab 的 URL 过滤）
+const PLATFORM_URL_KEYS: Array<{ id: string; key: string }> = [
+  { id: 'boss', key: 'zhipin' },
+  { id: 'liepin', key: 'liepin' },
+  { id: '51job', key: '51job' },
+  { id: 'zhaopin', key: 'zhaopin' },
+  { id: 'maimai', key: 'maimai' },
+]
+
+// 从 URL 推断平台名（通用，覆盖全部已注册平台）
+function inferPlatformNameFromUrl(url: string): string | undefined {
+  if (!url) return undefined
+  const matched = getPlatformsMeta().map((p) => p).find((p) => {
+    const key = PLATFORM_URL_KEYS.find((k) => k.id === p.id)?.key
+    return key ? url.toLowerCase().includes(key) : false
+  })
+  return matched?.name
+}
+
+// 从平台名反查平台 id
+function inferPlatformIdFromName(name: string): string | undefined {
+  const meta = getPlatformsMeta().find((p) => p.name === name)
+  return meta?.id
+}
+
 async function sendMessageWithRecovery(tabId: number, message: unknown): Promise<unknown> {
   try {
     return await chrome.tabs.sendMessage(tabId, message)
@@ -61,7 +86,9 @@ async function findSupportedBossTab(
 ): Promise<chrome.tabs.Tab | undefined> {
   const patterns = preferredPlatformId
     ? getSupportedUrlPatterns().filter((p) =>
-        p.toLowerCase().includes(preferredPlatformId === 'boss' ? 'zhipin' : 'liepin'),
+        p.toLowerCase().includes(
+          PLATFORM_URL_KEYS.find((k) => k.id === preferredPlatformId)?.key ?? 'zhipin',
+        ),
       )
     : getSupportedUrlPatterns()
   const tabs = await chrome.tabs.query({ url: patterns })
@@ -188,14 +215,13 @@ export default function App() {
           setPlatformName(detectedName)
         } else {
           const url = tab.url
-          if (/zhipin\.com/i.test(url)) {
-            setPlatformName('Boss直聘')
-          } else if (/liepin\.com/i.test(url)) {
-            setPlatformName('猎聘')
+          const inferred = inferPlatformNameFromUrl(url ?? '')
+          if (inferred) {
+            setPlatformName(inferred)
           } else if (getSupportedUrlPatterns().some((p) => {
             // 简单的 glob 风格匹配：将 * 替换为正则
             const regex = new RegExp('^' + p.replace(/\*/g, '.*') + '$', 'i')
-            return regex.test(url)
+            return regex.test(url ?? '')
           })) {
             // URL 匹配我们的支持列表但不是已知平台，留空让 content script 决定
             setPlatformName('')
@@ -236,11 +262,7 @@ export default function App() {
     const preferred =
       platformOverride !== 'auto'
         ? platformOverride
-        : effectivePlatformName === '猎聘'
-          ? 'liepin'
-          : effectivePlatformName === 'Boss直聘'
-            ? 'boss'
-            : undefined
+        : inferPlatformIdFromName(effectivePlatformName) ?? undefined
     const platformLabel = effectivePlatformName || '招聘平台'
     showToast(`正在连接 ${platformLabel} 页面…`, 'info')
     try {
@@ -277,11 +299,8 @@ export default function App() {
         throw new Error(response?.error || '页面未确认启动')
       }
       // 成功连接后，用目标 tab 的实际 URL 推断平台名（popup 自身是扩展页时更准确）
-      const resolvedPlatformLabel = targetTab.url && /zhipin\.com/i.test(targetTab.url)
-        ? 'Boss直聘'
-        : targetTab.url && /liepin\.com/i.test(targetTab.url)
-          ? '猎聘'
-          : platformLabel
+      const resolvedPlatformLabel =
+        inferPlatformNameFromUrl(targetTab.url ?? '') ?? platformLabel
       showToast(`已连接 ${resolvedPlatformLabel} 页面，开始扫描岗位`, 'success')
       setApplyRunning(true)
       if (targetTab.id) setRunningTabId(targetTab.id)

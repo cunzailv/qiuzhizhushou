@@ -58,10 +58,24 @@ export default function Export() {
       bossTitle: app.bossTitle,
       bossOnline: false,
       publishedAt: app.appliedAt,
-      url: `https://www.zhipin.com/job_detail/${app.jobId}.html`,
+      url: resolveJobUrl(app),
     }))
     await downloadAndMergeJobs(jobs, `岗位信息汇总_${new Date().toISOString().slice(0, 10)}`)
     showToast('岗位信息导出成功', 'success')
+  }
+
+  // 平台岗位链接回退（按平台生成可读链接；未收录平台返回空）
+  function resolveJobUrl(app: { platformId?: string; jobId?: string }): string {
+    const jobId = app.jobId || ''
+    const platformUrlMap: Array<{ id?: string; build: (id: string) => string }> = [
+      { id: 'boss', build: (id) => `https://www.zhipin.com/job_detail/${id}.html` },
+      { id: 'liepin', build: (id) => `https://www.liepin.com/a/${id}/` },
+      { id: '51job', build: (id) => `https://jobs.51job.com/all/${id}.html` },
+      { id: 'zhaopin', build: (id) => `https://www.zhaopin.com/jobs/${id}` },
+      { id: 'maimai', build: (id) => `https://maimai.cn/job/${id}` },
+    ]
+    const rule = platformUrlMap.find((r) => r.id === app.platformId)
+    return rule ? rule.build(jobId) : ''
   }
 
   function showToast(message: string, type: 'success' | 'error' | 'warning' | 'info') {
