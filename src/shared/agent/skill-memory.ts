@@ -10,7 +10,7 @@ export function computeSignature(state: { buttons: { text: string }[] }): string
   return state.buttons.slice(0, 10).map(b => b.text).join('|')
 }
 
-/** 查找匹配的缓存 Skill */
+/** 查找匹配的缓存 Skill（F3：被后台停用的技能不命中） */
 export async function findBestSkill(
   platform: string,
   pageType: string,
@@ -20,7 +20,7 @@ export async function findBestSkill(
   const skills = await db.agentSkills
     .where('[platform+pageType+goal]')
     .equals([platform, pageType, goal])
-    .filter(s => s.expiresAt > now && s.failCount < 3)
+    .filter(s => s.expiresAt > now && s.failCount < 3 && s.enabled !== false)
     .sortBy('successCount')
 
   return skills.reverse()[0] || null
@@ -68,6 +68,7 @@ export async function upsertSkill(params: {
       lastUsedAt: Date.now(),
       expiresAt: Date.now() + 14 * 86400000,
       selectorSignature: params.selectorSignature,
+      enabled: true,
     })
   }
 }
@@ -78,4 +79,22 @@ export async function recordSkillFail(skill: AgentSkill): Promise<void> {
     failCount: skill.failCount + 1,
     lastUsedAt: Date.now(),
   })
+}
+
+// ─── F3 · 技能管理（后台） ───
+
+/** 全部技能（后台表格用，按最后使用倒序） */
+export async function listSkills(): Promise<AgentSkill[]> {
+  const all = await db.agentSkills.orderBy('lastUsedAt').reverse().toArray()
+  return all
+}
+
+/** 启停技能（false=停用，findBestSkill 不再命中） */
+export async function setSkillEnabled(id: string, enabled: boolean): Promise<void> {
+  await db.agentSkills.update(id, { enabled })
+}
+
+/** 删除技能 */
+export async function deleteSkill(id: string): Promise<void> {
+  await db.agentSkills.delete(id)
 }

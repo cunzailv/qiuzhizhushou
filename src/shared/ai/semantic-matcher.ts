@@ -1,4 +1,5 @@
 import { chatCompletion } from './api-client'
+import { getPrompt } from '../db/prompt-store'
 import { computeLocalMatch } from './local-matcher'
 import type { Resume } from '../types/resume'
 import type { JobCard, MatchResult, MatchDimensions } from '../types/job'
@@ -51,7 +52,7 @@ export async function matchWithSemanticAI(resume: Resume, job: JobCard): Promise
 
 请按 Agent 思维流程分析匹配度并输出 JSON。`
 
-  const result = await chatCompletion(SYSTEM_PROMPT, userMessage, 0.2)
+  const result = await chatCompletion(await getPrompt('ai.match', SYSTEM_PROMPT), userMessage, 0.2)
   if (!result) return local
 
   try {

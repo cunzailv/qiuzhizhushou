@@ -1,4 +1,5 @@
 import { chatCompletion } from './api-client'
+import { getPrompt } from '../db/prompt-store'
 import type { Resume, ResumeAnalysis } from '../types/resume'
 
 export async function analyzeResumeQuality(resume: Resume): Promise<ResumeAnalysis> {
@@ -116,7 +117,7 @@ async function tryAIAnalysis(resume: Resume): Promise<ResumeAnalysis | null> {
 
 请按 Agent 思维流程逐步分析。`
 
-  const result = await chatCompletion(systemPrompt, userMessage, 0.5)
+  const result = await chatCompletion(await getPrompt('ai.resumeAnalyze', systemPrompt), userMessage, 0.5)
   if (!result) return null
 
   try {

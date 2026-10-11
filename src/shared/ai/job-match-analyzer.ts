@@ -1,4 +1,5 @@
 import { chatCompletionStream } from './api-client'
+import { getPrompt } from '../db/prompt-store'
 import type { MatchDimensions } from '../types/job'
 
 // ─── A4: 差距→行动清单 ───
@@ -94,7 +95,7 @@ ${jobDescription.slice(0, 2000)}
 
 请按照要求的 JSON 格式输出职位匹配分析结果。`
 
-  const fullText = await chatCompletionStream(SYSTEM_PROMPT, userMessage, onChunk, 0.3, signal)
+  const fullText = await chatCompletionStream(await getPrompt('ai.gapReport', SYSTEM_PROMPT), userMessage, onChunk, 0.3, signal)
 
   // 从流式响应中解析 JSON（优先 ```json 代码块，其次裸 {...}）
   try {

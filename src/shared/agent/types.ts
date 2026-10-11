@@ -77,4 +77,6 @@ export interface AgentSkill {
   lastUsedAt: number
   expiresAt: number
   selectorSignature: string
+  /** F3：后台启停开关；false 时 findBestSkill 不再命中 */
+  enabled?: boolean
 }

@@ -1,5 +1,6 @@
 import { ALL_SKILLS } from '../parser/skills-dict'
 import { chatCompletion } from './api-client'
+import { getPrompt } from '../db/prompt-store'
 import { getSetting } from '../db/settings-store'
 import type { JobCard, JdRequirements, JdSkill } from '../types/job'
 
@@ -172,7 +173,7 @@ ${job.jobDescription || ''}
 
 请按 Agent 思维流程输出结构化 JD JSON。`
 
-  const result = await chatCompletion(SYSTEM_PROMPT, userMessage, 0.2)
+  const result = await chatCompletion(await getPrompt('ai.jdAnalyze', SYSTEM_PROMPT), userMessage, 0.2)
   if (!result) return null
   try {
     const jsonStr = result.match(/\{[\s\S]*\}/)?.[0]

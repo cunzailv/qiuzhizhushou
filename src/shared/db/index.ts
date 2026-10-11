@@ -87,6 +87,18 @@ export class BossZhipinDB extends Dexie {
       auditLogs: 'id, createdAt, source, platform, result',
       careerProfiles: 'id',
     })
+
+    this.version(6).stores({
+      agentSkills: 'id, platform, pageType, goal, [platform+pageType+goal], lastUsedAt, expiresAt',
+    }).upgrade(async (tx) => {
+      // F3：为存量技能补齐 enabled 标记（旧记录默认启用）
+      await tx
+        .table<AgentSkill, string>('agentSkills')
+        .toCollection()
+        .modify((skill: AgentSkill) => {
+          if (skill.enabled === undefined) skill.enabled = true
+        })
+    })
   }
 }
 

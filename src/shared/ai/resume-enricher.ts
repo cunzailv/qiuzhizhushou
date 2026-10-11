@@ -1,4 +1,5 @@
 import { chatCompletion } from './api-client'
+import { getPrompt } from '../db/prompt-store'
 import { extractSkillLevels } from '../parser/structure-extractor'
 import type { Resume, ResumeProfile, SkillLevelEntry } from '../types/resume'
 
@@ -76,7 +77,7 @@ ${rawText.substring(0, 3000)}
 
 请按 Agent 思维流程生成简历画像 JSON。`
 
-  const result = await chatCompletion(SYSTEM_PROMPT, userMessage, 0.3)
+  const result = await chatCompletion(await getPrompt('ai.resumeEnrich', SYSTEM_PROMPT), userMessage, 0.3)
   if (!result) return null
 
   try {

@@ -3,6 +3,7 @@ import { capturePageState } from './page-observer'
 import { executeAction } from './action-executor'
 import { findBestSkill, upsertSkill, computeSignature, recordSkillFail } from './skill-memory'
 import { buildUserPrompt, SYSTEM_PROMPT } from './prompts'
+import { getPrompt } from '../db/prompt-store'
 import { logAudit } from '../db/audit-store'
 import type { AgentGoalResult, AgentStep, PageState } from './types'
 import { randomDelay } from '../antiBot'
@@ -147,7 +148,7 @@ export async function reactLoop(
 
     // 调 AI
     onThinking?.(`AI思考中 (${attempt + 1}/${MAX_ATTEMPTS})...`)
-    const rawResponse = await think(SYSTEM_PROMPT, userPrompt, 0.1, options.useStreaming ?? false, onThinking)
+    const rawResponse = await think(await getPrompt('agent.system', SYSTEM_PROMPT), userPrompt, 0.1, options.useStreaming ?? false, onThinking)
 
     // 解析
     const step = parseAIResponse(rawResponse)

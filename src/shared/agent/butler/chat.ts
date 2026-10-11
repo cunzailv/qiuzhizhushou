@@ -2,6 +2,7 @@
 // 按公司/BOSS/岗位生成个性化打招呼（AI 优先、模板兜底）；
 // 聊天页常见问题自动应答（薪资期望/到岗时间/自我介绍/经验匹配）。
 import { chatCompletion } from '../../ai/api-client'
+import { getPrompt } from '../../db/prompt-store'
 import { getJobSpecificGreeting } from '../../platform/boss/action-simulator'
 import type { Resume } from '../../types/resume'
 import type { JobCard, MatchResult } from '../../types/job'
@@ -30,7 +31,7 @@ export async function generatePersonalizedGreeting(
       `【我的匹配】${match.skillMatch.slice(0, 5).join('、') || '方向匹配'}，匹配分 ${match.score}`,
       memory ? `【该公司过往回复率】${Math.round((memory.replyCount / Math.max(1, memory.touchCount)) * 100)}%` : '',
     ].filter(Boolean).join('\n')
-    const raw = await chatCompletion(GREETING_SYSTEM, userMessage, 0.7)
+    const raw = await chatCompletion(await getPrompt('butler.greeting', GREETING_SYSTEM), userMessage, 0.7)
     const cleaned = (raw || '').replace(/["“”]+/g, '').trim()
     if (cleaned.length >= 10) return cleaned
   }
@@ -111,7 +112,7 @@ export async function respondToQuestion(
 
   if (aiEnabled && type !== 'other') {
     const raw = await chatCompletion(
-      '你是求职者的AI助理，基于简历事实回答问题。只输出回答正文，简洁自然，第一人称。',
+      await getPrompt('butler.reply'),
       `【简历】${resume.rawText?.slice(0, 400) || ''}\n【问题】${question}\n【岗位】${job?.title || ''} ${job?.salary || ''}`,
       0.6,
     )
