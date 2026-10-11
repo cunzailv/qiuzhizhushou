@@ -18,6 +18,7 @@ import { createFloatingPanel, updatePanelContent, showPanelToast } from './injec
 import { randomDelay, scanRisk, checkDailyLimit, incrementCounter } from '../shared/antiBot'
 import { matchResumeToJob } from '../shared/ai'
 import { reactLoop } from '../shared/agent'
+import { transition, recordMachineTransition, goalResultToEvent, type ApplyState, type ApplyEvent } from '../shared/agent/apply-state-machine'
 import { getSharedResumeSummary, getSharedFullResume, getSharedAppliedJobIds, addSharedAppliedJobId } from '../shared/db/shared-state'
 import { log, logWarn, logError, logGroup, logGroupEnd } from '../shared/utils/logger'
 import { getSetting } from '../shared/db/settings-store'
@@ -686,16 +687,30 @@ async function applyToJob(job: JobCard, match: MatchResult, preOpenedDetail?: HT
   }
 }
 
-/** AI自动确认模式：智能体观察页面、推理操作、沉淀技能 */
+/** AI自动确认模式：智能体观察页面、推理操作、沉淀技能（E5：全程状态机编排 + 审计） */
 async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolean> {
   const pageType = adapter.detectPageType()
   const platformId = adapter.id
+  let machineState: ApplyState = 'matched'
+  const track = async (event: ApplyEvent, extra?: { verified?: boolean; error?: string }) => {
+    const next = transition(machineState, event)
+    if (next) {
+      await recordMachineTransition({
+        jobTitle: job.title, jobCompany: job.companyName, platform: platformId,
+        stateFrom: machineState, stateTo: next, eventType: event.type,
+        verified: extra?.verified, error: extra?.error,
+      })
+      machineState = next
+    }
+  }
 
   // Goal 1: 打开详情 — 优先用固定选择器，失败则 AI 接管
+  await track({ type: 'START' })
   let detailEl: HTMLElement | null = null
   const fixedDetail = await adapter.activateJobCard(job.url, job.id, job.title, job.companyName)
   if (fixedDetail) {
     detailEl = fixedDetail
+    await track({ type: 'DETAIL_OPENED' }, { verified: true })
     log(MOD, 'agentApplyToJob', `Fixed selector opened detail: ${job.title}`)
   } else {
     log(MOD, 'agentApplyToJob', `Fixed selector failed, delegating to AI agent...`)
@@ -717,6 +732,10 @@ async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolea
     }, {
       onConfirm: async (desc) => requestUserConfirm(`AI 即将执行：${desc}`),
     })
+    await track(r1.success
+      ? { type: 'DETAIL_OPENED' }
+      : { type: 'DETAIL_FAILED', reason: r1.error || 'AI 无法打开详情', fallbackAvailable: false },
+    { verified: r1.success, error: r1.error })
     if (!r1.success) {
       logWarn(MOD, 'agentApplyToJob', `Agent failed goal 1: ${r1.error}`)
       updatePanelContent(panelHost!, {
@@ -741,6 +760,7 @@ async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolea
   const commUiBefore = adapter.snapshotCommunicationUi()
   const fixedClick = await adapter.clickApplyButton(detailEl || job as any)
   if (fixedClick) {
+    await track({ type: 'CHAT_CLICKED' }, { verified: true })
     log(MOD, 'agentApplyToJob', `Fixed selector clicked apply: ${job.title}`)
   } else {
     log(MOD, 'agentApplyToJob', `Fixed click failed, delegating to AI...`)
@@ -761,6 +781,10 @@ async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolea
     }, {
       onConfirm: async (desc) => requestUserConfirm(`AI 即将执行：${desc}`),
     })
+    await track(r2.success
+      ? { type: 'CHAT_CLICKED' }
+      : { type: 'CHAT_FAILED', reason: r2.error || 'AI 无法发起沟通', fallbackAvailable: false },
+    { verified: r2.success, error: r2.error })
     if (!r2.success) {
       logWarn(MOD, 'agentApplyToJob', `Agent failed goal 2: ${r2.error}`)
       updatePanelContent(panelHost!, {
@@ -781,6 +805,7 @@ async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolea
   if (!greetingSent) {
     log(MOD, 'agentApplyToJob', `Greeting fill skipped (auto-sent or no textarea)`)
   }
+  await track({ type: 'GREETING_SENT' }, { verified: true })
   await randomDelay(500, 1000)
 
   // 保存

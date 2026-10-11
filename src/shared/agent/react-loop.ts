@@ -3,6 +3,7 @@ import { capturePageState } from './page-observer'
 import { executeAction } from './action-executor'
 import { findBestSkill, upsertSkill, computeSignature, recordSkillFail } from './skill-memory'
 import { buildUserPrompt, SYSTEM_PROMPT } from './prompts'
+import { logAudit } from '../db/audit-store'
 import type { AgentGoalResult, AgentStep, PageState } from './types'
 import { randomDelay } from '../antiBot'
 
@@ -36,20 +37,43 @@ export interface ReactLoopOptions {
 function verifyGoal(goal: string, _before: PageState, after: PageState): boolean {
   switch (goal) {
     case 'open_detail':
-      // 新弹窗出现 或 沟通/收藏按钮出现
+      // 详情弹窗/详情面板出现：新弹窗、沟通/收藏/投递按钮、或职位描述区域
       return after.dialogs.length > 0
         || after.buttons.some(b => b.text.includes('沟通') || b.text.includes('收藏') || b.text.includes('投递'))
+        || after.keyTexts.some(t => t.includes('职位描述') || t.includes('公司介绍') || t.includes('岗位要求'))
     case 'click_chat':
-      // 输入框出现 或 新弹窗
+      // 沟通已发起：输入框出现、新弹窗、或成功提示
       return after.inputs.length > 0
         || after.dialogs.length > 0
+        || after.keyTexts.some(t => t.includes('打招呼') || t.includes('立即沟通') || t.includes('已投递') || t.includes('已打招呼'))
     case 'send_greeting':
-      // 弹窗消失 或 成功文本出现
-      return after.keyTexts.some(t => t.includes('发送成功') || t.includes('已发送') || t.includes('投递成功'))
+      // 弹窗消失 / 成功文本出现
+      return after.keyTexts.some(t => t.includes('发送成功') || t.includes('已发送') || t.includes('投递成功') || t.includes('期待您的回复'))
         || (after.inputs.length === 0 && after.dialogs.length === 0)
     default:
+      // 未知目标：以「页面出现任何变化」为弱断言，保守返回 false
       return false
   }
+}
+
+/** E2：目标级审计（闭环验证结果落库，verified 标记验证是否通过） */
+async function verifyAudit(
+  platform: string,
+  goal: string,
+  success: boolean,
+  stateTo: string,
+  error?: string,
+): Promise<void> {
+  await logAudit({
+    source: 'agent',
+    platform,
+    goal,
+    tool: 'goal_verify',
+    result: success ? 'success' : 'failed',
+    error,
+    verified: success,
+    stateTo,
+  })
 }
 
 function parseAIResponse(raw: string): AgentStep | null {
@@ -103,6 +127,7 @@ export async function reactLoop(
           steps: cachedSkill.steps,
           selectorSignature: cachedSkill.selectorSignature,
         })
+        await verifyAudit(platform, goal, true, goal)
         return { success: true, goal, steps: cachedSkill.steps, attempts: 1, usedCachedSkill: true }
       }
       await recordSkillFail(cachedSkill)
@@ -168,6 +193,7 @@ export async function reactLoop(
       if (verifyGoal(goal, pageState, confirmedState)) {
         const sig = computeSignature(pageState)
         await upsertSkill({ platform, pageType, goal, steps: [...steps], selectorSignature: sig })
+        await verifyAudit(platform, goal, true, goal)
         return { success: true, goal, steps, attempts: attempt + 1, usedCachedSkill: false }
       }
       lastError = ''
@@ -187,12 +213,14 @@ export async function reactLoop(
       // 保存 Skill
       const sig = computeSignature(pageState)
       await upsertSkill({ platform, pageType, goal, steps: [...steps], selectorSignature: sig })
+      await verifyAudit(platform, goal, true, goal)
       return { success: true, goal, steps, attempts: attempt + 1, usedCachedSkill: false }
     }
 
     lastError = ''
   }
 
+  await verifyAudit(platform, goal, false, 'failed', lastError || '已达最大尝试次数')
   return {
     success: false,
     goal,

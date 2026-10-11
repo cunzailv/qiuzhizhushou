@@ -5,6 +5,8 @@ export { findBestSkill, upsertSkill, computeSignature, recordSkillFail } from '.
 export { registerTool, getTool, listTools, actionToToolCall } from './tool-registry'
 export { decidePermission } from './permission'
 export type { PermissionLevel, PermissionDecision } from './permission'
+export { transition, isTerminal, isSuccess, recordMachineTransition, goalResultToEvent } from './apply-state-machine'
+export type { ApplyState, ApplyEvent, MachineRecord } from './apply-state-machine'
 export type {
   PageState, ButtonInfo, InputInfo, DialogInfo,
   AgentAction, AgentStep, AgentGoalResult, AgentSkill,

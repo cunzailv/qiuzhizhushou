@@ -4,7 +4,7 @@
 
 import { db } from './index'
 
-export type AuditResult = 'success' | 'failed' | 'confirm_wait' | 'denied'
+export type AuditResult = 'success' | 'failed' | 'confirm_wait' | 'denied' | 'skipped'
 
 export interface AuditRecord {
   id: string
@@ -54,7 +54,7 @@ export async function getAuditLogs(
 
 export async function countAuditByResult(): Promise<Record<AuditResult, number>> {
   const rows = await db.auditLogs.toArray()
-  const count: Record<AuditResult, number> = { success: 0, failed: 0, confirm_wait: 0, denied: 0 }
+  const count: Record<AuditResult, number> = { success: 0, failed: 0, confirm_wait: 0, denied: 0, skipped: 0 }
   for (const r of rows) count[r.result] = (count[r.result] ?? 0) + 1
   return count
 }
