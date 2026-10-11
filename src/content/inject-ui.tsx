@@ -349,7 +349,7 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
   }
 
   const progress = stats && stats.total > 0 ? (stats.processed / stats.total * 100) : 0
-  const progressColor = status === 'done' ? '#10B981' : progress > 0 ? '#FB923C' : '#47476B'
+  const progressColor = status === 'done' ? '#10B981' : progress > 0 ? '#FB923C' : '#9CA3AF'
 
   // Lock the delivery-mode / scoring toggles while a run is in progress — the
   // running loop has already captured its mode & filters, so mid-run changes
@@ -420,7 +420,7 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
       <button class="debug-btn" id="btn-copy-card" title="复制首张岗位卡片HTML，用于排查公司名/职位描述提取">🐞 复制卡片HTML</button>
     </div>
     ${matchResults && matchResults.length > 0 ? buildMatchResults(matchResults) : ''}
-    <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.06);font-size:9px;color:#5B5B7D;">
+    <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(0,0,0,0.06);font-size:9px;color:#6B7280;">
       平台:${currentPlatformName} | 聊天页:${content.isChatPage ? '是' : '否'} | 状态:${status}
     </div>
   `
@@ -570,7 +570,7 @@ export function showPanelToast(host: HTMLElement, message: string, type: 'succes
     left: 12px;
     right: 12px;
     padding: 10px 14px;
-    background: rgba(15,15,26,0.98);
+    background: rgba(255,255,255,0.98);
     border: 1px solid ${colors[type]}40;
     border-radius: 10px;
     color: ${colors[type]};
@@ -602,12 +602,12 @@ function getStyles(): string {
     }
 
     .panel {
-      background: rgba(15, 15, 26, 0.97);
+      background: rgba(255, 255, 255, 0.97);
       backdrop-filter: blur(24px);
       -webkit-backdrop-filter: blur(24px);
       border: 1px solid rgba(249, 115, 22, 0.15);
       border-radius: 16px;
-      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 60px rgba(249, 115, 22, 0.08);
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.18), 0 0 60px rgba(249, 115, 22, 0.1);
       overflow: hidden;
       width: 320px;
       max-width: calc(100vw - 16px);
@@ -677,7 +677,7 @@ function getStyles(): string {
       gap: 4px;
       padding: 8px 14px;
       background: rgba(249, 115, 22, 0.06);
-      border-bottom: 1px solid rgba(255,255,255,0.04);
+      border-bottom: 1px solid rgba(0,0,0,0.06);
       min-height: 0;
     }
     .filter-tag {
@@ -691,14 +691,14 @@ function getStyles(): string {
       max-width: 140px;
       overflow: hidden;
       text-overflow: ellipsis;
-      background: rgba(255,255,255,0.06);
-      color: #A1A1C0;
-      border: 1px solid rgba(255,255,255,0.06);
+      background: rgba(0,0,0,0.04);
+      color: #4B5563;
+      border: 1px solid rgba(0,0,0,0.08);
     }
-    .filter-tag-title { border-color: rgba(249,115,22,0.3); color: #FDBA74; }
-    .filter-tag-loc { border-color: rgba(16,185,129,0.2); color: #6EE7B7; }
-    .filter-tag-salary { border-color: rgba(245,158,11,0.3); color: #FCD34D; }
-    .filter-tag-exclude { border-color: rgba(239,68,68,0.2); color: #FCA5A5; }
+    .filter-tag-title { border-color: rgba(249,115,22,0.3); color: #EA580C; }
+    .filter-tag-loc { border-color: rgba(16,185,129,0.2); color: #059669; }
+    .filter-tag-salary { border-color: rgba(245,158,11,0.3); color: #D97706; }
+    .filter-tag-exclude { border-color: rgba(239,68,68,0.2); color: #DC2626; }
     .filter-tag-score { border-color: rgba(16,185,129,0.3); color: #10B981; }
 
     /* Body */
@@ -709,26 +709,26 @@ function getStyles(): string {
       flex: 1 1 auto;
       overflow-y: auto;
       scrollbar-width: thin;
-      scrollbar-color: rgba(255,255,255,0.1) transparent;
+      scrollbar-color: rgba(0,0,0,0.15) transparent;
     }
     .panel-body::-webkit-scrollbar { width: 4px; }
-    .panel-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+    .panel-body::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 2px; }
 
     .stat-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
       padding: 6px 0;
-      border-bottom: 1px solid rgba(255,255,255,0.03);
+      border-bottom: 1px solid rgba(0,0,0,0.05);
     }
-    .stat-label { color: #7B7BA0; font-size: 11px; }
+    .stat-label { color: #6B7280; font-size: 11px; }
     .stat-value, .stat-value-success { font-size: 13px; font-weight: 700; }
     .stat-value { color: #FB923C; }
     .stat-value-success { color: #10B981; }
 
     .panel-message {
       padding: 8px 0;
-      color: #A1A1C0;
+      color: #4B5563;
       font-size: 11px;
       line-height: 1.4;
     }
@@ -736,7 +736,7 @@ function getStyles(): string {
     .progress-bar {
       width: 100%;
       height: 4px;
-      background: rgba(255,255,255,0.05);
+      background: rgba(0,0,0,0.06);
       border-radius: 2px;
       overflow: hidden;
       margin: 6px 0;
@@ -749,7 +749,7 @@ function getStyles(): string {
     .mode-toggle {
       display: flex;
       gap: 4px;
-      background: rgba(255,255,255,0.04);
+      background: rgba(0,0,0,0.05);
       padding: 3px;
       border-radius: 10px;
       margin: 8px 0;
@@ -763,15 +763,15 @@ function getStyles(): string {
       font-weight: 500;
       cursor: pointer;
       background: transparent;
-      color: #6B6B8D;
+      color: #6B7280;
       transition: all 0.2s;
       white-space: nowrap;
     }
     .mode-btn.active {
       background: rgba(249,115,22,0.2);
-      color: #FDBA74;
+      color: #EA580C;
     }
-    .mode-btn:hover:not(.active) { color: #A1A1C0; }
+    .mode-btn:hover:not(.active) { color: #4B5563; }
 
     .score-toggle {
       display: flex;
@@ -779,7 +779,7 @@ function getStyles(): string {
       padding: 3px;
       margin: -2px 0 8px;
       border-radius: 10px;
-      background: rgba(255,255,255,0.04);
+      background: rgba(0,0,0,0.05);
     }
     .score-btn {
       flex: 1;
@@ -787,18 +787,18 @@ function getStyles(): string {
       border: 1px solid transparent;
       border-radius: 8px;
       background: transparent;
-      color: #6B6B8D;
+      color: #6B7280;
       font-size: 11px;
       cursor: pointer;
       transition: all 0.2s;
     }
     .score-btn.active {
-      color: #FCD34D;
+      color: #D97706;
       border-color: rgba(245,158,11,0.25);
       background: rgba(245,158,11,0.1);
     }
     .score-btn.active.direct {
-      color: #6EE7B7;
+      color: #059669;
       border-color: rgba(16,185,129,0.25);
       background: rgba(16,185,129,0.1);
     }
@@ -811,7 +811,7 @@ function getStyles(): string {
       padding: 3px;
       margin: -2px 0 8px;
       border-radius: 10px;
-      background: rgba(255,255,255,0.04);
+      background: rgba(0,0,0,0.05);
     }
     .resume-btn {
       flex: 1;
@@ -819,13 +819,13 @@ function getStyles(): string {
       border: 1px solid transparent;
       border-radius: 8px;
       background: transparent;
-      color: #6B6B8D;
+      color: #6B7280;
       font-size: 11px;
       cursor: pointer;
       transition: all 0.2s;
     }
     .resume-btn.active {
-      color: #6EE7B7;
+      color: #059669;
       border-color: rgba(16,185,129,0.25);
       background: rgba(16,185,129,0.1);
     }
@@ -877,23 +877,23 @@ function getStyles(): string {
     }
     .debug-btn {
       background: transparent;
-      border: 1px solid rgba(255,255,255,0.08);
-      color: #6B6B8D;
+      border: 1px solid rgba(0,0,0,0.12);
+      color: #6B7280;
       font-size: 10px;
       padding: 4px 8px;
       border-radius: 8px;
       cursor: pointer;
       transition: all 0.2s;
     }
-    .debug-btn:hover { color: #A1A1C0; border-color: rgba(255,255,255,0.18); }
+    .debug-btn:hover { color: #4B5563; border-color: rgba(0,0,0,0.25); }
 
     .match-section {
       margin-top: 12px;
       padding-top: 8px;
-      border-top: 1px solid rgba(255,255,255,0.05);
+      border-top: 1px solid rgba(0,0,0,0.06);
     }
     .match-header {
-      color: #7B7BA0;
+      color: #6B7280;
       font-size: 10px;
       font-weight: 600;
       margin-bottom: 6px;
@@ -915,7 +915,7 @@ function getStyles(): string {
       gap: 1px;
     }
     .match-title {
-      color: #E2E2F0;
+      color: #111827;
       font-size: 11px;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -923,7 +923,7 @@ function getStyles(): string {
       min-width: 0;
     }
     .match-company {
-      color: #7B7BA0;
+      color: #6B7280;
       font-size: 10px;
       overflow: hidden;
       text-overflow: ellipsis;
