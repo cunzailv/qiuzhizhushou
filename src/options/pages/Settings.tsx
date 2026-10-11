@@ -20,6 +20,8 @@ export default function Settings() {
   const [customModels, setCustomModels] = useState<ModelPreset[]>([])
   const [showAddForm, setShowAddForm] = useState(false)
   const [newModel, setNewModel] = useState({ name: '', provider: '', baseUrl: '', modelName: '' })
+  const [permissionApply, setPermissionApply] = useState<'auto' | 'confirm' | 'denied'>('confirm')
+  const [permissionSend, setPermissionSend] = useState<'auto' | 'confirm' | 'denied'>('confirm')
 
   const allModels = [...BUILTIN_MODELS, ...customModels]
   const selectedPreset = allModels.find(m => m.id === settings.modelPreset)
@@ -41,8 +43,19 @@ export default function Settings() {
     setLocalSettings({ ...DEFAULT_SETTINGS, ...all } as PluginSettings)
     const override = await getSetting<string>('platformOverride', 'auto')
     setPlatformOverride(override)
+    const pa = await getSetting<'auto' | 'confirm' | 'denied'>('permission_apply', 'confirm')
+    setPermissionApply(pa)
+    const ps = await getSetting<'auto' | 'confirm' | 'denied'>('permission_send', 'confirm')
+    setPermissionSend(ps)
     const cm = await getCustomModels()
     setCustomModels(cm)
+  }
+
+  async function setPermissionLevel(key: 'permission_apply' | 'permission_send', level: 'auto' | 'confirm' | 'denied') {
+    if (key === 'permission_apply') setPermissionApply(level)
+    else setPermissionSend(level)
+    await setSetting(key, level)
+    showToast(`AI 动作权限已更新：${level === 'auto' ? '自动执行' : level === 'confirm' ? '需确认' : '禁止'}`, 'success')
   }
 
   async function handlePlatformOverrideChange(value: string) {
@@ -456,6 +469,57 @@ export default function Settings() {
               启用 AI 评分筛选（关闭后「一键沟通」不评分、直接沟通）
             </span>
           </label>
+        </div>
+      </Card>
+
+      {/* AI 动作权限（E3：权限三档） */}
+      <Card>
+        <div className="flex items-center gap-2 mb-1">
+          <Shield className="w-5 h-5 text-primary" />
+          <span className="font-semibold text-text-primary">AI 动作权限</span>
+        </div>
+        <p className="text-xs text-text-muted mb-4">Harness 权限三档：自动执行 / 需确认 / 禁止。投递与发送类动作默认需确认。</p>
+
+        <div className="space-y-4">
+          <div>
+            <label className="text-xs text-text-muted mb-2 block">投递 / 申请动作</label>
+            <div className="flex gap-2">
+              {(['auto', 'confirm', 'denied'] as const).map((level) => (
+                <button
+                  key={level}
+                  onClick={() => { setPermissionLevel('permission_apply', level) }}
+                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                    permissionApply === level
+                      ? 'bg-primary/20 text-primary-light ring-1 ring-primary/30'
+                      : 'bg-surface-darkest text-text-muted'
+                  }`}
+                >
+                  {level === 'auto' ? '自动执行' : level === 'confirm' ? '需确认' : '禁止'}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-text-muted mt-1.5">设为「自动执行」后，AI 发起的投递/申请将不再弹确认卡片。</p>
+          </div>
+
+          <div>
+            <label className="text-xs text-text-muted mb-2 block">发送消息动作</label>
+            <div className="flex gap-2">
+              {(['auto', 'confirm', 'denied'] as const).map((level) => (
+                <button
+                  key={level}
+                  onClick={() => { setPermissionLevel('permission_send', level) }}
+                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                    permissionSend === level
+                      ? 'bg-primary/20 text-primary-light ring-1 ring-primary/30'
+                      : 'bg-surface-darkest text-text-muted'
+                  }`}
+                >
+                  {level === 'auto' ? '自动执行' : level === 'confirm' ? '需确认' : '禁止'}
+                </button>
+              ))}
+            </div>
+            <p className="text-xs text-text-muted mt-1.5">发送打招呼/消息时的确认策略。</p>
+          </div>
         </div>
       </Card>
 

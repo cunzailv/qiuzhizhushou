@@ -815,6 +815,19 @@ async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolea
     return false
   }
   await addSharedAppliedJobId(job.id)
+  // E4：投递成功后更新职业状态记忆（画像快照 + 差距沉淀）
+  try {
+    const { recordCareerMatch, absorbGapSuggestions } = await import('../shared/db/career-store')
+    await recordCareerMatch({
+      overallScore: match.score, recommendation: match.recommendation,
+      jobTitle: job.title, jobCompany: job.companyName,
+    })
+    if (match.skillGap && match.skillGap.length > 0) {
+      await absorbGapSuggestions(match.skillGap.slice(0, 3))
+    }
+  } catch (err: any) {
+    logWarn(MOD, 'agentApplyToJob', `Career memory update failed: ${err?.message}`)
+  }
   log(MOD, 'agentApplyToJob', `Done: ${job.title}`)
   return true
 }
