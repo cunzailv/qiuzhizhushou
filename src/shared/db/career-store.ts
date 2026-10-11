@@ -111,3 +111,16 @@ export async function absorbGapSuggestions(suggestions: string[]): Promise<Caree
   }
   return getCareerProfile()
 }
+
+// ─── G1 · 记忆中心：职业画像清理 ───
+
+/** 清除职业画像记忆（恢复空画像） */
+export async function clearCareerProfile(): Promise<void> {
+  await db.careerProfiles.delete('default')
+}
+
+/** 获取最近一次画像写入时间（记忆中心总览用） */
+export async function getCareerUpdatedAt(): Promise<string | undefined> {
+  const profile = await db.careerProfiles.get('default')
+  return profile?.updatedAt
+}

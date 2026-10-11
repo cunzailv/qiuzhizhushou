@@ -109,3 +109,40 @@ export async function clearFollowUpsFor(applicationId: string): Promise<void> {
   const existing = await db.followUps.where('applicationId').equals(applicationId).toArray()
   for (const item of existing) await db.followUps.delete(item.id)
 }
+
+// ─── G1 · 记忆中心管理接口 ───
+
+/** 全部公司记忆（按更新时间倒序） */
+export async function listCompanyMemories(): Promise<CompanyMemory[]> {
+  return db.companyMemories.orderBy('updatedAt').reverse().toArray()
+}
+
+/** 删除单条公司记忆 */
+export async function deleteCompanyMemory(id: string): Promise<void> {
+  await db.companyMemories.delete(id)
+}
+
+/** 清空公司记忆 */
+export async function clearCompanyMemories(): Promise<void> {
+  await db.companyMemories.clear()
+}
+
+/** 全部决策留痕（按时间倒序） */
+export async function listDecisionLogs(): Promise<DecisionLog[]> {
+  return db.decisionLogs.orderBy('createdAt').reverse().toArray()
+}
+
+/** 清空决策留痕 */
+export async function clearDecisionLogs(): Promise<void> {
+  await db.decisionLogs.clear()
+}
+
+/** 全部跟进建议（含已处理，按时间倒序） */
+export async function listFollowUps(): Promise<FollowUpSuggestion[]> {
+  return db.followUps.orderBy('createdAt').reverse().toArray()
+}
+
+/** 清空跟进建议 */
+export async function clearFollowUps(): Promise<void> {
+  await db.followUps.clear()
+}

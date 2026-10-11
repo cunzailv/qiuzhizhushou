@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useState } from 'react'
 import {
-  LayoutDashboard, CalendarDays, Ban, Download, Settings2, Activity, Bot,
+  LayoutDashboard, CalendarDays, Ban, Download, Settings2, Activity, Bot, Brain, Send, FileText,
 } from 'lucide-react'
 import logoUrl from '../assets/logo-transparent.png'
 
@@ -16,11 +16,17 @@ const Blacklist = lazy(() => import('./pages/Blacklist'))
 const Export = lazy(() => import('./pages/Export'))
 const Audit = lazy(() => import('./pages/Audit'))
 const Agent = lazy(() => import('./pages/Agent'))
+const Memory = lazy(() => import('./pages/Memory'))
+const Applications = lazy(() => import('./pages/Applications'))
+const Resumes = lazy(() => import('./pages/Resumes'))
 const Settings = lazy(() => import('./pages/Settings'))
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'dashboard', label: '仪表盘', icon: <LayoutDashboard className="w-5 h-5" /> },
   { id: 'calendar', label: '面试日历', icon: <CalendarDays className="w-5 h-5" /> },
+  { id: 'applications', label: '投递记录', icon: <Send className="w-5 h-5" /> },
+  { id: 'memory', label: '记忆中心', icon: <Brain className="w-5 h-5" /> },
+  { id: 'resumes', label: '简历管理', icon: <FileText className="w-5 h-5" /> },
   { id: 'blacklist', label: '黑名单', icon: <Ban className="w-5 h-5" /> },
   { id: 'audit', label: '审计中心', icon: <Activity className="w-5 h-5" /> },
   { id: 'agent', label: '智能体', icon: <Bot className="w-5 h-5" /> },
@@ -82,6 +88,9 @@ export default function App() {
           {activeNav === 'blacklist' && <Blacklist />}
           {activeNav === 'audit' && <Audit />}
           {activeNav === 'agent' && <Agent />}
+          {activeNav === 'memory' && <Memory />}
+          {activeNav === 'applications' && <Applications />}
+          {activeNav === 'resumes' && <Resumes />}
           {activeNav === 'export' && <Export />}
           {activeNav === 'settings' && <Settings />}
         </Suspense>
