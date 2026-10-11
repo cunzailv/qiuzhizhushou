@@ -44,6 +44,25 @@ export interface MatchAnalysisRecord {
   createdAt: string
 }
 
+/** H3 · 投递流程运行记录（状态机持久化） */
+export interface ApplyRunRecord {
+  jobId: string
+  state: string
+  /** 运行上下文快照（平台/岗位/简历等，恢复用） */
+  context?: Record<string, unknown>
+  updatedAt: string
+}
+
+/** H5 · 错误日志记录 */
+export interface ErrorRecord {
+  id: string
+  createdAt: string
+  source: string
+  message: string
+  stack?: string
+  context?: string
+}
+
 export class BossZhipinDB extends Dexie {
   resumes!: Table<Resume, string>
   applications!: Table<Application, string>
@@ -57,6 +76,8 @@ export class BossZhipinDB extends Dexie {
   followUps!: Table<FollowUpSuggestion, string>
   auditLogs!: Table<AuditRecord, string>
   careerProfiles!: Table<CareerProfile, string>
+  applyRuns!: Table<ApplyRunRecord, string>
+  errors!: Table<ErrorRecord, string>
 
   constructor() {
     super('BossZhipinAssistant')
@@ -98,6 +119,11 @@ export class BossZhipinDB extends Dexie {
         .modify((skill: AgentSkill) => {
           if (skill.enabled === undefined) skill.enabled = true
         })
+    })
+
+    this.version(7).stores({
+      applyRuns: 'jobId, state, updatedAt',
+      errors: 'id, createdAt, source, message',
     })
   }
 }

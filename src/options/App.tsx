@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useState } from 'react'
+import React, { Suspense, lazy, useState, useEffect } from 'react'
 import {
   LayoutDashboard, CalendarDays, Ban, Download, Settings2, Activity, Bot, Brain, Send, FileText,
 } from 'lucide-react'
@@ -36,6 +36,11 @@ const NAV_ITEMS: NavItem[] = [
 
 export default function App() {
   const [activeNav, setActiveNav] = useState('dashboard')
+
+  // H5：后台安装全局错误捕获
+  useEffect(() => {
+    void import('../shared/db/error-store').then((m) => m.installGlobalErrorCapture()).catch(() => undefined)
+  }, [])
 
   return (
     <div className="flex h-screen bg-surface-darkest">

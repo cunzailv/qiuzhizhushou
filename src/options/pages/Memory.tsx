@@ -8,6 +8,7 @@ import {
   listFollowUps, clearFollowUps,
 } from '../../shared/db/butler-store'
 import { getAllMatchAnalyses, deleteMatchAnalysis, deleteMatchAnalysesByResume } from '../../shared/db/match-analysis-store'
+import { maskDeep } from '../../shared/security/mask'
 import { Trash2, Download, Brain, Building2, GitBranch, BellRing, Target } from 'lucide-react'
 
 function formatTime(t?: string | number): string {
@@ -94,13 +95,13 @@ export default function Memory() {
   }
 
   function exportJson(kind: string, rows: unknown[]) {
-    download(`memory-${kind}.json`, JSON.stringify(rows, null, 2))
-    showToast('已导出 JSON')
+    download(`memory-${kind}.json`, JSON.stringify(maskDeep(rows), null, 2))
+    showToast('已导出 JSON（已脱敏）')
   }
 
   function exportCsv(kind: string, rows: Record<string, unknown>[]) {
-    download(`memory-${kind}.csv`, toCsv(rows), 'text/csv')
-    showToast('已导出 CSV')
+    download(`memory-${kind}.csv`, toCsv(maskDeep(rows)), 'text/csv')
+    showToast('已导出 CSV（已脱敏）')
   }
 
   const summary: Array<{ label: string; count: number; icon: React.ReactNode; updated: string }> = [

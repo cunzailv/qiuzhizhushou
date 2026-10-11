@@ -4,6 +4,7 @@
 // 后台「职业状态看板」消费该表；投递/面试结果回流时自动更新。
 
 import { db } from './index'
+import { encryptText, decryptText } from '../security/vault'
 
 export interface CareerSkill {
   name: string
@@ -58,9 +59,20 @@ const DEFAULT_PROFILE: CareerProfile = {
 export async function getCareerProfile(): Promise<CareerProfile> {
   try {
     const existing = await db.careerProfiles.get('default')
-    if (existing) return existing
-    await db.careerProfiles.put(DEFAULT_PROFILE)
-    return DEFAULT_PROFILE
+    if (!existing) {
+      await db.careerProfiles.put(DEFAULT_PROFILE)
+      return DEFAULT_PROFILE
+    }
+    // H1：画像整体加密存 payload；旧数据（无 payload）透传
+    const stored = existing as CareerProfile & { payload?: string }
+    if (stored.payload) {
+      const plain = await decryptText(stored.payload)
+      const parsed = JSON.parse(plain)
+      if (parsed && typeof parsed === 'object' && Array.isArray(parsed.skills)) {
+        return { ...DEFAULT_PROFILE, ...parsed, id: 'default', updatedAt: existing.updatedAt ?? parsed.updatedAt }
+      }
+    }
+    return existing
   } catch {
     // 页面域 DB 不可用（content script）时返回默认快照
     return DEFAULT_PROFILE
@@ -76,7 +88,9 @@ export async function updateCareerProfile(patch: Partial<Omit<CareerProfile, 'id
     updatedAt: new Date().toISOString(),
   }
   try {
-    await db.careerProfiles.put(next)
+    // H1：整体 JSON 加密后写入 payload 字段（旧字段不再维护，读取统一走解密）
+    const payload = await encryptText(JSON.stringify(next))
+    await db.careerProfiles.put({ id: 'default', updatedAt: next.updatedAt, payload } as unknown as CareerProfile)
   } catch {
     // 忽略页面域写入失败
   }

@@ -8,7 +8,7 @@ import type { ModelPreset } from '../../shared/ai'
 import type { PluginSettings } from '../../shared/types/settings'
 import { DEFAULT_SETTINGS } from '../../shared/types/settings'
 import { getPlatformsMeta } from '../../shared/platform'
-import { Key, Zap, Shield, ChevronDown, ExternalLink, AlertTriangle, Globe, Plus, X } from 'lucide-react'
+import { Key, Zap, Shield, ChevronDown, ExternalLink, AlertTriangle, Globe, Plus, X, Bug, Trash2 } from 'lucide-react'
 
 export default function Settings() {
   const [settings, setLocalSettings] = useState<PluginSettings>(DEFAULT_SETTINGS)
@@ -535,7 +535,77 @@ export default function Settings() {
         </div>
       </div>
 
+      {/* H5：错误日志 */}
+      <ErrorLogCard />
+
       <Toast {...toast} onClose={() => setToast({ ...toast, visible: false })} />
     </div>
+  )
+}
+
+/** H5 · 本地错误日志查看（全局捕获 + AI 失败点） */
+function ErrorLogCard() {
+  const [errors, setErrors] = useState<Array<{ id: string; createdAt: string; source: string; message: string; stack?: string }>>([])
+  const [expanded, setExpanded] = useState(false)
+
+  async function load() {
+    try {
+      const { listErrors } = await import('../../shared/db/error-store')
+      setErrors(await listErrors(30))
+    } catch {
+      // ignore
+    }
+  }
+
+  useEffect(() => {
+    void load()
+  }, [])
+
+  async function handleClear() {
+    if (!confirm('确认清空全部错误日志？')) return
+    try {
+      const { clearErrors } = await import('../../shared/db/error-store')
+      await clearErrors()
+      await load()
+    } catch {
+      // ignore
+    }
+  }
+
+  return (
+    <Card>
+      <div className="flex items-center justify-between mb-3">
+        <div className="flex items-center gap-2">
+          <Bug className="w-5 h-5 text-primary-light" />
+          <span className="font-semibold text-text-primary">错误日志（{errors.length}）</span>
+          <span className="text-[11px] text-text-muted">全局捕获 + AI 失败点自动记录</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setExpanded(!expanded)} className="px-2.5 py-1 rounded-lg bg-black/5 text-text-muted text-xs hover:text-text-primary transition-colors">
+            {expanded ? '收起' : '展开'}
+          </button>
+          <button onClick={handleClear} className="px-2.5 py-1 rounded-lg bg-black/5 text-text-muted text-xs hover:text-red-400 transition-colors">
+            <Trash2 className="w-3 h-3 inline mr-1" />
+            清空
+          </button>
+        </div>
+      </div>
+      {errors.length === 0 ? (
+        <p className="text-sm text-text-muted text-center py-6">暂无错误记录</p>
+      ) : (
+        <div className="space-y-2 max-h-72 overflow-y-auto">
+          {errors.map((e) => (
+            <div key={e.id} className="rounded-xl border border-black/10 bg-surface-darkest p-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-text-primary">{e.source}</span>
+                <span className="text-[11px] text-text-muted shrink-0">{e.createdAt}</span>
+              </div>
+              <p className="text-xs text-text-secondary mt-1 break-all">{e.message}</p>
+              {expanded && e.stack && <pre className="text-[10px] text-text-muted mt-1 whitespace-pre-wrap break-all">{e.stack}</pre>}
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
   )
 }

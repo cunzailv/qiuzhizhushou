@@ -18,7 +18,7 @@ import { createFloatingPanel, updatePanelContent, showPanelToast } from './injec
 import { randomDelay, scanRisk, checkDailyLimit, incrementCounter } from '../shared/antiBot'
 import { matchResumeToJob } from '../shared/ai'
 import { reactLoop } from '../shared/agent'
-import { transition, recordMachineTransition, goalResultToEvent, type ApplyState, type ApplyEvent } from '../shared/agent/apply-state-machine'
+import { transition, recordMachineTransition, saveApplyRun, clearApplyRun, goalResultToEvent, type ApplyState, type ApplyEvent } from '../shared/agent/apply-state-machine'
 import { getSharedResumeSummary, getSharedFullResume, getSharedAppliedJobIds, addSharedAppliedJobId } from '../shared/db/shared-state'
 import { log, logWarn, logError, logGroup, logGroupEnd } from '../shared/utils/logger'
 import { getSetting } from '../shared/db/settings-store'
@@ -700,6 +700,14 @@ async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolea
         stateFrom: machineState, stateTo: next, eventType: event.type,
         verified: extra?.verified, error: extra?.error,
       })
+      // H3：每步迁移落盘，重启后可从非终态恢复
+      await saveApplyRun(job.id, next, {
+        jobTitle: job.title,
+        companyName: job.companyName,
+        platform: platformId,
+        resumeId: defaultResume?.id ?? '',
+        score: match.score,
+      })
       machineState = next
     }
   }
@@ -828,6 +836,7 @@ async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolea
   } catch (err: any) {
     logWarn(MOD, 'agentApplyToJob', `Career memory update failed: ${err?.message}`)
   }
+  await clearApplyRun(job.id)
   log(MOD, 'agentApplyToJob', `Done: ${job.title}`)
   return true
 }

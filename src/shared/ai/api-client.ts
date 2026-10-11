@@ -1,8 +1,22 @@
 import { getSetting } from '../db/settings-store'
 import { getPresetById } from './model-presets'
 import { consumeAiCall } from './ai-budget'
+import { recordError } from '../db/error-store'
 interface ChatCompletionResponse {
   choices: Array<{ message: { content: string } }>
+}
+
+/** H2：瞬时错误指数退避重试（最多 2 次），返回是否需要继续重试 */
+async function shouldRetry(attempt: number, error: unknown): Promise<boolean> {
+  if (attempt >= 2) return false
+  // 网络/超时类错误才重试；HTTP 状态错误不重试（4xx/5xx 通常稳定失败）
+  const name = error instanceof Error ? error.name : ''
+  if (name === 'AbortError' || name === 'TypeError' || name === 'TimeoutError') {
+    const delay = 800 * 2 ** attempt
+    await new Promise((r) => setTimeout(r, delay))
+    return true
+  }
+  return false
 }
 
 /** 根据设置解析最终的 baseUrl 和 modelName（预设优先，自定义覆盖） */
@@ -55,24 +69,42 @@ export async function chatCompletion(
     max_tokens: 1500,
   })
 
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 30000)
+  let response: Response | undefined
+  let lastError: unknown
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // 每次尝试使用新的 AbortController（已 abort 的 signal 不可复用）
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 30000)
+    try {
+      response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body,
+        signal: controller.signal,
+      })
+      clearTimeout(timeout)
+      break
+    } catch (err) {
+      clearTimeout(timeout)
+      lastError = err
+      if (!(await shouldRetry(attempt, err))) break
+    }
+  }
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body,
-    signal: controller.signal,
-  })
-
-  clearTimeout(timeout)
+  if (!response) {
+    const msg = lastError instanceof Error ? lastError.message : String(lastError)
+    console.error(`[AI] 请求失败：${msg}`)
+    void recordError({ source: 'ai.api', message: `chatCompletion 请求失败: ${msg}` })
+    return ''
+  }
 
   if (!response.ok) {
     const errorText = await response.text()
     console.error(`AI API error: ${response.status} - ${errorText}`)
+    void recordError({ source: 'ai.api', message: `chatCompletion HTTP ${response.status}: ${errorText.slice(0, 200)}` })
     return ''
   }
 
@@ -148,11 +180,15 @@ export async function chatCompletionStream(
 
   if (!response.ok) {
     const errorText = await response.text()
+    void recordError({ source: 'ai.api', message: `chatCompletionStream HTTP ${response.status}: ${errorText.slice(0, 200)}` })
     throw new Error(`AI API 错误 (${response.status}): ${errorText.slice(0, 200)}`)
   }
 
   const reader = response.body?.getReader()
-  if (!reader) throw new Error('浏览器不支持流式响应')
+  if (!reader) {
+    void recordError({ source: 'ai.api', message: 'chatCompletionStream 无响应体' })
+    throw new Error('浏览器不支持流式响应')
+  }
 
   const decoder = new TextDecoder()
   let fullText = ''

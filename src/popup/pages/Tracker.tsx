@@ -32,7 +32,17 @@ export default function Tracker() {
   }
 
   async function handleStatusChange(id: string, status: ApplicationStatus) {
+    const app = applications.find((a) => a.id === id)
     await updateApplicationStatus(id, status)
+    // H4：负面结果回流 → 沉淀提升方向（反馈自进化）
+    if (app) {
+      try {
+        const { evolveFromApplication } = await import('../../shared/db/feedback-store')
+        await evolveFromApplication(app, status)
+      } catch {
+        // 反馈沉淀失败不影响状态更新
+      }
+    }
     await loadApplications()
   }
 

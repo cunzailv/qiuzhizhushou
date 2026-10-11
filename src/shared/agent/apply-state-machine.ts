@@ -152,3 +152,61 @@ export function goalResultToEvent(result: AgentGoalResult, fallbackAvailable: bo
         : { type: 'GIVE_UP', reason: result.error || '目标未达成' }
   }
 }
+
+// ─── H3 · 状态机持久化（applyRuns）───
+
+import { db, type ApplyRunRecord } from '../db/index'
+
+/** 保存一次投递流程的运行状态（每步迁移后调用，重启可恢复） */
+export async function saveApplyRun(
+  jobId: string,
+  state: ApplyState,
+  context?: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const record: ApplyRunRecord = {
+      jobId,
+      state,
+      context,
+      updatedAt: new Date().toISOString(),
+    }
+    await db.applyRuns.put(record)
+  } catch {
+    // 页面域 DB 不可用时忽略（不阻塞投递）
+  }
+}
+
+/** 读取未完成的投递流程（非终态），无则返回 undefined */
+export async function loadPendingApplyRun(jobId: string): Promise<ApplyRunRecord | undefined> {
+  try {
+    const run = await db.applyRuns.get(jobId)
+    if (!run) return undefined
+    if (isTerminal(run.state as ApplyState)) {
+      // 终态直接清理，不返回
+      await db.applyRuns.delete(jobId)
+      return undefined
+    }
+    return run
+  } catch {
+    return undefined
+  }
+}
+
+/** 全部未完成投递流程（后台展示/恢复入口用） */
+export async function listPendingApplyRuns(): Promise<ApplyRunRecord[]> {
+  try {
+    const all = await db.applyRuns.toArray()
+    return all.filter((r) => !isTerminal(r.state as ApplyState))
+  } catch {
+    return []
+  }
+}
+
+/** 清理某个 jobId 的流程记录（终态/放弃时调用） */
+export async function clearApplyRun(jobId: string): Promise<void> {
+  try {
+    await db.applyRuns.delete(jobId)
+  } catch {
+    // ignore
+  }
+}

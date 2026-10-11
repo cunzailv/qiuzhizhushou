@@ -33,16 +33,12 @@ export default function Dashboard() {
   }, [])
 
   async function loadData() {
-    const s = await getStats()
-    setStats(s)
-    const apps = await getAllApplications()
-    setRecentApps(apps.slice(0, 10))
-    const resumes = await getAllResumes()
-    setResumeCount(resumes.length)
-    const bl = await getBlacklist()
-    setBlacklistCount(bl.length)
-    const cp = await getCareerProfile()
-    setCareer(cp)
+    // H 层加固：单块读取失败不中断整卡渲染
+    try { const s = await getStats(); setStats(s) } catch { /* ignore */ }
+    try { const apps = await getAllApplications(); setRecentApps(apps.slice(0, 10)) } catch { /* ignore */ }
+    try { const resumes = await getAllResumes(); setResumeCount(resumes.length) } catch { /* ignore */ }
+    try { const bl = await getBlacklist(); setBlacklistCount(bl.length) } catch { /* ignore */ }
+    try { const cp = await getCareerProfile(); setCareer(cp) } catch { /* ignore */ }
   }
 
   const statCards = [
