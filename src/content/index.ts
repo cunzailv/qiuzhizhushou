@@ -45,6 +45,53 @@ let currentFilters: ApplyFilters = { ...DEFAULT_FILTERS }
 let lastRiskWarning = ''
 let liepinResumeMode = false
 
+// E3：权限确认桥（content 侧持有，reactLoop 的 onConfirm 等待用户点击）
+let confirmBridge: { desc: string; resolve: (decision: boolean) => void } | null = null
+
+/** 发起一次用户确认：渲染确认卡片并等待用户决策（超时 30s 默认拒绝） */
+function requestUserConfirm(desc: string): Promise<boolean> {
+  if (!panelHost) return Promise.resolve(false)
+  return new Promise((resolve) => {
+    confirmBridge = { desc, resolve }
+    updatePanelContent(panelHost!, {
+      mode: currentMode,
+      status: 'pause',
+      message: '等待确认...',
+      filters: currentFilters, resumeMode: liepinResumeMode,
+      confirmRequest: { desc },
+    })
+    // 30 秒未操作视为拒绝，避免流程卡死
+    setTimeout(() => {
+      if (confirmBridge) {
+        const bridge = confirmBridge
+        confirmBridge = null
+        updatePanelContent(panelHost!, {
+          mode: currentMode,
+          status: 'applying',
+          message: '⏸ 确认超时，已跳过该动作',
+          filters: currentFilters, resumeMode: liepinResumeMode,
+          confirmRequest: null,
+        })
+        bridge.resolve(false)
+      }
+    }, 30_000)
+  })
+}
+
+function settleConfirm(decision: boolean): void {
+  const bridge = confirmBridge
+  if (!bridge) return
+  confirmBridge = null
+  updatePanelContent(panelHost!, {
+    mode: currentMode,
+    status: 'applying',
+    message: decision ? '✅ 已确认，继续执行' : '✖ 已取消该动作',
+    filters: currentFilters, resumeMode: liepinResumeMode,
+    confirmRequest: null,
+  })
+  bridge.resolve(decision)
+}
+
 // ------ Fetch full resume: try chrome.storage.local first, fallback to background ------
 async function fetchFullResume(): Promise<Resume | undefined> {
   // Try chrome.storage.local first (fast, no message passing)
@@ -176,6 +223,15 @@ window.addEventListener('message', (event) => {
   if (event.source !== window) return
 
   const data = event.data
+  if (data?.type === 'BOSS_ASSISTANT_CONFIRM') {
+    log(MOD, 'panelMessage', `CONFIRM decision=${data.decision}`)
+    settleConfirm(data.decision === true)
+  }
+  if (data?.type === 'BOSS_ASSISTANT_CONFIRM_TEST' && typeof data.desc === 'string' && data.desc.startsWith('TEST:')) {
+    // 测试钩子：仅用于浏览器验收时渲染确认卡片（前缀保护，普通页面无法误触发）
+    log(MOD, 'panelMessage', `CONFIRM_TEST ${data.desc}`)
+    requestUserConfirm(data.desc.slice(5))
+  }
   if (data?.type === 'BOSS_ASSISTANT_START_APPLY') {
     log(MOD, 'panelMessage', `START_APPLY, mode: ${data.mode || currentMode}`)
     startApply(data.mode || currentMode, data.filters || currentFilters)
@@ -658,6 +714,8 @@ async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolea
         message: `🤖 ${thinking}`,
         filters: currentFilters, resumeMode: liepinResumeMode,
       })
+    }, {
+      onConfirm: async (desc) => requestUserConfirm(`AI 即将执行：${desc}`),
     })
     if (!r1.success) {
       logWarn(MOD, 'agentApplyToJob', `Agent failed goal 1: ${r1.error}`)
@@ -700,6 +758,8 @@ async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolea
         message: `🤖 ${thinking}`,
         filters: currentFilters, resumeMode: liepinResumeMode,
       })
+    }, {
+      onConfirm: async (desc) => requestUserConfirm(`AI 即将执行：${desc}`),
     })
     if (!r2.success) {
       logWarn(MOD, 'agentApplyToJob', `Agent failed goal 2: ${r2.error}`)

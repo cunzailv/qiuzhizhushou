@@ -25,6 +25,14 @@ async function think(
   }
 }
 
+export interface ReactLoopOptions {
+  useStreaming?: boolean
+  /** E3：确认回调。高风险动作被权限层拦截时调用；回调返回 true 表示用户已确认（重放），false 跳过 */
+  onConfirm?: (actionDesc: string) => Promise<boolean>
+  /** 测试/调用方显式指定权限覆盖 */
+  permissionOverrides?: { apply?: 'auto' | 'confirm' | 'denied'; send?: 'auto' | 'confirm' | 'denied' }
+}
+
 function verifyGoal(goal: string, _before: PageState, after: PageState): boolean {
   switch (goal) {
     case 'open_detail':
@@ -70,7 +78,7 @@ export async function reactLoop(
   goal: string,
   context: Record<string, string>,
   onThinking?: (text: string) => void,
-  options: { useStreaming?: boolean } = {},
+  options: ReactLoopOptions = {},
 ): Promise<AgentGoalResult> {
   // 1. 查 Skill 缓存
   const cachedSkill = await findBestSkill(platform, pageType, goal)
@@ -82,7 +90,10 @@ export async function reactLoop(
       onThinking?.('使用缓存技能...')
       let allOk = true
       for (const step of cachedSkill.steps) {
-        const res = await executeAction(step.action)
+        // 缓存回放属于受控重放：跳过权限确认，但保留审计
+        const res = await executeAction(step.action, {
+          platform, pageType, goal, skipPermission: true,
+        })
         if (!res.ok) { allOk = false; break }
         await randomDelay(400, 800)
       }
@@ -127,8 +138,41 @@ export async function reactLoop(
       return { success: true, goal, steps, attempts: attempt + 1, usedCachedSkill: false }
     }
 
-    // 执行
-    const result = await executeAction(step.action)
+    // 执行（E3：高风险动作走确认回调；确认后重放，未确认跳过）
+    const result = await executeAction(step.action, {
+      platform, pageType, goal,
+      permissionOverrides: options.permissionOverrides,
+    })
+    if (result.needsConfirm) {
+      const confirmed = options.onConfirm
+        ? await options.onConfirm(`${step.action.type}${step.action.target ? ':' + step.action.target.value : ''}`)
+        : false
+      if (!confirmed) {
+        lastError = '用户未确认高风险动作，跳过'
+        steps.push(step)
+        continue
+      }
+      const replay = await executeAction(step.action, {
+        platform, pageType, goal,
+        permissionOverrides: options.permissionOverrides,
+        confirmed: true,
+      })
+      if (!replay.ok) {
+        lastError = replay.error || '执行失败'
+        steps.push(step)
+        continue
+      }
+      steps.push(step)
+      await randomDelay(500, 1200)
+      const confirmedState = capturePageState(platform, goal, pageType)
+      if (verifyGoal(goal, pageState, confirmedState)) {
+        const sig = computeSignature(pageState)
+        await upsertSkill({ platform, pageType, goal, steps: [...steps], selectorSignature: sig })
+        return { success: true, goal, steps, attempts: attempt + 1, usedCachedSkill: false }
+      }
+      lastError = ''
+      continue
+    }
     if (!result.ok) {
       lastError = result.error || '执行失败'
       steps.push(step)

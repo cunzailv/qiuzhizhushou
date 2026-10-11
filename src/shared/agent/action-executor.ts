@@ -1,127 +1,130 @@
-import type { AgentAction, ActionTarget } from './types'
+// E1+E3 · 工具执行入口（Harness 工具系统 + 权限三档 + 审计）
+// 兼容旧签名 executeAction(action)，内部升级为：
+//   注册表校验 → 权限分档（auto/confirm/denied）→ 执行计时 → 审计落库。
+// confirm 级别不执行，返回 needsConfirm，由 UI 层（浮窗确认卡片）接管。
 
-function findByText(text: string): Element | null {
-  // Exact match first, then includes
-  const all = document.querySelectorAll('button, [role="button"], a, span[class*="btn"]')
-  for (const el of all) {
-    if ((el.textContent || '').replace(/\s+/g, ' ').trim() === text) return el
+import { actionToToolCall, getTool } from './tool-registry'
+import { decidePermission } from './permission'
+import { logAudit } from '../db/audit-store'
+import type { AgentAction } from './types'
+
+export interface ExecuteActionOptions {
+  platform?: string
+  goal?: string
+  pageType?: string
+  /** true 时跳过权限检查（内部/缓存回放场景），默认 false */
+  skipPermission?: boolean
+  /** 权限覆盖（测试或调用方显式指定） */
+  permissionOverrides?: { apply?: 'auto' | 'confirm' | 'denied'; send?: 'auto' | 'confirm' | 'denied' }
+  /** 确认回调：confirm 级别动作由调用方确认后以 true 重放 */
+  confirmed?: boolean
+  /** 是否落审计，默认 true */
+  audit?: boolean
+}
+
+/**
+ * 执行一个 AI 返回的动作。
+ * 返回 needsConfirm=true 表示动作被权限层拦截，等待用户确认。
+ */
+export async function executeAction(
+  action: AgentAction,
+  options: ExecuteActionOptions = {},
+): Promise<{ ok: boolean; error?: string; needsConfirm?: boolean; durationMs?: number }> {
+  const started = Date.now()
+  const ctx = {
+    platform: options.platform || '',
+    goal: options.goal || '',
+    pageType: options.pageType || '',
   }
-  for (const el of all) {
-    if ((el.textContent || '').replace(/\s+/g, ' ').trim().includes(text)) return el
-  }
-  return null
-}
 
-function findByIndex(index: number): Element | null {
-  const all = document.querySelectorAll('button, [role="button"], a[class*="btn"], a.btn')
-  return all[index] || null
-}
-
-function findByCss(selector: string): Element | null {
-  try {
-    return document.querySelector(selector)
-  } catch {
-    return null
-  }
-}
-
-function resolveTarget(target: ActionTarget): Element | null {
-  switch (target.kind) {
-    case 'button_text': return findByText(target.value)
-    case 'button_index': return findByIndex(parseInt(target.value, 10))
-    case 'css_selector': return findByCss(target.value)
-    default: return null
-  }
-}
-
-function getClickable(el: Element): HTMLElement {
-  if (el instanceof HTMLElement && ['BUTTON', 'A'].includes(el.tagName)) return el
-  const parent = el.closest('button, a, [role="button"]') as HTMLElement | null
-  return parent || (el as HTMLElement)
-}
-
-async function clickElement(target: ActionTarget): Promise<boolean> {
-  const el = resolveTarget(target)
-  if (!el) return false
-
-  const clickable = getClickable(el)
-  clickable.scrollIntoView({ block: 'center', behavior: 'instant' })
-  await new Promise(r => setTimeout(r, 300))
-
-  try {
-    clickable.click()
-    clickable.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function typeText(target: ActionTarget, text: string): Promise<boolean> {
-  const el = resolveTarget(target)
-  if (!el || !(el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement)) return false
-
-  el.scrollIntoView({ block: 'center' })
-  el.focus()
-  await new Promise(r => setTimeout(r, 200))
-
-  // React synthetic event bypass
-  const proto = Object.getPrototypeOf(el)
-  const setter = (Object.getOwnPropertyDescriptor(proto, 'value')?.set
-    || Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set) as ((v: string) => void) | undefined
-  if (setter) {
-    setter.call(el, text)
-  } else {
-    ;(el as HTMLInputElement).value = text
-  }
-  el.dispatchEvent(new Event('input', { bubbles: true }))
-  el.dispatchEvent(new Event('change', { bubbles: true }))
-  await new Promise(r => setTimeout(r, 300))
-  return true
-}
-
-/** 执行一个 AI 返回的动作 */
-export async function executeAction(action: AgentAction): Promise<{ ok: boolean; error?: string }> {
-  try {
-    switch (action.type) {
-      case 'click': {
-        if (!action.target) return { ok: false, error: 'click 缺少 target' }
-        const ok = await clickElement(action.target)
-        if (!ok) return { ok: false, error: `未找到目标元素: ${action.target.value}` }
-        return { ok: true }
-      }
-      case 'type': {
-        if (!action.target || !action.text) return { ok: false, error: 'type 缺少 target 或 text' }
-        const ok = await typeText(action.target, action.text)
-        if (!ok) return { ok: false, error: `未找到输入框: ${action.target.value}` }
-        return { ok: true }
-      }
-      case 'wait': {
-        await new Promise(r => setTimeout(r, action.duration || 2000))
-        return { ok: true }
-      }
-      case 'scroll': {
-        window.scrollTo({ top: action.scrollTo === 'top' ? 0 : document.documentElement.scrollHeight, behavior: 'instant' })
-        await new Promise(r => setTimeout(r, 500))
-        return { ok: true }
-      }
-      case 'press_enter': {
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
-        await new Promise(r => setTimeout(r, 500))
-        return { ok: true }
-      }
-      case 'press_escape': {
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-        await new Promise(r => setTimeout(r, 500))
-        return { ok: true }
-      }
-      case 'done': {
-        return { ok: true }
-      }
-      default:
-        return { ok: false, error: `未知动作类型: ${(action as any).type}` }
+  // 1) 兼容层：AgentAction → 工具调用
+  const call = actionToToolCall(action)
+  if (!call) {
+    const msg = `未知动作类型: ${(action as any).type}`
+    if (options.audit !== false) {
+      await logAudit({ source: 'agent', platform: ctx.platform, goal: ctx.goal, result: 'failed', error: msg })
     }
+    return { ok: false, error: msg }
+  }
+
+  const tool = getTool(call.tool)
+  if (!tool) {
+    const msg = `工具未注册: ${call.tool}`
+    if (options.audit !== false) {
+      await logAudit({ source: 'agent', platform: ctx.platform, goal: ctx.goal, result: 'failed', error: msg })
+    }
+    return { ok: false, error: msg }
+  }
+
+  // 2) 参数校验
+  if (tool.validate) {
+    const err = tool.validate(call.payload)
+    if (err) {
+      const msg = `参数校验失败[${call.tool}]: ${err}`
+      if (options.audit !== false) {
+        await logAudit({ source: 'agent', platform: ctx.platform, goal: ctx.goal, tool: call.tool, result: 'failed', error: msg })
+      }
+      return { ok: false, error: msg, durationMs: Date.now() - started }
+    }
+  }
+
+  // 3) 权限分档
+  if (!options.skipPermission) {
+    const decision = await decidePermission(
+      call.tool,
+      {
+        goal: ctx.goal,
+        text: typeof call.payload.text === 'string' ? call.payload.text : undefined,
+        targetValue: typeof call.payload.value === 'string' ? call.payload.value : undefined,
+      },
+      options.permissionOverrides,
+    )
+
+    if (decision.level === 'denied') {
+      if (options.audit !== false) {
+        await logAudit({
+          source: 'agent', platform: ctx.platform, goal: ctx.goal,
+          tool: call.tool, permissionLevel: 'denied', result: 'denied',
+          error: decision.reason, durationMs: Date.now() - started,
+        })
+      }
+      return { ok: false, error: `动作被禁止: ${decision.reason}`, durationMs: Date.now() - started }
+    }
+
+    if (decision.level === 'confirm' && !options.confirmed) {
+      if (options.audit !== false) {
+        await logAudit({
+          source: 'agent', platform: ctx.platform, goal: ctx.goal,
+          tool: call.tool, permissionLevel: 'confirm', result: 'confirm_wait',
+          error: decision.message, durationMs: Date.now() - started,
+        })
+      }
+      return { ok: false, error: decision.message || '需要用户确认', needsConfirm: true, durationMs: Date.now() - started }
+    }
+  }
+
+  // 4) 执行（计时 + 审计）
+  try {
+    const result = await tool.execute(call.payload, ctx)
+    const durationMs = Date.now() - started
+    if (options.audit !== false) {
+      await logAudit({
+        source: 'agent', platform: ctx.platform, goal: ctx.goal,
+        tool: call.tool, permissionLevel: options.skipPermission ? undefined : 'auto',
+        result: result.ok ? 'success' : 'failed',
+        error: result.error, durationMs,
+      })
+    }
+    return { ok: result.ok, error: result.error, durationMs }
   } catch (err: any) {
-    return { ok: false, error: err?.message || '执行失败' }
+    const durationMs = Date.now() - started
+    const msg = err?.message || '执行失败'
+    if (options.audit !== false) {
+      await logAudit({
+        source: 'agent', platform: ctx.platform, goal: ctx.goal,
+        tool: call.tool, result: 'failed', error: msg, durationMs,
+      })
+    }
+    return { ok: false, error: msg, durationMs }
   }
 }

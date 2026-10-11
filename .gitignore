@@ -44,3 +44,6 @@ playwright-report
 
 # Creative design process files
 .creative-design
+
+# lark-doc 草稿残留
+draft_*_folder/

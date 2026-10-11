@@ -20,6 +20,8 @@ interface PanelContent {
   resumeMode?: boolean
   pageType?: string
   isChatPage?: boolean
+  /** E3：权限确认请求。非空时渲染确认卡片，等待用户确认/取消 */
+  confirmRequest?: { desc: string } | null
 }
 
 let isMinimized = false
@@ -319,7 +321,7 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
   if (!wrapper) return
 
   const filterBar = shadow.getElementById('filter-bar')
-  const { mode, stats, matchResults, status = 'idle', message, dailyRemaining, filters } = content
+  const { mode, stats, matchResults, status = 'idle', message, dailyRemaining, filters, confirmRequest } = content
   const effectiveFilters: ApplyFilters = { ...DEFAULT_FILTERS, ...filters }
 
   // Sync platform badge (explicit payload wins, else module state)
@@ -404,6 +406,16 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
     ` : ''}
     `}
     <div class="btn-row">
+      ${confirmRequest ? `
+        <div style="width:100%;background:#FFF7ED;border:1px solid #FDBA74;border-radius:10px;padding:10px 12px;">
+          <div style="font-size:12px;font-weight:700;color:#9A3412;margin-bottom:6px;">⚠️ 需要确认</div>
+          <div style="font-size:12px;color:#4B5563;line-height:1.6;margin-bottom:10px;">${confirmRequest.desc}</div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn btn-primary" id="btn-confirm-yes" style="flex:1;">✅ 确认执行</button>
+            <button class="btn" id="btn-confirm-no" style="flex:1;background:#ECEEF2;color:#4B5563;">✖ 取消</button>
+          </div>
+        </div>
+      ` : `
       ${content.isChatPage ? `
         ${status === 'idle' ? `<button class="btn btn-primary" id="btn-send-resumes">📤 批量发简历</button>` : ''}
         ${status === 'applying' ? `<button class="btn btn-danger" id="btn-stop">⏹ 停止</button>` : ''}
@@ -414,6 +426,7 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
         ${status === 'done' ? `<button class="btn btn-primary" id="btn-start">🔄 继续沟通</button>` : ''}
         ${status === 'pause' ? `<button class="btn btn-primary" id="btn-resume">▶ 继续沟通</button>` : ''}
         ${status === 'scanning' || status === 'matching' ? `<button class="btn btn-danger" id="btn-stop">⏹ 停止</button>` : ''}
+      `}
       `}
     </div>
     <div class="debug-row">
@@ -432,6 +445,14 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
   const scoreFilter = shadow.getElementById('score-filter')
   const scoreDirect = shadow.getElementById('score-direct')
   const modeBtns = shadow.querySelectorAll('.mode-btn')
+
+  // E3：确认卡片按钮 → content 侧桥接 resolve
+  shadow.getElementById('btn-confirm-yes')?.addEventListener('click', () => {
+    window.postMessage({ type: 'BOSS_ASSISTANT_CONFIRM', decision: true }, '*')
+  })
+  shadow.getElementById('btn-confirm-no')?.addEventListener('click', () => {
+    window.postMessage({ type: 'BOSS_ASSISTANT_CONFIRM', decision: false }, '*')
+  })
 
   btnStart?.addEventListener('click', () => {
     window.postMessage({

@@ -3,6 +3,8 @@ import type { Resume } from '../types/resume'
 import type { Application } from '../types/application'
 import type { AgentSkill } from '../agent/types'
 import type { CompanyMemory, DecisionLog, FollowUpSuggestion } from '../types/butler'
+import type { AuditRecord } from './audit-store'
+import type { CareerProfile } from './career-store'
 
 export interface InterviewEvent {
   id: string
@@ -53,6 +55,8 @@ export class BossZhipinDB extends Dexie {
   companyMemories!: Table<CompanyMemory, string>
   decisionLogs!: Table<DecisionLog, string>
   followUps!: Table<FollowUpSuggestion, string>
+  auditLogs!: Table<AuditRecord, string>
+  careerProfiles!: Table<CareerProfile, string>
 
   constructor() {
     super('BossZhipinAssistant')
@@ -77,6 +81,11 @@ export class BossZhipinDB extends Dexie {
       companyMemories: 'id, companyName, jobTitle, updatedAt',
       decisionLogs: 'id, source, subject, createdAt',
       followUps: 'id, applicationId, companyName, createdAt, dismissed',
+    })
+
+    this.version(5).stores({
+      auditLogs: 'id, createdAt, source, platform, result',
+      careerProfiles: 'id',
     })
   }
 }
