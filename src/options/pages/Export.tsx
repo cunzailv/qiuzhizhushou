@@ -109,7 +109,7 @@ export default function Export() {
               <button
                 onClick={() => setFilterStatus('all')}
                 className={`px-2 py-1 text-[11px] rounded-lg transition-colors ${
-                  filterStatus === 'all' ? 'bg-primary/20 text-primary-light' : 'bg-white/5 text-text-muted'
+                  filterStatus === 'all' ? 'bg-primary/20 text-primary-light' : 'bg-black/5 text-text-muted'
                 }`}
               >
                 全部 ({applications.length})
@@ -119,7 +119,7 @@ export default function Export() {
                   key={status}
                   onClick={() => setFilterStatus(status)}
                   className={`px-2 py-1 text-[11px] rounded-lg transition-colors ${
-                    filterStatus === status ? 'bg-primary/20 text-primary-light' : 'bg-white/5 text-text-muted'
+                    filterStatus === status ? 'bg-primary/20 text-primary-light' : 'bg-black/5 text-text-muted'
                   }`}
                 >
                   {label} ({applications.filter((a) => a.status === status).length})
@@ -199,7 +199,7 @@ export default function Export() {
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr className="text-text-muted border-b border-white/5">
+                <tr className="text-text-muted border-b border-black/10">
                   <th className="text-left py-2 pr-4">岗位</th>
                   <th className="text-left py-2 pr-4">公司</th>
                   <th className="text-left py-2 pr-4">职位描述</th>
@@ -210,7 +210,7 @@ export default function Export() {
               </thead>
               <tbody>
                 {filtered.slice(0, 20).map((app) => (
-                  <tr key={app.id} className="border-b border-white/5">
+                  <tr key={app.id} className="border-b border-black/10">
                     <td className="py-2 pr-4 text-text-primary">{app.jobTitle}</td>
                     <td className="py-2 pr-4 text-text-secondary">{app.companyName}</td>
                     <td className="py-2 pr-4 text-text-secondary max-w-[220px] truncate" title={app.jobDescription || ''}>

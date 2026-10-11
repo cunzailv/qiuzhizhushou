@@ -353,7 +353,7 @@ export default function Resumes() {
           {resumes.map((resume) => (
             <Card
               key={resume.id}
-              className="flex items-start gap-3 p-3 cursor-pointer hover:bg-white/5"
+              className="flex items-start gap-3 p-3 cursor-pointer hover:bg-black/5"
               onClick={() => setSelectedResume(resume)}
             >
               <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
@@ -408,7 +408,7 @@ export default function Resumes() {
       )}
 
       {/* ====== 岗位匹配分析 ====== */}
-      <div className="border-t border-white/5 pt-4 space-y-3">
+      <div className="border-t border-black/10 pt-4 space-y-3">
         <h2 className="text-lg font-bold gradient-text flex items-center gap-2">
           <Search className="w-4 h-4" />
           岗位匹配分析
@@ -423,7 +423,7 @@ export default function Resumes() {
             <select
               value={matchResumeId}
               onChange={(e) => setMatchResumeId(e.target.value)}
-              className="w-full rounded-xl bg-surface-dark border border-white/5 px-3 py-2 text-sm text-text-primary appearance-none cursor-pointer focus:outline-none focus:border-primary/30"
+              className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary appearance-none cursor-pointer focus:outline-none focus:border-primary/30"
             >
               <option value="">选择要匹配的简历...</option>
               {resumes.map(r => (
@@ -444,7 +444,7 @@ export default function Resumes() {
           value={jdText}
           onChange={(e) => setJdText(e.target.value)}
           rows={5}
-          className="w-full rounded-xl bg-surface-dark border border-white/5 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-primary/30"
+          className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-primary/30"
         />
 
         {/* Buttons */}
@@ -578,7 +578,7 @@ export default function Resumes() {
 
       {/* ====== 分析历史 ====== */}
       {history.length > 0 && (
-        <div className="border-t border-white/5 pt-4 space-y-2">
+        <div className="border-t border-black/10 pt-4 space-y-2">
           <h2 className="text-sm font-bold gradient-text flex items-center gap-2">
             <Clock className="w-3.5 h-3.5" />
             分析历史

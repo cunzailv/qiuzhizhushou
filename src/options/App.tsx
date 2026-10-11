@@ -30,7 +30,7 @@ export default function App() {
   return (
     <div className="flex h-screen bg-surface-darkest">
       {/* Sidebar */}
-      <aside className="w-56 bg-surface-dark/80 border-r border-white/5 flex flex-col p-4 shrink-0">
+      <aside className="w-56 bg-surface-dark/80 border-r border-black/10 flex flex-col p-4 shrink-0">
         {/* Logo */}
         <div className="mb-8 px-2 flex items-center gap-2.5">
           <img
@@ -53,7 +53,7 @@ export default function App() {
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
                 activeNav === item.id
                   ? 'bg-primary/20 text-primary-light shadow-glow'
-                  : 'text-text-secondary hover:text-text-primary hover:bg-white/5'
+                  : 'text-text-secondary hover:text-text-primary hover:bg-black/5'
               }`}
             >
               {item.icon}
@@ -63,7 +63,7 @@ export default function App() {
         </nav>
 
         {/* Footer */}
-        <div className="border-t border-white/5 pt-3 mt-4">
+        <div className="border-t border-black/10 pt-3 mt-4">
           <p className="text-[10px] text-text-muted text-center">
             v1.0.0 · 智能求职助手
           </p>

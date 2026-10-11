@@ -129,7 +129,7 @@ export default function Tracker() {
 
               {/* Expanded Details */}
               {expandedId === app.id && (
-                <div className="mt-3 pt-3 border-t border-white/5 space-y-2">
+                <div className="mt-3 pt-3 border-t border-black/10 space-y-2">
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] text-text-muted">匹配分数：</span>
                     <span className="text-sm font-bold text-primary-light">
@@ -151,7 +151,7 @@ export default function Tracker() {
                         className={`px-2 py-1 text-[10px] rounded-lg transition-colors ${
                           app.status === s
                             ? 'bg-primary/20 text-primary-light'
-                            : 'bg-white/5 text-text-muted hover:text-text-secondary'
+                            : 'bg-black/5 text-text-muted hover:text-text-secondary'
                         }`}
                       >
                         {APPLICATION_STATUS_LABELS[s]}

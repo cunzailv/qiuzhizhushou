@@ -33,8 +33,8 @@ export default function Dashboard() {
   }
 
   const statCards = [
-    { label: '今日投递', value: stats.today, icon: Send, color: '#6366F1' },
-    { label: '总投递数', value: stats.total, icon: TrendingUp, color: '#8B5CF6' },
+    { label: '今日投递', value: stats.today, icon: Send, color: '#F97316' },
+    { label: '总投递数', value: stats.total, icon: TrendingUp, color: '#FB923C' },
     { label: 'HR已读', value: stats.read, icon: Eye, color: '#3B82F6' },
     { label: '面试邀约', value: stats.interview, icon: CalendarCheck, color: '#10B981' },
     { label: '转化率', value: `${stats.passRate}%`, icon: Target, color: '#F59E0B' },

@@ -119,7 +119,7 @@ export default function InterviewCalendar() {
                     className={`aspect-square rounded-lg flex flex-col items-center justify-start p-1 text-sm ${
                       !day ? '' : isToday
                         ? 'bg-primary/20 text-primary-light font-bold'
-                        : 'hover:bg-white/5 text-text-secondary'
+                        : 'hover:bg-black/5 text-text-secondary'
                     } ${dayEvents.length > 0 ? 'cursor-pointer' : ''}`}
                   >
                     {day && (
@@ -178,7 +178,7 @@ export default function InterviewCalendar() {
                     )}
                   </div>
                   {event.notes && (
-                    <p className="text-xs text-text-muted mt-1 border-t border-white/5 pt-1">{event.notes}</p>
+                    <p className="text-xs text-text-muted mt-1 border-t border-black/10 pt-1">{event.notes}</p>
                   )}
                 </Card>
               ))

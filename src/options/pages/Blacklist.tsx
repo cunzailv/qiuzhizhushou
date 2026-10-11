@@ -130,7 +130,7 @@ export default function Blacklist() {
           <Download className="w-3.5 h-3.5" />
           导出CSV
         </Button>
-        <label className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl bg-surface-light text-text-secondary hover:bg-surface-medium border border-white/10 transition-all duration-200 cursor-pointer">
+        <label className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl bg-surface-light text-text-secondary hover:bg-surface-medium border border-black/10 transition-all duration-200 cursor-pointer">
           <Upload className="w-3.5 h-3.5" />
           导入CSV
           <input

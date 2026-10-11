@@ -83,7 +83,7 @@ export default function Butler() {
       </div>
 
       {strategy && (
-        <div className="rounded-xl border border-white/5 bg-white/[0.03] p-3 space-y-2">
+        <div className="rounded-xl border border-black/10 bg-black/[0.03] p-3 space-y-2">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-text-primary">
             <Bot className="w-3.5 h-3.5 text-primary-light" />
             今日沟通策略
@@ -98,16 +98,16 @@ export default function Butler() {
       )}
 
       {review && (
-        <div className="rounded-xl border border-white/5 bg-white/[0.03] p-3 space-y-2">
+        <div className="rounded-xl border border-black/10 bg-black/[0.03] p-3 space-y-2">
           <div className="flex items-center gap-1.5 text-xs font-semibold text-text-primary">
             <BarChart3 className="w-3.5 h-3.5 text-primary-light" />
             周期复盘（{review.period}）
           </div>
           <div className="flex flex-wrap gap-1.5 text-[11px]">
-            <span className="px-2 py-0.5 rounded-full bg-white/[0.05]">投递 {review.total}</span>
-            <span className="px-2 py-0.5 rounded-full bg-white/[0.05]">已读 {review.funnel.read}</span>
-            <span className="px-2 py-0.5 rounded-full bg-white/[0.05]">沟通 {review.funnel.communicating}</span>
-            <span className="px-2 py-0.5 rounded-full bg-white/[0.05]">面试 {review.funnel.interview}</span>
+            <span className="px-2 py-0.5 rounded-full bg-black/[0.05]">投递 {review.total}</span>
+            <span className="px-2 py-0.5 rounded-full bg-black/[0.05]">已读 {review.funnel.read}</span>
+            <span className="px-2 py-0.5 rounded-full bg-black/[0.05]">沟通 {review.funnel.communicating}</span>
+            <span className="px-2 py-0.5 rounded-full bg-black/[0.05]">面试 {review.funnel.interview}</span>
             <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300">回复率 {review.replyRate}%</span>
           </div>
           <ul className="text-[11px] text-text-muted space-y-1">
@@ -119,7 +119,7 @@ export default function Butler() {
         </div>
       )}
 
-      <div className="rounded-xl border border-white/5 bg-white/[0.03] p-3 space-y-2">
+      <div className="rounded-xl border border-black/10 bg-black/[0.03] p-3 space-y-2">
         <div className="flex items-center gap-1.5 text-xs font-semibold text-text-primary">
           <Sparkles className="w-3.5 h-3.5 text-primary-light" />
           跟进建议（投递 N 天未回复，建议+确认）
@@ -128,9 +128,9 @@ export default function Butler() {
           <p className="text-[11px] text-text-muted">暂无待跟进的投递。点击「扫描跟进」检查投递状态。</p>
         ) : (
           followUps.slice(0, 5).map((followUp) => (
-            <div key={followUp.id} className="rounded-lg bg-white/[0.03] border border-white/5 p-2.5 space-y-1.5">
+            <div key={followUp.id} className="rounded-lg bg-black/[0.03] border border-black/10 p-2.5 space-y-1.5">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-medium text-text-normal">
+                <span className="text-xs font-medium text-text-primary">
                   {followUp.companyName} · {followUp.jobTitle}
                 </span>
                 <span className="text-[10px] text-amber-400 whitespace-nowrap">已 {followUp.daysSince} 天未回复</span>
@@ -147,7 +147,7 @@ export default function Butler() {
         )}
       </div>
 
-      <div className="rounded-xl border border-white/5 bg-white/[0.03] p-3 space-y-2">
+      <div className="rounded-xl border border-black/10 bg-black/[0.03] p-3 space-y-2">
         <div className="flex items-center gap-1.5 text-xs font-semibold text-text-primary">
           <Bot className="w-3.5 h-3.5 text-primary-light" />
           最近 AI/Agent 决策留痕

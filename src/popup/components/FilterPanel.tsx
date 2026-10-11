@@ -25,7 +25,7 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
       {/* Collapse toggle */}
       <button
         onClick={onToggleCollapse}
-        className="w-full flex items-center justify-between py-2 px-3 rounded-xl bg-white/[0.03] border border-white/5 hover:border-white/10 transition-colors"
+        className="w-full flex items-center justify-between py-2 px-3 rounded-xl bg-black/[0.03] border border-black/10 hover:border-black/10 transition-colors"
       >
         <div className="flex items-center gap-2">
           <Filter className="w-3.5 h-3.5 text-primary-light" />
@@ -40,7 +40,7 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
       </button>
 
       {!collapsed && (
-        <div className="space-y-2.5 p-3 bg-white/[0.02] rounded-xl border border-white/5">
+        <div className="space-y-2.5 p-3 bg-black/[0.02] rounded-xl border border-black/10">
           {/* Job Title */}
           <FilterField
             icon={<Search className="w-3 h-3 text-primary-light" />}

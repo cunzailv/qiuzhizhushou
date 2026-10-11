@@ -166,12 +166,12 @@ export default function Settings() {
               </button>
 
               {showModelDropdown && (
-                <div className="absolute top-full left-0 right-0 mt-1 p-1 rounded-xl bg-surface-dark border border-white/10 shadow-xl z-50 max-h-[260px] overflow-y-auto">
+                <div className="absolute top-full left-0 right-0 mt-1 p-1 rounded-xl bg-surface-dark border border-black/10 shadow-xl z-50 max-h-[260px] overflow-y-auto">
                   {allModels.map((model) => (
                     <button
                       key={model.id}
                       onClick={() => handleSelectPreset(model.id, model)}
-                      className={`w-full px-3 py-2 rounded-lg text-left transition-colors hover:bg-white/5 ${
+                      className={`w-full px-3 py-2 rounded-lg text-left transition-colors hover:bg-black/5 ${
                         settings.modelPreset === model.id ? 'bg-primary/10' : ''
                       }`}
                     >
@@ -211,7 +211,7 @@ export default function Settings() {
                 添加自定义模型
               </button>
             ) : (
-              <div className="mt-2 p-2 rounded-lg bg-surface-darkest/50 border border-white/5 space-y-1.5">
+              <div className="mt-2 p-2 rounded-lg bg-black/5 border border-black/10 space-y-1.5">
                 <input
                   type="text"
                   value={newModel.name}

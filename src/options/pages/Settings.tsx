@@ -139,7 +139,7 @@ export default function Settings() {
           <select
             value={platformOverride}
             onChange={(e) => handlePlatformOverrideChange(e.target.value)}
-            className="w-full px-3 py-2.5 rounded-xl bg-surface-darkest border border-white/10 text-sm text-text-primary focus:border-primary-light focus:outline-none"
+            className="w-full px-3 py-2.5 rounded-xl bg-surface-darkest border border-black/10 text-sm text-text-primary focus:border-primary-light focus:outline-none"
           >
             <option value="auto">自动识别（按网址）</option>
             {getPlatformsMeta().map((p) => (
@@ -164,7 +164,7 @@ export default function Settings() {
             <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setShowModelDropdown(!showModelDropdown)}
-                className="w-full px-3 py-2.5 rounded-xl bg-surface-darkest border border-white/10 text-left flex items-center justify-between hover:border-white/20 transition-colors"
+                className="w-full px-3 py-2.5 rounded-xl bg-surface-darkest border border-black/10 text-left flex items-center justify-between hover:border-black/20 transition-colors"
               >
                 <div className="flex items-center gap-3">
                   <span className="text-sm font-medium">{selectedPreset?.name || '选择模型'}</span>
@@ -174,12 +174,12 @@ export default function Settings() {
               </button>
 
               {showModelDropdown && (
-                <div className="absolute top-full left-0 right-0 mt-1 p-2 rounded-xl bg-surface-dark border border-white/10 shadow-2xl z-50 max-h-[320px] overflow-y-auto">
+                <div className="absolute top-full left-0 right-0 mt-1 p-2 rounded-xl bg-surface-dark border border-black/10 shadow-2xl z-50 max-h-[320px] overflow-y-auto">
                   {allModels.map((model) => (
                     <button
                       key={model.id}
                       onClick={() => handleSelectPreset(model.id, model)}
-                      className={`w-full px-3 py-2.5 rounded-lg text-left transition-colors hover:bg-white/5 ${
+                      className={`w-full px-3 py-2.5 rounded-lg text-left transition-colors hover:bg-black/5 ${
                         settings.modelPreset === model.id ? 'bg-primary/10 ring-1 ring-primary/30' : ''
                       }`}
                     >
@@ -219,7 +219,7 @@ export default function Settings() {
                 添加自定义模型
               </button>
             ) : (
-              <div className="p-3 rounded-xl bg-surface-darkest/50 border border-white/5 space-y-3">
+              <div className="p-3 rounded-xl bg-black/5 border border-black/10 space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-text-muted mb-1 block">显示名称</label>
@@ -227,7 +227,7 @@ export default function Settings() {
                       type="text"
                       value={newModel.name}
                       onChange={(e) => setNewModel({ ...newModel, name: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-white/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
+                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-black/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
                       placeholder="如 GPT-4o"
                     />
                   </div>
@@ -237,7 +237,7 @@ export default function Settings() {
                       type="text"
                       value={newModel.provider}
                       onChange={(e) => setNewModel({ ...newModel, provider: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-white/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
+                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-black/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
                       placeholder="如 OpenAI"
                     />
                   </div>
@@ -247,7 +247,7 @@ export default function Settings() {
                       type="text"
                       value={newModel.baseUrl}
                       onChange={(e) => setNewModel({ ...newModel, baseUrl: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-white/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
+                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-black/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
                       placeholder="https://api.openai.com/v1"
                     />
                   </div>
@@ -257,7 +257,7 @@ export default function Settings() {
                       type="text"
                       value={newModel.modelName}
                       onChange={(e) => setNewModel({ ...newModel, modelName: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-white/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
+                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-black/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
                       placeholder="gpt-4o"
                     />
                   </div>
@@ -288,7 +288,7 @@ export default function Settings() {
                 type="password"
                 value={settings.apiKey}
                 onChange={(e) => handleSave({ apiKey: e.target.value })}
-                className="flex-1 px-3 py-2.5 rounded-xl bg-surface-darkest border border-white/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
+                className="flex-1 px-3 py-2.5 rounded-xl bg-surface-darkest border border-black/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
                 placeholder={selectedPreset ? `输入 ${selectedPreset.provider} 的 API Key` : '输入 API Key'}
               />
               <Button onClick={handleTestAPI} loading={testing} variant="secondary">
@@ -311,14 +311,14 @@ export default function Settings() {
 
           {/* Custom model fields */}
           {isCustom && (
-            <div className="grid grid-cols-2 gap-4 p-3 rounded-xl bg-surface-darkest/50 border border-white/5">
+            <div className="grid grid-cols-2 gap-4 p-3 rounded-xl bg-black/5 border border-black/10">
               <div>
                 <label className="text-xs text-text-muted mb-1.5 block">API Base URL</label>
                 <input
                   type="text"
                   value={settings.apiBaseUrl}
                   onChange={(e) => handleSave({ apiBaseUrl: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-white/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
+                  className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-black/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
                   placeholder="https://api.openai.com/v1"
                 />
               </div>
@@ -328,7 +328,7 @@ export default function Settings() {
                   type="text"
                   value={settings.modelName}
                   onChange={(e) => handleSave({ modelName: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-white/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
+                  className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-black/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
                   placeholder="gpt-4o-mini"
                 />
               </div>
@@ -378,7 +378,7 @@ export default function Settings() {
               <select
                 value={settings.minDelay}
                 onChange={(e) => handleSave({ minDelay: parseInt(e.target.value) })}
-                className="w-full px-3 py-2 rounded-xl bg-surface-darkest border border-white/10 text-sm"
+                className="w-full px-3 py-2 rounded-xl bg-surface-darkest border border-black/10 text-sm"
               >
                 {[1000,2000,3000,5000].map(v => (
                   <option key={v} value={v}>{v/1000} 秒</option>
@@ -390,7 +390,7 @@ export default function Settings() {
               <select
                 value={settings.maxDelay}
                 onChange={(e) => handleSave({ maxDelay: parseInt(e.target.value) })}
-                className="w-full px-3 py-2 rounded-xl bg-surface-darkest border border-white/10 text-sm"
+                className="w-full px-3 py-2 rounded-xl bg-surface-darkest border border-black/10 text-sm"
               >
                 {[3000,5000,8000,10000,15000].map(v => (
                   <option key={v} value={v}>{v/1000} 秒</option>
@@ -409,7 +409,7 @@ export default function Settings() {
             <select
               value={settings.maxScanCount}
               onChange={(e) => handleSave({ maxScanCount: parseInt(e.target.value) })}
-              className="w-full px-3 py-2 rounded-xl bg-surface-darkest border border-white/10 text-sm"
+              className="w-full px-3 py-2 rounded-xl bg-surface-darkest border border-black/10 text-sm"
             >
               {[10, 20, 30, 50, 80, 100, 150, 200].map((v) => (
                 <option key={v} value={v}>{v} 个</option>

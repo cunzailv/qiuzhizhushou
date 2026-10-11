@@ -338,7 +338,7 @@ export default function App() {
   return (
     <div className="w-[420px] max-h-[600px] overflow-y-auto bg-surface-darkest">
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-surface-darkest/80 backdrop-blur-md border-b border-white/5">
+      <div className="sticky top-0 z-10 bg-white/85 backdrop-blur-md border-b border-black/10">
         {/* 品牌行 */}
         <div className="flex items-center gap-2.5 px-3 pt-3 pb-1.5">
           <img
@@ -363,7 +363,7 @@ export default function App() {
                 {effectivePlatformName}
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-text-muted border border-white/10">
+              <span className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2 py-0.5 text-[10px] text-text-muted border border-black/10">
                 未检测到招聘平台
               </span>
             )}
@@ -376,7 +376,7 @@ export default function App() {
             <select
               value={platformOverride}
               onChange={(e) => handlePlatformChange(e.target.value)}
-              className="rounded bg-surface-dark px-1.5 py-0.5 text-[11px] text-text-normal border border-white/10 outline-none focus:border-primary"
+              className="rounded bg-surface-dark px-1.5 py-0.5 text-[11px] text-text-primary border border-black/10 outline-none focus:border-primary"
             >
               <option value="auto">自动识别</option>
               {platforms.map((p) => (

@@ -15,7 +15,7 @@ export function Progress({ value, className = '', color }: ProgressProps) {
         className="h-full rounded-full transition-all duration-500 ease-out"
         style={{
           width: `${clampedValue}%`,
-          background: color || `linear-gradient(90deg, #6366F1, #8B5CF6)`,
+          background: color || `linear-gradient(90deg, #F97316, #FB923C)`,
         }}
       />
     </div>
