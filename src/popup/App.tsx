@@ -12,6 +12,7 @@ import {
 import {
   LayoutDashboard, FileText, ListChecks, Settings2, Bot,
 } from 'lucide-react'
+import logoUrl from '../assets/logo-transparent.png'
 
 const MOD = 'Popup:App'
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -338,14 +339,44 @@ export default function App() {
     <div className="w-[420px] max-h-[600px] overflow-y-auto bg-surface-darkest">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-surface-darkest/80 backdrop-blur-md border-b border-white/5">
-        <Tabs tabs={TABS} activeTab={activeTab} onTabChange={setActiveTab} className="m-3" />
+        {/* 品牌行 */}
+        <div className="flex items-center gap-2.5 px-3 pt-3 pb-1.5">
+          <img
+            src={logoUrl}
+            alt="求职投递助手"
+            className="w-8 h-8 rounded-lg object-contain shrink-0"
+          />
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5">
+              <h1 className="text-[15px] font-bold leading-tight bg-gradient-to-r from-brand-orange to-primary-light bg-clip-text text-transparent">
+                求职投递助手
+              </h1>
+            </div>
+            <p className="text-[10px] text-text-muted leading-tight truncate">
+              AI 匹配评估 · 多平台一键投递
+            </p>
+          </div>
+          <div className="ml-auto shrink-0">
+            {effectivePlatformName ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary-light border border-primary/20">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary-light animate-pulse" />
+                {effectivePlatformName}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded-full bg-white/5 px-2 py-0.5 text-[10px] text-text-muted border border-white/10">
+                未检测到招聘平台
+              </span>
+            )}
+          </div>
+        </div>
+        <Tabs tabs={TABS} activeTab={activeTab} onTabChange={setActiveTab} className="m-3 mt-1" />
         <div className="px-3 pb-2 -mt-1 flex items-center justify-between gap-2 text-[11px] text-text-muted">
           <label className="flex items-center gap-1.5">
             平台：
             <select
               value={platformOverride}
               onChange={(e) => handlePlatformChange(e.target.value)}
-              className="rounded bg-surface-dark px-1.5 py-0.5 text-[11px] text-text-normal border border-white/10 outline-none focus:border-emerald-500"
+              className="rounded bg-surface-dark px-1.5 py-0.5 text-[11px] text-text-normal border border-white/10 outline-none focus:border-primary"
             >
               <option value="auto">自动识别</option>
               {platforms.map((p) => (
@@ -355,7 +386,7 @@ export default function App() {
           </label>
           <span className="truncate">
             {effectivePlatformName
-              ? <span className="text-emerald-400">{effectivePlatformName}</span>
+              ? <span className="text-primary-light">{effectivePlatformName}</span>
               : '未检测到招聘平台页面'}
           </span>
         </div>

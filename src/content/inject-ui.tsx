@@ -257,8 +257,8 @@ function createFloatingTrigger(host: HTMLElement): void {
     width: 48px;
     height: 48px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #6366F1, #8B5CF6);
-    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.4);
+    background: linear-gradient(135deg, #F97316, #FB923C);
+    box-shadow: 0 4px 20px rgba(249, 115, 22, 0.4);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -277,11 +277,11 @@ function createFloatingTrigger(host: HTMLElement): void {
   })
   triggerBtn.addEventListener('mouseenter', () => {
     triggerBtn!.style.transform = 'scale(1.1)'
-    triggerBtn!.style.boxShadow = '0 6px 24px rgba(99, 102, 241, 0.6)'
+    triggerBtn!.style.boxShadow = '0 6px 24px rgba(249, 115, 22, 0.6)'
   })
   triggerBtn.addEventListener('mouseleave', () => {
     triggerBtn!.style.transform = 'scale(1)'
-    triggerBtn!.style.boxShadow = '0 4px 20px rgba(99, 102, 241, 0.4)'
+    triggerBtn!.style.boxShadow = '0 4px 20px rgba(249, 115, 22, 0.4)'
   })
   document.body.appendChild(triggerBtn)
 }
@@ -337,7 +337,7 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
     idle: '○', scanning: '🔍', matching: '🧠', applying: '📨', pause: '⏸', done: '✅',
   }
   switch (status) {
-    case 'idle': statusText = '就绪'; statusColor = '#6366F1'; break
+    case 'idle': statusText = '就绪'; statusColor = '#F97316'; break
     case 'scanning': statusText = '扫描岗位中...'; statusColor = '#F59E0B'; break
     case 'matching':
       statusText = effectiveFilters.enableAiMatch ? 'AI匹配分析中...' : '准备直投中...'
@@ -349,7 +349,7 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
   }
 
   const progress = stats && stats.total > 0 ? (stats.processed / stats.total * 100) : 0
-  const progressColor = status === 'done' ? '#10B981' : progress > 0 ? '#8B5CF6' : '#47476B'
+  const progressColor = status === 'done' ? '#10B981' : progress > 0 ? '#FB923C' : '#47476B'
 
   // Lock the delivery-mode / scoring toggles while a run is in progress — the
   // running loop has already captured its mode & filters, so mid-run changes
@@ -605,9 +605,9 @@ function getStyles(): string {
       background: rgba(15, 15, 26, 0.97);
       backdrop-filter: blur(24px);
       -webkit-backdrop-filter: blur(24px);
-      border: 1px solid rgba(99, 102, 241, 0.15);
+      border: 1px solid rgba(249, 115, 22, 0.15);
       border-radius: 16px;
-      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 60px rgba(99, 102, 241, 0.08);
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5), 0 0 60px rgba(249, 115, 22, 0.08);
       overflow: hidden;
       width: 320px;
       max-width: calc(100vw - 16px);
@@ -618,7 +618,7 @@ function getStyles(): string {
     }
 
     .panel-header {
-      background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 100%);
+      background: linear-gradient(135deg, #F97316 0%, #FB923C 100%);
       padding: 10px 14px;
       display: flex;
       align-items: center;
@@ -676,7 +676,7 @@ function getStyles(): string {
       flex-wrap: wrap;
       gap: 4px;
       padding: 8px 14px;
-      background: rgba(99, 102, 241, 0.06);
+      background: rgba(249, 115, 22, 0.06);
       border-bottom: 1px solid rgba(255,255,255,0.04);
       min-height: 0;
     }
@@ -695,7 +695,7 @@ function getStyles(): string {
       color: #A1A1C0;
       border: 1px solid rgba(255,255,255,0.06);
     }
-    .filter-tag-title { border-color: rgba(99,102,241,0.3); color: #A78BFA; }
+    .filter-tag-title { border-color: rgba(249,115,22,0.3); color: #FDBA74; }
     .filter-tag-loc { border-color: rgba(16,185,129,0.2); color: #6EE7B7; }
     .filter-tag-salary { border-color: rgba(245,158,11,0.3); color: #FCD34D; }
     .filter-tag-exclude { border-color: rgba(239,68,68,0.2); color: #FCA5A5; }
@@ -723,7 +723,7 @@ function getStyles(): string {
     }
     .stat-label { color: #7B7BA0; font-size: 11px; }
     .stat-value, .stat-value-success { font-size: 13px; font-weight: 700; }
-    .stat-value { color: #8B5CF6; }
+    .stat-value { color: #FB923C; }
     .stat-value-success { color: #10B981; }
 
     .panel-message {
@@ -768,8 +768,8 @@ function getStyles(): string {
       white-space: nowrap;
     }
     .mode-btn.active {
-      background: rgba(99,102,241,0.2);
-      color: #A78BFA;
+      background: rgba(249,115,22,0.2);
+      color: #FDBA74;
     }
     .mode-btn:hover:not(.active) { color: #A1A1C0; }
 
@@ -858,10 +858,10 @@ function getStyles(): string {
       transition: all 0.2s;
     }
     .btn-primary {
-      background: linear-gradient(135deg, #6366F1, #8B5CF6);
+      background: linear-gradient(135deg, #F97316, #FB923C);
       color: white;
     }
-    .btn-primary:hover { box-shadow: 0 0 20px rgba(99,102,241,0.4); transform: translateY(-1px); }
+    .btn-primary:hover { box-shadow: 0 0 20px rgba(249,115,22,0.4); transform: translateY(-1px); }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
     .btn-danger {
       background: rgba(239,68,68,0.12);

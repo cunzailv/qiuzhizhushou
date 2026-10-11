@@ -2,6 +2,7 @@ import React, { Suspense, lazy, useState } from 'react'
 import {
   LayoutDashboard, CalendarDays, Ban, Download, Settings2,
 } from 'lucide-react'
+import logoUrl from '../assets/logo-transparent.png'
 
 interface NavItem {
   id: string
@@ -31,9 +32,16 @@ export default function App() {
       {/* Sidebar */}
       <aside className="w-56 bg-surface-dark/80 border-r border-white/5 flex flex-col p-4 shrink-0">
         {/* Logo */}
-        <div className="mb-8 px-2">
-          <h1 className="text-lg font-bold gradient-text">求职助手</h1>
-          <p className="text-[10px] text-text-muted mt-0.5">智能求职助手 · 管理后台</p>
+        <div className="mb-8 px-2 flex items-center gap-2.5">
+          <img
+            src={logoUrl}
+            alt="求职投递助手"
+            className="w-10 h-10 rounded-xl object-contain shrink-0"
+          />
+          <div className="min-w-0">
+            <h1 className="text-lg font-bold leading-tight gradient-text">求职投递助手</h1>
+            <p className="text-[10px] text-text-muted mt-0.5 leading-tight">智能求职 · 管理后台</p>
+          </div>
         </div>
 
         {/* Navigation */}
