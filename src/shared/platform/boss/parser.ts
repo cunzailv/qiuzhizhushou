@@ -2,6 +2,7 @@
 // 该模块只服务于 Boss 平台，不依赖任何 content 层代码。
 import type { JobCard } from '../../types/job'
 import type { PageType } from '../types'
+import { decodeBossFontGlyphs, sanitizeJobText, sanitizeJobCard } from '../../utils/text-sanitizer'
 
 interface JobMatchingTextFields {
   title: string
@@ -30,10 +31,19 @@ export function buildJobMatchingText(fields: JobMatchingTextFields): string {
     .join(' ')
 }
 
-function generateJobId(url: string): string {
-  // Extract job id from URL like /job_detail/xxx.html
-  const match = url.match(/job_detail[/=](\w+)/)
-  return match ? match[1] : Date.now().toString(36)
+export function generateJobId(url: string, fallbackKey = ''): string {
+  // Extract job id from URL like /job_detail/xxx.html (支持包含 ~、- 等特殊字符的 ID)
+  const match = url.match(/job_detail[/=]([^/?.#]+)/)
+  if (match) return match[1]
+  if (fallbackKey) {
+    let hash = 0
+    for (let i = 0; i < fallbackKey.length; i++) {
+      hash = ((hash << 5) - hash) + fallbackKey.charCodeAt(i)
+      hash |= 0
+    }
+    return `job_${Math.abs(hash).toString(36)}`
+  }
+  return Date.now().toString(36)
 }
 
 function getSearchCardElements(): Element[] {
@@ -174,6 +184,80 @@ function extractCompanyName(root: Element | Document): string {
   return ''
 }
 
+/** 清洗 DOM 节点中的文本，彻底剔除 Boss 直聘防爬注入的 <style> 样式、隐形 span 及混淆干扰词 */
+function cleanElementText(el: Element): string {
+  try {
+    const clone = el.cloneNode(true) as HTMLElement
+
+    // 0. 解析 style 标签内的 CSS 混淆类，找出隐藏元素的类名
+    const styleTags = clone.querySelectorAll('style')
+    const hiddenClasses: string[] = []
+    styleTags.forEach((s) => {
+      const css = s.textContent || ''
+      const ruleRegex = /\.([a-zA-Z0-9_-]+)\s*\{([^}]*)\}/g
+      let m: RegExpExecArray | null
+      while ((m = ruleRegex.exec(css)) !== null) {
+        const body = m[2].toLowerCase()
+        if (
+          body.includes('hidden') ||
+          body.includes('font-size:0') ||
+          body.includes('font-size: 0') ||
+          body.includes('display:none') ||
+          body.includes('display: none') ||
+          body.includes('0.1px') ||
+          body.includes('width:0px') ||
+          body.includes('height:0px')
+        ) {
+          hiddenClasses.push(m[1])
+        }
+      }
+    })
+
+    // 移除所有命中混淆类的节点（如 <span class="wAEMXrfAK">boss</span>）
+    if (hiddenClasses.length > 0) {
+      const sel = hiddenClasses.map((c) => `.${c}`).join(', ')
+      try {
+        clone.querySelectorAll(sel).forEach((node) => node.remove())
+      } catch {
+        // 忽略复杂选择器异常
+      }
+    }
+
+    // 1. 彻底移除所有 style, script, noscript, svg, iframe 标签
+    clone.querySelectorAll('style, script, noscript, svg, iframe').forEach((s) => s.remove())
+
+    // 2. 移除所有防爬虫干扰的零宽、隐形或微小字体干扰元素
+    clone.querySelectorAll('*').forEach((node) => {
+      const htmlNode = node as HTMLElement
+      const styleAttr = (htmlNode.getAttribute('style') || '').toLowerCase()
+      const classAttr = (htmlNode.getAttribute('class') || '').toLowerCase()
+      if (
+        styleAttr.includes('visibility:hidden') ||
+        styleAttr.includes('visibility: hidden') ||
+        styleAttr.includes('font-size:0') ||
+        styleAttr.includes('font-size: 0') ||
+        styleAttr.includes('display:none') ||
+        styleAttr.includes('display: none') ||
+        styleAttr.includes('width:0.1px') ||
+        styleAttr.includes('width: 0.1px') ||
+        styleAttr.includes('height:0.1px') ||
+        styleAttr.includes('height: 0.1px') ||
+        styleAttr.includes('width:0px') ||
+        styleAttr.includes('height:0px') ||
+        classAttr.includes('invisible') ||
+        classAttr.includes('hidden-text')
+      ) {
+        htmlNode.remove()
+      }
+    })
+
+    const text = clone.innerText || clone.textContent || ''
+    return sanitizeJobText(text)
+  } catch {
+    return sanitizeJobText(el.textContent || '')
+  }
+}
+
 // Extract the full job description from an opened detail view. BOSS renders the
 // JD in a `.job-sec` / `.job-detail-section` block further DOWN the page — NOT
 // inside the apply-button's container (which is what `activateJobCard` returns).
@@ -187,26 +271,33 @@ export function extractJobDescriptionFromDetail(root: ParentNode = document): st
   const SELECTORS =
     '.job-sec, [class*="job-sec"], .job-detail-section, [class*="job-detail-section"], ' +
     '.job-describe, [class*="job-describe"], .job-desc, [class*="job-desc"], ' +
-    '.job-sec-text, [class*="job-sec-text"]'
+    '.job-sec-text, [class*="job-sec-text"], ' +
+    '[class*="job-description"], [class*="detail-description"], [class*="job-detail"] [class*="desc"]'
 
   let best = ''
+  let bestFallback = ''
   for (const scope of scopes) {
     const sections = Array.from(scope.querySelectorAll(SELECTORS))
     for (const sec of sections) {
-      const text = (sec.textContent || '').replace(/\s+/g, ' ').trim()
+      const text = cleanElementText(sec)
       if (text.length < 8) continue
       const isDesc =
         text.includes('职位描述') ||
         text.includes('岗位描述') ||
-        text.includes('岗位职责')
+        text.includes('岗位职责') ||
+        text.includes('工作职责') ||
+        text.includes('任职要求') ||
+        text.includes('任职资格')
       if (isDesc) {
         if (text.length > best.length) best = text
-      } else if (!best && text.length > 30) {
-        best = text
+      } else if (text.length > 80 && text.length > bestFallback.length) {
+        // 详情面板内无标题段落时，最长文本块通常就是 JD 正文
+        bestFallback = text
       }
     }
     if (best) break
   }
+  if (!best && bestFallback) best = bestFallback
 
   // Strip leading heading label(s).
   best = best
@@ -279,22 +370,27 @@ function getDigitRefs(): Array<{ d: string; img: ImageData }> {
 }
 
 export function decodeBossFontText(text: string, fontFamily = 'sans-serif'): string {
-  if (!text || typeof document === 'undefined' || !PUA_RE.test(text)) return text
+  if (!text) return ''
+  // 1. 优先使用确定性 PUA 字符映射（处理 \uE030-\uE039、\uEE00-\uEE09、\uE130-\uE139 等 Boss 经典映射码段）
+  const decoded = decodeBossFontGlyphs(text)
+  if (!PUA_RE.test(decoded)) return decoded
+
+  if (typeof document === 'undefined') return decoded.replace(PUA_RE, '')
   const refs = getDigitRefs()
-  if (refs.length === 0) return text
+  if (refs.length === 0) return decoded.replace(PUA_RE, '')
 
   let result = ''
-  for (const ch of text) {
+  for (const ch of decoded) {
     if (!PUA_RE.test(ch)) {
       result += ch
       continue
     }
     const target = renderGlyph(ch, fontFamily)
     if (!target) {
-      result += ch
+      result += ''
       continue
     }
-    let best = ch
+    let best = ''
     let bestScore = -1
     for (const ref of refs) {
       const score = glyphSimilarity(target, ref.img)
@@ -303,9 +399,8 @@ export function decodeBossFontText(text: string, fontFamily = 'sans-serif'): str
         best = ref.d
       }
     }
-    // Only accept the guess when reasonably confident; otherwise keep the
-    // original glyph so we never silently corrupt the data.
-    result += bestScore >= 0.6 ? best : ch
+    // Only accept the guess when reasonably confident; otherwise drop PUA glyph
+    result += bestScore >= 0.6 ? best : ''
   }
   return result
 }
@@ -362,7 +457,7 @@ export function parseJobCardsFromSearchPage(): JobCard[] {
       : []
     const infos: string[] = []
     infoNodes.forEach((n) => {
-      const t = (n.textContent || '').replace(/\s+/g, ' ').trim()
+      const t = decodeBossFontGlyphs((n.textContent || '').replace(/\s+/g, ' ').trim())
       if (t && t.length < 40 && !infos.includes(t)) infos.push(t)
     })
 
@@ -372,6 +467,9 @@ export function parseJobCardsFromSearchPage(): JobCard[] {
       (i) =>
         i !== experience &&
         i !== education &&
+        i !== salary &&
+        !/\d+[-~到至]\d+[Kk]/.test(i) &&
+        !/[Kk]·\d+薪/.test(i) &&
         !/(年|应届|本科|硕士|大专|博士|中专|高中|学历|融资|上市|民营|外资|国企|独资|代表处|非营利|少于|以上|规模|人|区|路|街道)/.test(i),
     )
 
@@ -392,11 +490,33 @@ export function parseJobCardsFromSearchPage(): JobCard[] {
     // full JD is read from the detail view during apply). Avoid the broad
     // `[class*="job-detail"]` selector which matched unrelated containers.
     const descEl = html.querySelector('.job-desc, [class*="job-desc"], .info-desc, [class*="info-desc"], .job-description, .job-sec-text')
-    const jobDescPreview = (descEl?.textContent || '').replace(/\s+/g, ' ').trim()
+    const jobDescPreview = sanitizeJobText((descEl?.textContent || '').replace(/\s+/g, ' ').trim())
 
     // Extract online status
     const onlineEl = html.querySelector('[class*="online"], [class*="active-now"], .online-tag')
     const bossOnline = !!onlineEl
+
+    // Extract published/active time
+    let publishedAt = ''
+    const timeEl = html.querySelector(
+      '.boss-online-tag, [class*="boss-online"], [class*="active-time"], [class*="active-status"], [class*="pub-time"], [class*="post-time"]',
+    )
+    if (timeEl) {
+      publishedAt = (timeEl.textContent || '').trim()
+    }
+    if (!publishedAt) {
+      const leaves = Array.from(html.querySelectorAll('*')).filter((n) => !n.children.length)
+      for (const n of leaves) {
+        const t = (n.textContent || '').trim()
+        if (
+          /^(刚刚活跃|今日活跃|3日内活跃|本周活跃|2周内活跃|本月活跃|半年前活跃|超1个月活跃|昨日活跃)$/.test(t) ||
+          /^(\d+小时前|\d+分钟前|\d+天前|今天|昨天|\d{1,2}月\d{1,2}日)$/.test(t)
+        ) {
+          publishedAt = t
+          break
+        }
+      }
+    }
 
     // Add the card as long as we have a title. A missing company name must
     // NOT drop the whole card (otherwise scanning shows nothing). We keep
@@ -412,8 +532,8 @@ export function parseJobCardsFromSearchPage(): JobCard[] {
       if (!companyName && !debugDownloaded) {
         downloadCardDebug(html.outerHTML)
       }
-      cards.push({
-        id: generateJobId(url),
+      cards.push(sanitizeJobCard({
+        id: generateJobId(url, `${companyName}:${title}`),
         title,
         companyName,
         companyLogo,
@@ -422,10 +542,13 @@ export function parseJobCardsFromSearchPage(): JobCard[] {
         experience,
         education,
         tags,
-        // 评分器以 jobDescription 为唯一匹配文本输入；搜索卡片几乎读不到职位描述，
+        // 卡片真实职位描述（详情预览，可能为空或很短）；评分用匹配文本见 matchingText。
+        // 导出/展示的"职位描述"从此只存真实内容，不再落入标题+薪资+标签的拼凑串。
+        jobDescription: jobDescPreview,
+        // 评分器以匹配文本为输入：搜索卡片几乎读不到职位描述，
         // 因此用 buildJobMatchingText 把标题/公司/薪资/地点/经验/学历/标签拼入该字段，
         // 让本地评分真正反映卡片元数据（否则长期卡在基础分）。
-        jobDescription: buildJobMatchingText({
+        matchingText: buildJobMatchingText({
           title,
           companyName,
           salary,
@@ -438,9 +561,9 @@ export function parseJobCardsFromSearchPage(): JobCard[] {
         bossName,
         bossTitle,
         bossOnline,
-        publishedAt: '',
+        publishedAt,
         url: url || window.location.href,
-      })
+      }))
     }
   })
 
@@ -470,8 +593,8 @@ export function parseJobDetailFromPage(): JobCard | null {
 
   if (!title || !companyName) return null
 
-  return {
-    id: generateJobId(window.location.href),
+  return sanitizeJobCard({
+    id: generateJobId(window.location.href, `${companyName}:${title}`),
     title,
     companyName,
     companyLogo: '',
@@ -486,7 +609,7 @@ export function parseJobDetailFromPage(): JobCard | null {
     bossOnline: false,
     publishedAt: '',
     url: window.location.href,
-  }
+  })
 }
 
 // Parse the current page type

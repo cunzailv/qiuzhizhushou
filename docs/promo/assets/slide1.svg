@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920" font-family="'PingFang SC','Hiragino Sans GB','Songti SC',sans-serif">
+  <rect width="1080" height="1920" fill="#0F172A"/>
+  <text x="540" y="520" font-size="96" font-weight="700" fill="#FFFFFF" text-anchor="middle">投了 300 份</text>
+  <text x="540" y="680" font-size="96" font-weight="700" fill="#FF7A2F" text-anchor="middle">回了 3 个</text>
+  <rect x="440" y="760" width="200" height="6" rx="3" fill="#FF7A2F"/>
+  <text x="540" y="900" font-size="46" fill="#CBD5E1" text-anchor="middle">海投 ≠ 努力</text>
+  <text x="540" y="970" font-size="46" fill="#CBD5E1" text-anchor="middle">只是投得糊</text>
+  <text x="540" y="1520" font-size="34" fill="#64748B" text-anchor="middle">智能求职助手 · 一个投前参谋</text>
+</svg>

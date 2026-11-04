@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920" font-family="'PingFang SC','Hiragino Sans GB','Songti SC',sans-serif">
+  <rect width="1080" height="1920" fill="#FFFFFF"/>
+  <text x="540" y="240" font-size="60" font-weight="700" fill="#1E3A8A" text-anchor="middle">所以我写了个工具</text>
+  <rect x="150" y="500" width="780" height="470" rx="28" fill="#FFFFFF" stroke="#CBD5E1" stroke-width="3"/>
+  <text x="540" y="1060" font-size="40" font-weight="700" fill="#1E3A8A" text-anchor="middle">智能求职助手 · 开源免费</text>
+  <text x="540" y="1130" font-size="26" fill="#94A3B8" text-anchor="middle">五个平台，一个入口</text>
+  <text x="540" y="1560" font-size="30" fill="#64748B" text-anchor="middle">打开插件，五个数字告诉你今天有没有白忙</text>
+</svg>

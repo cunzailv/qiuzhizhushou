@@ -5,19 +5,20 @@ import { Badge } from '../../components/ui/badge'
 import { Progress } from '../../components/ui/progress'
 import { Dialog } from '../../components/ui/dialog'
 import { Toast } from '../../components/ui/toast'
-import { getAllResumes, saveResume, deleteResume, setDefaultResume, getResumeById } from '../../shared/db/resume-store'
+import { getAllResumes, saveResume, deleteResume, setDefaultResume, getResumeById, updateResume } from '../../shared/db/resume-store'
 import { setSharedResumeSummary, clearSharedResumeSummary } from '../../shared/db/shared-state'
 import { parsePDF, parseWord, extractStructuredData } from '../../shared/parser'
 import { analyzeResumeQuality, analyzeJobMatch, checkAIConfigured } from '../../shared/ai'
 import type { JobMatchAnalysis } from '../../shared/ai'
 import { log, logWarn, logError, logGroup, logGroupEnd } from '../../shared/utils/logger'
-import type { Resume, ResumeProfile } from '../../shared/types/resume'
+import type { Resume, ResumeProfile, Education, WorkExperience } from '../../shared/types/resume'
 import { formatDate } from '../../shared/utils/date'
 import { saveMatchAnalysis, getAllMatchAnalyses, deleteMatchAnalysis } from '../../shared/db/match-analysis-store'
 import type { MatchAnalysisRecord } from '../../shared/db'
 import {
   Upload, FileText, Star, Trash2, Eye, CheckCircle, AlertCircle,
   Code, Search, XCircle, Bot, ChevronDown, Clock, TrendingUp,
+  Pencil, Save, Plus, X,
 } from 'lucide-react'
 
 export default function Resumes() {
@@ -26,6 +27,11 @@ export default function Resumes() {
   const [selectedResume, setSelectedResume] = useState<Resume | null>(null)
   const [toast, setToast] = useState<{ visible: boolean; message: string; type: 'success' | 'error' | 'warning' | 'info' }>({ visible: false, message: '', type: 'info' })
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // ------ 简历编辑 state ------
+  const [editing, setEditing] = useState(false)
+  const [editForm, setEditForm] = useState<Resume['structuredData'] | null>(null)
+  const [newSkill, setNewSkill] = useState('')
 
   // ------ 岗位匹配分析 state ------
   const [jdText, setJdText] = useState('')
@@ -243,6 +249,82 @@ export default function Resumes() {
   function showToast(message: string, type: 'success' | 'error' | 'warning' | 'info') {
     setToast({ visible: true, message, type })
     setTimeout(() => setToast({ visible: false, message: '', type: 'info' }), 3000)
+  }
+
+  // ====== 简历编辑 ======
+  function startEdit(resume: Resume) {
+    setEditForm(JSON.parse(JSON.stringify(resume.structuredData)))
+    setNewSkill('')
+    setEditing(true)
+  }
+
+  function cancelEdit() {
+    setEditing(false)
+    setEditForm(null)
+    setNewSkill('')
+  }
+
+  function updateEditField<K extends keyof Resume['structuredData']>(key: K, value: Resume['structuredData'][K]) {
+    setEditForm(prev => prev ? { ...prev, [key]: value } : prev)
+  }
+
+  function updateEducation(index: number, key: keyof Education, value: string) {
+    if (!editForm) return
+    const education = editForm.education.map((edu, i) => i === index ? { ...edu, [key]: value } : edu)
+    setEditForm({ ...editForm, education })
+  }
+
+  function updateWork(index: number, key: keyof WorkExperience, value: string) {
+    if (!editForm) return
+    const workExperience = editForm.workExperience.map((work, i) => i === index ? { ...work, [key]: value } : work)
+    setEditForm({ ...editForm, workExperience })
+  }
+
+  function addSkill() {
+    const skill = newSkill.trim()
+    if (!skill || !editForm) return
+    if (editForm.skills.some(s => s.toLowerCase() === skill.toLowerCase())) {
+      showToast('该技能已在列表中', 'warning')
+      return
+    }
+    setEditForm({ ...editForm, skills: [...editForm.skills, skill] })
+    setNewSkill('')
+  }
+
+  function removeSkill(skill: string) {
+    if (!editForm) return
+    setEditForm({ ...editForm, skills: editForm.skills.filter(s => s !== skill) })
+  }
+
+  async function saveEdit() {
+    if (!selectedResume || !editForm) return
+    const updatedStructured = editForm
+    try {
+      await updateResume(selectedResume.id, {
+        structuredData: updatedStructured,
+        profile: selectedResume.profile
+          ? {
+              ...selectedResume.profile,
+              yearsOfExperience: updatedStructured.yearsOfExperience || 0,
+              generatedAt: new Date().toISOString(),
+            }
+          : undefined,
+      })
+      const updated = await getResumeById(selectedResume.id)
+      if (updated) {
+        // 同步到 chrome.storage.local，内容脚本/评分立即可用新数据
+        await setSharedResumeSummary(updated)
+        setSelectedResume(updated)
+      }
+      await loadResumes()
+      setEditing(false)
+      setEditForm(null)
+      setNewSkill('')
+      showToast('简历已更新，岗位评分将使用新数据', 'success')
+    } catch (err) {
+      logError(MOD, 'saveEdit', err)
+      showToast('保存失败，请重试', 'error')
+    }
   }
 
   async function handleJobMatch() {
@@ -644,97 +726,286 @@ export default function Resumes() {
       {/* Resume Detail Dialog */}
       <Dialog
         open={!!selectedResume}
-        onClose={() => setSelectedResume(null)}
+        onClose={() => { setSelectedResume(null); setEditing(false); setEditForm(null); setNewSkill('') }}
         title="简历详情"
       >
         {selectedResume && (
           <div className="space-y-4">
-            {/* Basic info */}
-            <div className="grid grid-cols-2 gap-2">
-              {selectedResume.structuredData.name && (
-                <div className="glass-card p-2">
-                  <p className="text-[10px] text-text-muted">姓名</p>
-                  <p className="text-sm font-medium">{selectedResume.structuredData.name}</p>
-                </div>
-              )}
-              {selectedResume.structuredData.email && (
-                <div className="glass-card p-2">
-                  <p className="text-[10px] text-text-muted">邮箱</p>
-                  <p className="text-xs truncate">{selectedResume.structuredData.email}</p>
-                </div>
-              )}
-              {selectedResume.structuredData.phone && (
-                <div className="glass-card p-2">
-                  <p className="text-[10px] text-text-muted">电话</p>
-                  <p className="text-sm font-medium">{selectedResume.structuredData.phone}</p>
-                </div>
-              )}
-              {selectedResume.structuredData.city && (
-                <div className="glass-card p-2">
-                  <p className="text-[10px] text-text-muted">城市</p>
-                  <p className="text-sm font-medium">{selectedResume.structuredData.city}</p>
+            {/* 操作栏：查看/编辑切换 */}
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] text-text-muted">
+                {editing ? '编辑模式：修改后点击「保存修改」，评分将立即使用新数据' : '查看模式'}
+              </span>
+              {!editing ? (
+                <Button size="sm" onClick={() => startEdit(selectedResume)}>
+                  <Pencil className="w-3.5 h-3.5" />
+                  编辑简历
+                </Button>
+              ) : (
+                <div className="flex gap-2">
+                  <Button size="sm" variant="secondary" onClick={cancelEdit}>
+                    <X className="w-3.5 h-3.5" />
+                    取消
+                  </Button>
+                  <Button size="sm" onClick={saveEdit}>
+                    <Save className="w-3.5 h-3.5" />
+                    保存修改
+                  </Button>
                 </div>
               )}
             </div>
 
-            {/* Skills */}
-            {selectedResume.structuredData.skills.length > 0 && (
-              <div>
-                <p className="text-xs font-semibold text-text-secondary mb-1.5 flex items-center gap-1">
-                  <Code className="w-3 h-3" /> 技能标签
-                </p>
-                <div className="flex flex-wrap gap-1">
-                  {selectedResume.structuredData.skills.map((s) => (
-                    <Badge key={s} variant="default">{s}</Badge>
-                  ))}
+            {editing && editForm ? (
+              /* ===== 编辑模式 ===== */
+              <div className="space-y-4">
+                {/* 基本信息 */}
+                <div>
+                  <p className="text-xs font-semibold text-text-secondary mb-2">基本信息</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="block">
+                      <span className="text-[10px] text-text-muted">姓名</span>
+                      <input
+                        className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                        value={editForm.name}
+                        onChange={(e) => updateEditField('name', e.target.value)}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] text-text-muted">工作年限（年）</span>
+                      <input
+                        type="number" min="0" step="0.5"
+                        className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                        value={editForm.yearsOfExperience || 0}
+                        onChange={(e) => updateEditField('yearsOfExperience', Math.max(0, Number(e.target.value) || 0))}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] text-text-muted">电话</span>
+                      <input
+                        className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                        value={editForm.phone}
+                        onChange={(e) => updateEditField('phone', e.target.value)}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-[10px] text-text-muted">邮箱</span>
+                      <input
+                        className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                        value={editForm.email}
+                        onChange={(e) => updateEditField('email', e.target.value)}
+                      />
+                    </label>
+                    <label className="block col-span-2">
+                      <span className="text-[10px] text-text-muted">城市</span>
+                      <input
+                        className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                        value={editForm.city}
+                        onChange={(e) => updateEditField('city', e.target.value)}
+                      />
+                    </label>
+                  </div>
                 </div>
-              </div>
-            )}
 
-            {/* AI Analysis */}
-            {selectedResume.aiAnalysis ? (
-              <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <Progress
-                    value={selectedResume.aiAnalysis.overallScore}
-                    color={getScoreColor(selectedResume.aiAnalysis.overallScore)}
-                    className="flex-1"
+                {/* 技能标签 */}
+                <div>
+                  <p className="text-xs font-semibold text-text-secondary mb-1.5">技能标签（直接参与岗位匹配）</p>
+                  <div className="flex flex-wrap gap-1.5 mb-2">
+                    {editForm.skills.map((s) => (
+                      <span key={s} className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg bg-primary/10 text-primary-light">
+                        {s}
+                        <button onClick={() => removeSkill(s)} className="text-text-muted hover:text-danger" title="删除技能">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                    {editForm.skills.length === 0 && (
+                      <span className="text-xs text-text-muted">暂无技能，可手动添加</span>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <input
+                      className="flex-1 rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                      placeholder="输入技能后回车添加，如：Vue、Java"
+                      value={newSkill}
+                      onChange={(e) => setNewSkill(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addSkill() } }}
+                    />
+                    <Button size="sm" variant="secondary" onClick={addSkill}>
+                      <Plus className="w-3.5 h-3.5" />
+                      添加
+                    </Button>
+                  </div>
+                </div>
+
+                {/* 学历 */}
+                {editForm.education.map((edu, i) => (
+                  <div key={i}>
+                    <p className="text-xs font-semibold text-text-secondary mb-2">学历 {i + 1}</p>
+                    <div className="grid grid-cols-3 gap-2">
+                      <label className="block">
+                        <span className="text-[10px] text-text-muted">学校</span>
+                        <input
+                          className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                          value={edu.school}
+                          onChange={(e) => updateEducation(i, 'school', e.target.value)}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[10px] text-text-muted">学历</span>
+                        <input
+                          className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                          value={edu.degree}
+                          onChange={(e) => updateEducation(i, 'degree', e.target.value)}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[10px] text-text-muted">专业</span>
+                        <input
+                          className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                          value={edu.major}
+                          onChange={(e) => updateEducation(i, 'major', e.target.value)}
+                        />
+                      </label>
+                    </div>
+                  </div>
+                ))}
+
+                {/* 工作经历 */}
+                {editForm.workExperience.map((work, i) => (
+                  <div key={i}>
+                    <p className="text-xs font-semibold text-text-secondary mb-2">工作经历 {i + 1}</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="block">
+                        <span className="text-[10px] text-text-muted">公司</span>
+                        <input
+                          className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                          value={work.company}
+                          onChange={(e) => updateWork(i, 'company', e.target.value)}
+                        />
+                      </label>
+                      <label className="block">
+                        <span className="text-[10px] text-text-muted">职位</span>
+                        <input
+                          className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                          value={work.position}
+                          onChange={(e) => updateWork(i, 'position', e.target.value)}
+                        />
+                      </label>
+                    </div>
+                    <label className="block mt-2">
+                      <span className="text-[10px] text-text-muted">工作内容 / 职责</span>
+                      <textarea
+                        rows={2}
+                        className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30 resize-none"
+                        value={work.description}
+                        onChange={(e) => updateWork(i, 'description', e.target.value)}
+                      />
+                    </label>
+                  </div>
+                ))}
+
+                {/* 个人简介 */}
+                <label className="block">
+                  <span className="text-[10px] text-text-muted">个人简介 / Summary</span>
+                  <textarea
+                    rows={2}
+                    className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30 resize-none"
+                    value={editForm.summary}
+                    onChange={(e) => updateEditField('summary', e.target.value)}
                   />
-                  <span className="text-lg font-bold" style={{ color: getScoreColor(selectedResume.aiAnalysis.overallScore) }}>
-                    {selectedResume.aiAnalysis.overallScore}
-                  </span>
-                </div>
-
-                {selectedResume.aiAnalysis.strengths.length > 0 && (
-                  <div>
-                    <p className="text-xs font-semibold text-success mb-1">优势</p>
-                    {selectedResume.aiAnalysis.strengths.map((s, i) => (
-                      <p key={i} className="text-xs text-text-secondary flex items-start gap-1">
-                        <CheckCircle className="w-3 h-3 text-success mt-0.5 shrink-0" /> {s}
-                      </p>
-                    ))}
-                  </div>
-                )}
-
-                {selectedResume.aiAnalysis.weaknesses.length > 0 && (
-                  <div>
-                    <p className="text-xs font-semibold text-danger mb-1">不足</p>
-                    {selectedResume.aiAnalysis.weaknesses.map((s, i) => (
-                      <p key={i} className="text-xs text-text-secondary flex items-start gap-1">
-                        <AlertCircle className="w-3 h-3 text-danger mt-0.5 shrink-0" /> {s}
-                      </p>
-                    ))}
-                  </div>
-                )}
+                </label>
               </div>
             ) : (
-              <div className="text-center py-4">
-                <p className="text-xs text-text-muted mb-3">尚未分析简历</p>
-                <Button size="sm" onClick={() => handleAnalyze(selectedResume)} loading={loading}>
-                  <Eye className="w-3.5 h-3.5" />
-                  AI 分析简历
-                </Button>
-              </div>
+              /* ===== 查看模式 ===== */
+              <>
+                {/* Basic info */}
+                <div className="grid grid-cols-2 gap-2">
+                  {selectedResume.structuredData.name && (
+                    <div className="glass-card p-2">
+                      <p className="text-[10px] text-text-muted">姓名</p>
+                      <p className="text-sm font-medium">{selectedResume.structuredData.name}</p>
+                    </div>
+                  )}
+                  {selectedResume.structuredData.email && (
+                    <div className="glass-card p-2">
+                      <p className="text-[10px] text-text-muted">邮箱</p>
+                      <p className="text-xs truncate">{selectedResume.structuredData.email}</p>
+                    </div>
+                  )}
+                  {selectedResume.structuredData.phone && (
+                    <div className="glass-card p-2">
+                      <p className="text-[10px] text-text-muted">电话</p>
+                      <p className="text-sm font-medium">{selectedResume.structuredData.phone}</p>
+                    </div>
+                  )}
+                  {selectedResume.structuredData.city && (
+                    <div className="glass-card p-2">
+                      <p className="text-[10px] text-text-muted">城市</p>
+                      <p className="text-sm font-medium">{selectedResume.structuredData.city}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Skills */}
+                {selectedResume.structuredData.skills.length > 0 && (
+                  <div>
+                    <p className="text-xs font-semibold text-text-secondary mb-1.5 flex items-center gap-1">
+                      <Code className="w-3 h-3" /> 技能标签
+                    </p>
+                    <div className="flex flex-wrap gap-1">
+                      {selectedResume.structuredData.skills.map((s) => (
+                        <Badge key={s} variant="default">{s}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* AI Analysis */}
+                {selectedResume.aiAnalysis ? (
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-3">
+                      <Progress
+                        value={selectedResume.aiAnalysis.overallScore}
+                        color={getScoreColor(selectedResume.aiAnalysis.overallScore)}
+                        className="flex-1"
+                      />
+                      <span className="text-lg font-bold" style={{ color: getScoreColor(selectedResume.aiAnalysis.overallScore) }}>
+                        {selectedResume.aiAnalysis.overallScore}
+                      </span>
+                    </div>
+
+                    {selectedResume.aiAnalysis.strengths.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-success mb-1">优势</p>
+                        {selectedResume.aiAnalysis.strengths.map((s, i) => (
+                          <p key={i} className="text-xs text-text-secondary flex items-start gap-1">
+                            <CheckCircle className="w-3 h-3 text-success mt-0.5 shrink-0" /> {s}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+
+                    {selectedResume.aiAnalysis.weaknesses.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold text-danger mb-1">不足</p>
+                        {selectedResume.aiAnalysis.weaknesses.map((s, i) => (
+                          <p key={i} className="text-xs text-text-secondary flex items-start gap-1">
+                            <AlertCircle className="w-3 h-3 text-danger mt-0.5 shrink-0" /> {s}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="text-center py-4">
+                    <p className="text-xs text-text-muted mb-3">尚未分析简历</p>
+                    <Button size="sm" onClick={() => handleAnalyze(selectedResume)} loading={loading}>
+                      <Eye className="w-3.5 h-3.5" />
+                      AI 分析简历
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}

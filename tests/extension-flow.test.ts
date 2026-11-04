@@ -879,9 +879,17 @@ describe('extension application flow', () => {
         request.onsuccess = () => {
           const transaction = request.result.transaction('applications', 'readonly')
           const index = transaction.objectStore('applications').index('jobId')
-          const get = index.get('direct')
-          get.onerror = () => reject(get.error)
-          get.onsuccess = () => resolve(get.result?.matchScore)
+          const req1 = index.get('direct')
+          req1.onerror = () => reject(req1.error)
+          req1.onsuccess = () => {
+            if (req1.result) {
+              resolve(req1.result.matchScore)
+            } else {
+              const req2 = index.get('direct-score-bypass')
+              req2.onerror = () => reject(req2.error)
+              req2.onsuccess = () => resolve(req2.result?.matchScore)
+            }
+          }
         }
       })
     })

@@ -2,6 +2,7 @@ import { ALL_SKILLS } from '../parser/skills-dict'
 import { semanticSimilarity } from './semantic-refine'
 import { ROLE_KEYWORDS } from './role-keywords'
 import type { MatchResult, JobCard, MatchDimensions, JdRequirements } from '../types/job'
+import { getJobScoringText } from '../types/job'
 import type { Resume } from '../types/resume'
 
 // 维度满分：skills 45 / similarity 15 / direction 20 / experience 12 / education 8 = 100
@@ -16,9 +17,48 @@ export interface HardGateResult {
   reasons: string[]
 }
 
+// 语言家族：简历/岗位的编程语言能力归一。框架技能（Gin/Spring 等）不视为语言经验。
+// "Golang" 归一为 go；JS/TS 视为同族（TS 是 JS 超集，避免前端岗被误伤）。
+const LANGUAGE_FAMILIES: Record<string, string[]> = {
+  go: ['go', 'golang'],
+  java: ['java'],
+  python: ['python'],
+  php: ['php'],
+  'js/ts': ['javascript', 'typescript', 'js', 'ts'],
+  'c/c++': ['c++', 'cpp'],
+  'c#': ['c#', 'csharp'],
+  node: ['node', 'node.js', 'nodejs'],
+  ruby: ['ruby'],
+  rust: ['rust'],
+  swift: ['swift'],
+  kotlin: ['kotlin'],
+  dart: ['dart'],
+  scala: ['scala'],
+  shell: ['shell', 'bash'],
+}
+
+export function extractLanguageFamilies(text: string): string[] {
+  const found = new Set<string>()
+  for (const [family, aliases] of Object.entries(LANGUAGE_FAMILIES)) {
+    if (aliases.some((alias) => containsSkill(text, alias))) found.add(family)
+  }
+  return Array.from(found)
+}
+
+export function extractResumeLanguageFamilies(resumeSkills: string[]): string[] {
+  const lower = new Set(resumeSkills.map((s) => s.toLowerCase()))
+  const found = new Set<string>()
+  for (const [family, aliases] of Object.entries(LANGUAGE_FAMILIES)) {
+    if (aliases.some((alias) => lower.has(alias.toLowerCase()))) found.add(family)
+  }
+  return Array.from(found)
+}
+
 export function checkHardGates(job: JobCard, resume: Resume): HardGateResult {
   const reasons: string[] = []
   const req = job.requirements
+  // 评分/分析统一用评分文本（真实 JD 优先，列表页拼凑文本兜底）
+  const jdText = getJobScoringText(job)
 
   // 学历门槛
   if (req?.education && req.education !== '不限') {
@@ -39,10 +79,51 @@ export function checkHardGates(job: JobCard, resume: Resume): HardGateResult {
     }
   }
 
+  // 核心技能门槛（A4）：JD 要求的核心技能与简历技能零交集 → 一票否决。
+  // 解决"简历没写 Java 却投 Java 岗"：经验维度只比年限数字，不比经验的技术方向，
+  // 因此必须用技能交集兜底，防止 3 年前端经验被当成 3 年 Java 经验。
+  const resumeSkills = (resume.structuredData.skills || []).map((s) => s.toLowerCase())
+  if (resumeSkills.length > 0) {
+    let jdSkills: string[] = []
+    if (req?.skills && req.skills.length > 0) {
+      // 优先用 JD 结构化标注的"必须技能"；JD 未区分必须/加分时全部按核心技能处理
+      const required = req.skills.filter((s) => s.required).map((s) => s.skill)
+      jdSkills = required.length > 0 ? required : req.skills.map((s) => s.skill)
+    } else {
+      // 回退：从岗位匹配文本用技能词典扫描（列表页描述缺失时也能兜底）
+      jdSkills = Array.from(new Set(ALL_SKILLS.filter((skill) => containsSkill(jdText, skill))))
+    }
+    if (jdSkills.length > 0) {
+      const missingAll = jdSkills.every((skill) => !resumeSkills.includes(skill.toLowerCase()))
+      if (missingAll) {
+        reasons.push(`核心技能门槛：岗位要求${jdSkills.slice(0, 6).join('、')}等，简历技能均未涉及`)
+      }
+    }
+  }
+
+  // 语言硬门槛（A5）：岗位只要求单一语言家族，而简历不含该语言 → 一票否决。
+  // 修复"简历没写 Go/Java 却被投 Go/Java 岗"：框架（Gin/Spring）不等于语言经验；
+  // 简历有 TypeScript 视为具备 js/ts 家族能力；多语言岗位（≥2 家族）不触发，交给技能交集兜底。
+  const jdLangSource = [
+    job.title,
+    jdText,
+    ...(job.tags || []),
+    ...(req?.skills?.map((s) => s.skill) || []),
+  ].filter(Boolean).join(' ')
+  const jdLanguageFamilies = extractLanguageFamilies(jdLangSource)
+  const resumeLanguageFamilies = extractResumeLanguageFamilies(resumeSkills)
+  if (
+    jdLanguageFamilies.length === 1 &&
+    resumeLanguageFamilies.length > 0 &&
+    !resumeLanguageFamilies.includes(jdLanguageFamilies[0])
+  ) {
+    reasons.push(`语言门槛：岗位要求${jdLanguageFamilies[0]}语言经验，简历技能未包含`)
+  }
+
   return { passed: reasons.length === 0, reasons }
 }
 
-function getHighestDegree(resume: Resume): { degree: string; rank: number } | null {
+export function getHighestDegree(resume: Resume): { degree: string; rank: number } | null {
   let best: { degree: string; rank: number } | null = null
   for (const edu of resume.structuredData.education) {
     const rank = DEGREE_RANK[edu.degree]
@@ -136,6 +217,8 @@ function scoreEducation(resume: Resume, requirements?: JdRequirements): number {
 export function computeLocalMatch(resume: Resume, job: JobCard): MatchResult {
   const resumeData = resume.structuredData
   const resumeSkills = resumeData.skills
+  // 评分文本：真实 JD 优先（详情提取后），列表页拼凑文本兜底
+  const jdText = getJobScoringText(job)
   const resumeText = [
     resume.rawText,
     resumeData.summary,
@@ -150,19 +233,19 @@ export function computeLocalMatch(resume: Resume, job: JobCard): MatchResult {
     ]),
   ].filter(Boolean).join(' ')
 
-  const skillMatch = computeSkillOverlap(resumeSkills, job.jobDescription)
-  const skillGap = computeMissingSkills(resumeSkills, job.jobDescription)
+  const skillMatch = computeSkillOverlap(resumeSkills, jdText)
+  const skillGap = computeMissingSkills(resumeSkills, jdText)
 
   // 硬门槛（A3）：学历/年限不达标直接压分
   const gate = checkHardGates(job, resume)
 
   // 技能分：必须技能覆盖度
-  const reqCount = requiredSkillCount(job.jobDescription, job.requirements)
+  const reqCount = requiredSkillCount(jdText, job.requirements)
   const skillsScore = reqCount > 0
     ? Math.min(DIM_SCORE.skills, (skillMatch.length / reqCount) * DIM_SCORE.skills)
     : 0
 
-  const similarityScore = Math.round(textSimilarity(resumeText, job.jobDescription) * DIM_SCORE.similarity)
+  const similarityScore = Math.round(textSimilarity(resumeText, jdText) * DIM_SCORE.similarity)
   const directionScore = Math.round(roleAlignment(resumeText, job.title) * DIM_SCORE.direction)
 
   const resumeYears = resumeData.yearsOfExperience || resume.profile?.yearsOfExperience || 0

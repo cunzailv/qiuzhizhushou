@@ -13,7 +13,7 @@ import type { ApplyFilters } from '../../shared/types/filters'
 import { DEFAULT_FILTERS } from '../../shared/types/filters'
 import FilterPanel from '../components/FilterPanel'
 import {
-  TrendingUp, Send, Eye, CalendarCheck, Target,
+  TrendingUp, Send, Eye, CalendarCheck, Target, ExternalLink,
 } from 'lucide-react'
 
 const MOD = 'Popup:Dashboard'
@@ -55,6 +55,7 @@ export default function Dashboard({
       const savedExperience = await getSetting<string>('filterExperience', '')
       const savedEducation = await getSetting<string>('filterEducation', '')
       const savedExcludeKeywords = await getSetting<string>('filterExcludeKeywords', '')
+      const savedPublishTime = await getSetting<string>('filterPublishTime', 'week')
       const savedEnableAi = await getSetting<boolean>(
         'enableAiMatch',
         await getSetting<boolean>('filterEnableAiMatch', true),
@@ -68,6 +69,7 @@ export default function Dashboard({
         experience: savedExperience,
         education: savedEducation,
         excludeKeywords: savedExcludeKeywords,
+        publishTime: savedPublishTime,
         enableAiMatch: savedEnableAi,
         minMatchScore: savedMinScore,
       })
@@ -91,6 +93,7 @@ export default function Dashboard({
       if (updates.experience !== undefined) setSetting('filterExperience', f.experience)
       if (updates.education !== undefined) setSetting('filterEducation', f.education)
       if (updates.excludeKeywords !== undefined) setSetting('filterExcludeKeywords', f.excludeKeywords)
+      if (updates.publishTime !== undefined) setSetting('filterPublishTime', f.publishTime)
       if (updates.enableAiMatch !== undefined) setSetting('filterEnableAiMatch', f.enableAiMatch)
       if (updates.minMatchScore !== undefined) setSetting('filterMinMatchScore', f.minMatchScore)
     } catch { /* ignore */ }
@@ -126,6 +129,32 @@ export default function Dashboard({
       hired: 'success',
     }
     return <Badge variant={variants[status]}>{APPLICATION_STATUS_LABELS[status]}</Badge>
+  }
+
+  function renderScore(score: number | null | undefined) {
+    if (score === null || score === undefined) {
+      return <span className="text-[10px] text-text-muted">未评分</span>
+    }
+    const color = score >= 60 ? '#10B981' : score >= 40 ? '#F59E0B' : '#EF4444'
+    return (
+      <span
+        className="text-[11px] font-semibold px-1.5 py-0.5 rounded"
+        style={{ color, background: `${color}1A` }}
+        title="岗位匹配评分"
+      >
+        {score}分
+      </span>
+    )
+  }
+
+  function openJobDetail(app: Application) {
+    if (!app.jobId) return
+    const url = `https://www.zhipin.com/job_detail/${app.jobId}.html`
+    if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
+      chrome.tabs.create({ url }).catch(() => window.open(url, '_blank'))
+    } else {
+      window.open(url, '_blank')
+    }
   }
 
   return (
@@ -176,14 +205,22 @@ export default function Dashboard({
             <p className="text-xs text-text-muted text-center py-6">暂无沟通记录，快去沟通吧！</p>
           ) : (
             recentApps.map((app) => (
-              <Card key={app.id} className="flex items-center gap-3 py-2.5 px-3">
+              <Card
+                key={app.id}
+                className="flex items-center gap-3 py-2.5 px-3 hover:brightness-95 transition-all"
+                onClick={() => openJobDetail(app)}
+              >
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-medium text-text-primary truncate">{app.jobTitle}</p>
                   <p className="text-[10px] text-text-muted truncate">{app.companyName} · {app.salary}</p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
+                  {renderScore(app.matchScore)}
                   <span className="text-[10px] text-text-muted">{formatRelativeTime(app.appliedAt)}</span>
                   {getStatusBadge(app.status)}
+                  {app.jobId ? (
+                    <ExternalLink className="w-3 h-3 text-text-muted" />
+                  ) : null}
                 </div>
               </Card>
             ))

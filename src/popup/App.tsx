@@ -10,9 +10,14 @@ import {
   getPlatformById,
 } from '../shared/platform'
 import {
-  LayoutDashboard, FileText, ListChecks, Settings2, Bot,
+  LayoutDashboard, FileText, ListChecks, Settings2, Bot, Sparkles,
 } from 'lucide-react'
 import logoUrl from '../assets/logo-transparent.png'
+import PlatformShortcuts from './components/PlatformShortcuts'
+import { CampaignPanel } from './components/CampaignPanel'
+import { installGlobalErrorCapture } from '../shared/db/error-store'
+
+installGlobalErrorCapture()
 
 const MOD = 'Popup:App'
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -128,11 +133,12 @@ async function createSupportedBossTab(platformId?: string): Promise<chrome.tabs.
 }
 
 const TABS = [
-  { id: 'dashboard', label: '概览', icon: <LayoutDashboard className="w-3.5 h-3.5" /> },
-  { id: 'butler', label: '管家', icon: <Bot className="w-3.5 h-3.5" /> },
-  { id: 'resumes', label: '简历', icon: <FileText className="w-3.5 h-3.5" /> },
-  { id: 'tracker', label: '追踪', icon: <ListChecks className="w-3.5 h-3.5" /> },
-  { id: 'settings', label: '设置', icon: <Settings2 className="w-3.5 h-3.5" /> },
+  { id: 'dashboard', label: '概览', icon: <LayoutDashboard className="w-4 h-4" /> },
+  { id: 'pipeline', label: 'AIbot', icon: <Sparkles className="w-4 h-4" /> },
+  { id: 'butler', label: '管家', icon: <Bot className="w-4 h-4" /> },
+  { id: 'resumes', label: '简历', icon: <FileText className="w-4 h-4" /> },
+  { id: 'tracker', label: '追踪', icon: <ListChecks className="w-4 h-4" /> },
+  { id: 'settings', label: '设置', icon: <Settings2 className="w-4 h-4" /> },
 ]
 
 export default function App() {
@@ -392,6 +398,9 @@ export default function App() {
         </div>
       </div>
 
+      {/* 平台官网直达：五个平台一键跳转，无需手动输网址 */}
+      <PlatformShortcuts />
+
       {/* Content */}
       <Suspense fallback={<div className="p-6 text-center text-xs text-text-muted">加载中...</div>}>
         {activeTab === 'dashboard' && (
@@ -401,6 +410,11 @@ export default function App() {
             platformName={effectivePlatformName}
             applyRunning={applyRunning}
           />
+        )}
+        {activeTab === 'pipeline' && (
+          <div className="p-3">
+            <CampaignPanel onNotify={showToast} onNavigateTab={setActiveTab} />
+          </div>
         )}
         {activeTab === 'butler' && <Butler />}
         {activeTab === 'resumes' && <Resumes />}

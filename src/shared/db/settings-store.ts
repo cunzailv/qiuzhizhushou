@@ -1,4 +1,6 @@
 import { db } from './index'
+import type { CandidateProfilePreferences } from '../types/candidate-profile'
+import { DEFAULT_CANDIDATE_PREFERENCES } from '../types/candidate-profile'
 
 // 重要：content script 里的 IndexedDB 属于「网页域」（如 zhipin.com），
 // 与 popup/options（扩展域）不是同一个数据库，直接用 Dexie 读设置会读不到。
@@ -114,4 +116,32 @@ export async function syncSettingsToSharedStorage(): Promise<void> {
   } catch {
     // ignore
   }
+}
+
+const CANDIDATE_PREFS_KEY = 'candidate_profile_preferences'
+
+/** 获取求职者画像与底线配置 */
+export async function getCandidatePreferences(): Promise<CandidateProfilePreferences> {
+  const saved = await getSetting<Partial<CandidateProfilePreferences> | null>(
+    CANDIDATE_PREFS_KEY,
+    null,
+  )
+  if (!saved) return { ...DEFAULT_CANDIDATE_PREFERENCES }
+  return {
+    ...DEFAULT_CANDIDATE_PREFERENCES,
+    ...saved,
+  }
+}
+
+/** 保存求职者画像与底线配置 */
+export async function saveCandidatePreferences(
+  prefs: Partial<CandidateProfilePreferences>,
+): Promise<CandidateProfilePreferences> {
+  const current = await getCandidatePreferences()
+  const updated: CandidateProfilePreferences = {
+    ...current,
+    ...prefs,
+  }
+  await setSetting(CANDIDATE_PREFS_KEY, updated)
+  return updated
 }

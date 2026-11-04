@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="240" viewBox="0 0 1080 240" font-family="'PingFang SC','Hiragino Sans GB','Songti SC',sans-serif">
+  <rect width="1080" height="240" fill="#FFFFFF"/>
+  <text x="540" y="58" font-size="28" font-weight="700" fill="#1E3A8A" text-anchor="middle">一个入口，打通五大招聘平台</text>
+  <g font-size="24" font-weight="700" text-anchor="middle">
+    <rect x="30"  y="100" width="188" height="90" rx="14" fill="#FFF4EC" stroke="#FF7A2F" stroke-width="2"/>
+    <text x="124"  y="153" fill="#1E3A8A">Boss直聘</text>
+    <rect x="238" y="100" width="188" height="90" rx="14" fill="#FFF4EC" stroke="#FF7A2F" stroke-width="2"/>
+    <text x="332"  y="153" fill="#1E3A8A">猎聘</text>
+    <rect x="446" y="100" width="188" height="90" rx="14" fill="#FFF4EC" stroke="#FF7A2F" stroke-width="2"/>
+    <text x="540"  y="153" fill="#1E3A8A">前程无忧</text>
+    <rect x="654" y="100" width="188" height="90" rx="14" fill="#FFF4EC" stroke="#FF7A2F" stroke-width="2"/>
+    <text x="748"  y="153" fill="#1E3A8A">智联招聘</text>
+    <rect x="862" y="100" width="188" height="90" rx="14" fill="#FFF4EC" stroke="#FF7A2F" stroke-width="2"/>
+    <text x="956"  y="153" fill="#1E3A8A">脉脉</text>
+  </g>
+</svg>

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920" font-family="'PingFang SC','Hiragino Sans GB','Songti SC',sans-serif">
+  <rect width="1080" height="1920" fill="#FFFFFF"/>
+  <text x="540" y="240" font-size="60" font-weight="700" fill="#1E3A8A" text-anchor="middle">先打分，再决定投不投</text>
+  <circle cx="540" cy="620" r="170" fill="#FFF4EC" stroke="#FF7A2F" stroke-width="10"/>
+  <text x="540" y="700" font-size="200" font-weight="700" fill="#FF7A2F" text-anchor="middle">87</text>
+  <text x="540" y="830" font-size="34" fill="#475569" text-anchor="middle">匹配分 / 100</text>
+  <g font-size="40" font-weight="700">
+    <text x="220" y="1060" fill="#059669">✓ 技能匹配</text>
+    <text x="220" y="1150" fill="#059669">✓ 经验达标</text>
+    <text x="220" y="1240" fill="#DC2626">✗ 缺 K8s 实操</text>
+  </g>
+  <text x="540" y="1560" font-size="40" font-weight="700" fill="#1E3A8A" text-anchor="middle">AI 三层评分：先本地筛，再精评</text>
+</svg>

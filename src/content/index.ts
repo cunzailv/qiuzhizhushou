@@ -1,8 +1,10 @@
 // Content script entry point - injected into Boss Zhipin pages
 import { getActivePlatform } from '../shared/platform'
 import type { PlatformAdapter } from '../shared/platform/types'
+import { executeCampaignTask } from './task-runner'
+import { appendTasksToCampaign } from '../shared/agent/queue-store'
 import { setPlatformName } from './inject-ui'
-import { setLiepinResumeMode } from '../shared/platform/liepin'
+import { setLiepinResumeMode, fetchJobDetailDescription, prefilterLiepinJob } from '../shared/platform/liepin'
 import {
   getChatContacts,
   clickContact,
@@ -10,11 +12,15 @@ import {
   clickSendResume,
   selectAndSendResume,
   closeChatDialog,
+  getLastHrMessageFromChat,
+  fillChatInputAndSend,
 } from '../shared/platform/boss'
+import { generateHrReplyCopilot } from '../shared/ai/hr-copilot'
+import { getCandidatePreferences } from '../shared/db/settings-store'
 
 // 当前活动平台适配器（由 PlatformManager 按网址自动识别，或按设置手动覆盖）。
 let adapter: PlatformAdapter
-import { createFloatingPanel, updatePanelContent, showPanelToast } from './inject-ui'
+import { createFloatingPanel, updatePanelContent, showPanelToast, type ChatCopilotData } from './inject-ui'
 import { randomDelay, scanRisk, checkDailyLimit, incrementCounter } from '../shared/antiBot'
 import { matchResumeToJob } from '../shared/ai'
 import { reactLoop } from '../shared/agent'
@@ -26,12 +32,36 @@ import type { ApplyFilters } from '../shared/types/filters'
 import { DEFAULT_FILTERS, parseSalaryRange } from '../shared/types/filters'
 import type { JobCard, MatchResult } from '../shared/types/job'
 import type { Resume } from '../shared/types/resume'
+import {
+  extractTargetCareers,
+  evaluateJobCandidate,
+  isJobMatchingCareer,
+  isJobMatchingFreshness,
+} from '../shared/agent/job-filter'
+import { getBlacklist } from '../shared/db/blacklist-store'
 
 const MOD = 'ContentScript'
 
 // ------ State ------
 let isApplying = false
 let runStopped = false
+
+// Content 侧全局未捕获异常上报至 Background
+if (typeof window !== 'undefined') {
+  window.addEventListener('error', (e) => {
+    try {
+      chrome.runtime.sendMessage({
+        type: 'RECORD_ERROR',
+        payload: {
+          source: 'content.window',
+          message: e.message || String(e.error?.message ?? e.error ?? 'unknown'),
+          stack: e.error?.stack,
+          context: window.location.href,
+        },
+      })
+    } catch {}
+  })
+}
 let currentMode: 'batch' | 'recommend' = 'recommend'
 let panelHost: HTMLElement | null = null
 let matchResults: Array<{
@@ -40,6 +70,8 @@ let matchResults: Array<{
   score: number
   recommended: boolean
   scoreBypassed?: boolean
+  /** 猎聘两阶段：未通过卡片粗筛（分数为粗筛分，未做 AI 精评） */
+  prefiltered?: boolean
 }> = []
 let defaultResume: Resume | undefined = undefined
 let currentFilters: ApplyFilters = { ...DEFAULT_FILTERS }
@@ -175,6 +207,10 @@ async function init(): Promise<void> {
       isChatPage: initPageType === 'chat',
     })
     log(MOD, 'init', 'Floating panel created')
+
+    if (initPageType === 'chat') {
+      startChatCopilotObserver()
+    }
   } else {
     log(MOD, 'init', `Skipping — page type "${pageType}" not supported`)
   }
@@ -205,6 +241,169 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     log(MOD, 'onMessage', 'EXECUTE_STOP')
     stopApply()
     sendResponse({ success: true })
+  }
+  if (message.type === 'EXECUTE_CAMPAIGN_TASK') {
+    const task = message.payload?.task
+    ;(async () => {
+      if (!adapter) adapter = await getActivePlatform()
+      if (!defaultResume) defaultResume = await fetchFullResume()
+      if (!defaultResume) {
+        sendResponse({
+          taskId: task?.id,
+          status: 'failed',
+          failReason: '未找到默认简历，请在扩展中上传设置',
+        })
+        return
+      }
+      if (!panelHost?.isConnected) panelHost = createFloatingPanel()
+      const result = await executeCampaignTask(task, adapter, defaultResume, {
+        onProgress: (msg) => {
+          updatePanelContent(panelHost!, {
+            mode: 'recommend',
+            status: 'applying',
+            message: `🤖 [AI流水线] ${msg}`,
+            filters: currentFilters,
+            resumeMode: liepinResumeMode,
+          })
+        },
+      })
+      sendResponse(result)
+    })().catch((err) => {
+      try {
+        chrome.runtime.sendMessage({
+          type: 'RECORD_ERROR',
+          payload: {
+            source: 'content.campaign_task',
+            message: `执行任务未捕获异常: ${String(err)}`,
+            stack: err instanceof Error ? err.stack : undefined,
+            context: JSON.stringify({ taskId: task?.id, url: window.location.href }),
+          },
+        })
+      } catch {}
+      sendResponse({
+        taskId: task?.id,
+        status: 'failed',
+        failReason: String(err),
+      })
+    })
+    return true
+  }
+  if (message.type === 'COLLECT_PLATFORM_JOBS') {
+    const maxJobs = message.payload?.maxJobs || 25
+    const existingJobIdsList: string[] = message.payload?.existingJobIds || []
+    const excludeJobIds = new Set<string>(existingJobIdsList)
+
+    ;(async () => {
+      if (!adapter) adapter = await getActivePlatform()
+
+      // 等待页面职位卡片渲染（最多等待 8 秒）
+      for (let attempt = 0; attempt < 16; attempt++) {
+        const preview = adapter.parseJobCardsFromSearchPage()
+        if (preview.length > 0) break
+        await new Promise((r) => setTimeout(r, 500))
+      }
+
+      // 提取目标职业清单与筛选配置
+      const defaultResume = await fetchFullResume()
+      const effectiveFilters: ApplyFilters = message.payload?.filters || currentFilters
+      const targetCareers: string[] =
+        message.payload?.targetCareers && message.payload.targetCareers.length > 0
+          ? message.payload.targetCareers
+          : extractTargetCareers(defaultResume, effectiveFilters)
+
+      let blacklistSet = new Set<string>()
+      try {
+        const bl = await getBlacklist()
+        blacklistSet = new Set(bl.map((b) => b.companyName.trim()))
+      } catch {
+        // 忽略黑名单读取失败
+      }
+
+      const careerLabel = targetCareers.length > 0 ? targetCareers.join(' / ') : '全量职业'
+      const freshnessLabel =
+        effectiveFilters.publishTime === 'today'
+          ? '今日活跃'
+          : effectiveFilters.publishTime === '3days'
+          ? '3日内活跃'
+          : effectiveFilters.publishTime === 'month'
+          ? '本月活跃'
+          : effectiveFilters.publishTime === 'all'
+          ? '不限时间'
+          : '本周活跃'
+
+      if (!panelHost?.isConnected) panelHost = createFloatingPanel()
+      updatePanelContent(panelHost!, {
+        mode: 'recommend',
+        status: 'scanning',
+        message: `🤖 AIbot 正在按【${careerLabel} · ${freshnessLabel}】精准扫描最新职位入队…`,
+        filters: effectiveFilters,
+        resumeMode: liepinResumeMode,
+      })
+
+      const rawJobs = await adapter.collectJobCards(adapter.parseJobCardsFromSearchPage, {
+        maxJobs: maxJobs * 2,
+        excludeJobIds,
+        onCountChange: (count) => {
+          updatePanelContent(panelHost!, {
+            mode: 'recommend',
+            status: 'scanning',
+            message: `🤖 AIbot 正在扫描推荐流，已初筛 ${count} 个岗位卡片…`,
+            filters: effectiveFilters,
+            resumeMode: liepinResumeMode,
+          })
+        },
+      })
+
+      // 对采集到的卡片进行严格的简历职业方向、时间新鲜度、企业黑名单、薪资地点过滤
+      const filteredJobs: JobCard[] = []
+      let filteredByCareer = 0
+      let filteredByTime = 0
+      let filteredByBlacklist = 0
+
+      for (const job of rawJobs) {
+        const evalRes = evaluateJobCandidate(job, {
+          filters: effectiveFilters,
+          targetCareers,
+          blacklist: blacklistSet,
+        })
+        if (!evalRes.pass) {
+          if (evalRes.reason?.includes('职业方向')) filteredByCareer++
+          else if (evalRes.reason?.includes('活跃度') || evalRes.reason?.includes('时间')) filteredByTime++
+          else if (evalRes.reason?.includes('黑名单')) filteredByBlacklist++
+          continue
+        }
+        filteredJobs.push(job)
+        if (filteredJobs.length >= maxJobs) break
+      }
+
+      const tasks = filteredJobs.map((j) => ({
+        id: `${adapter.id}:${j.id}`,
+        platform: adapter.id as any,
+        jobId: j.id,
+        jobTitle: j.title,
+        company: j.companyName,
+        jobUrl: j.url,
+        salary: j.salary,
+        location: j.location,
+        experience: j.experience,
+        education: j.education,
+        tags: j.tags,
+        bossName: j.bossName,
+        bossTitle: j.bossTitle,
+      }))
+      const added = await appendTasksToCampaign(tasks)
+      sendResponse({
+        success: true,
+        collected: rawJobs.length,
+        added,
+        filteredByCareer,
+        filteredByTime,
+        filteredByBlacklist,
+      })
+    })().catch((err) => {
+      sendResponse({ success: false, error: String(err) })
+    })
+    return true
   }
   if (message.type === 'GET_PAGE_INFO') {
     const pageType = adapter.detectPageType()
@@ -275,6 +474,29 @@ window.addEventListener('message', (event) => {
     log(MOD, 'panelMessage', 'SEND_RESUMES')
     sendResumesOnChatPage()
   }
+  if (data?.type === 'BOSS_ASSISTANT_SETTINGS_CHANGED') {
+    log(MOD, 'panelMessage', 'SETTINGS_CHANGED via in-page Butler Chat, reloading filters...')
+    loadApplyDefaultsFromSettings().then(() => {
+      if (panelHost) {
+        updatePanelContent(panelHost, {
+          mode: currentMode,
+          status: 'idle',
+          filters: currentFilters,
+          resumeMode: liepinResumeMode,
+        })
+      }
+    })
+  }
+  if (data?.type === 'BOSS_ASSISTANT_COPILOT_FILL') {
+    const text = data.text || ''
+    fillChatInputAndSend(text, false)
+    if (panelHost) showPanelToast(panelHost, '已填入输入框，可在网页中编辑或发送', 'success')
+  }
+  if (data?.type === 'BOSS_ASSISTANT_COPILOT_SEND') {
+    const text = data.text || ''
+    fillChatInputAndSend(text, true)
+    if (panelHost) showPanelToast(panelHost, '已通过 Copilot 发送回复', 'success')
+  }
 })
 
 // ------ Filter Logic ------
@@ -282,7 +504,7 @@ function filterJobs(jobs: JobCard[], filters: ApplyFilters): { passed: JobCard[]
   const passed: JobCard[] = []
   let skipped = 0
 
-  const titleKeywords = filters.jobTitles.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  const titleKeywords = filters.jobTitles.trim().toLowerCase().split(/[,;\s|]+/).filter(Boolean)
   const locationKeywords = filters.locations.trim().toLowerCase().split(/\s+/).filter(Boolean)
   const excludeKeywords = filters.excludeKeywords.trim().toLowerCase().split(/\s+/).filter(Boolean)
 
@@ -290,8 +512,11 @@ function filterJobs(jobs: JobCard[], filters: ApplyFilters): { passed: JobCard[]
     let skip = false
 
     if (!skip && titleKeywords.length > 0) {
-      const jobTitleLower = job.title.toLowerCase()
-      if (!titleKeywords.every(kw => jobTitleLower.includes(kw))) skip = true
+      if (!isJobMatchingCareer(job.title, titleKeywords)) skip = true
+    }
+
+    if (!skip && filters.publishTime) {
+      if (!isJobMatchingFreshness(job.publishedAt, filters.publishTime)) skip = true
     }
 
     if (!skip && locationKeywords.length > 0) {
@@ -435,13 +660,39 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
   const appliedJobIds = await getSharedAppliedJobIds()
   log(MOD, 'startApply', `Already applied: ${appliedJobIds.length} jobs`)
 
+  // ── 方案A：猎聘两阶段评分 ──
+  // 猎聘搜索卡片没有 JD 正文（只有"标题+薪资+年限+学历"摘要），直接送 AI 评分
+  // 只能得到 34-40 分的低分且毫无区分度。因此：
+  //  阶段1 用本地规则（语言家族/标题/薪资/年限/学历/城市）粗筛全部岗位，取 topN 为候选；
+  //  阶段2 仅对候选 fetch 详情页真实 JD（SSR JSON-LD，免跳转）再走 AI/本地精评。
+  let liepinPrefilter: { candidates: Set<string>; scores: Map<string, number> } | null = null
+  const isLiepin = adapter.id === 'liepin'
+  if (isLiepin && filters?.enableAiMatch !== false) {
+    const prefilterLimit = await getSetting<number>('liepinDetailReviewLimit', 20)
+    const scored: Array<{ job: JobCard; pre: { pass: boolean; score: number; reasons: string[] } }> = jobs.map((job) => ({
+      job,
+      pre: prefilterLiepinJob(job, defaultResume!, filters),
+    }))
+    const passed = scored
+      .filter((x) => x.pre.pass)
+      .sort((a, b) => b.pre.score - a.pre.score)
+      .slice(0, prefilterLimit)
+    liepinPrefilter = {
+      candidates: new Set(passed.map((x) => x.job.id)),
+      scores: new Map(scored.map((x) => [x.job.id, x.pre.score])),
+    }
+    log(MOD, 'startApply', `Liepin two-stage: ${passed.length}/${jobs.length} candidates (limit ${prefilterLimit})`)
+  }
+
   updatePanelContent(panelHost!, {
     mode: currentMode,
     stats: { total: jobs.length, processed: 0, matched: 0 },
     status: 'matching',
     message: filters?.enableAiMatch === false
       ? `筛选后 ${jobs.length} 个岗位，准备沟通...`
-      : `筛选后 ${jobs.length} 个岗位，开始匹配分析...`,
+      : isLiepin && liepinPrefilter
+        ? `粗筛完成：${liepinPrefilter.candidates.size}/${jobs.length} 个进入详情精评…`
+        : `筛选后 ${jobs.length} 个岗位，开始匹配分析...`,
     filters, resumeMode: liepinResumeMode,
   })
 
@@ -500,6 +751,29 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
       break
     }
 
+    // 猎聘两阶段：未通过卡片粗筛的岗位直接落结果（展示粗筛分），不调 AI、不抓详情
+    if (isLiepin && liepinPrefilter && !liepinPrefilter.candidates.has(job.id)) {
+      const preScore = liepinPrefilter.scores.get(job.id) ?? 0
+      processedCount++
+      matchResults.push({
+        title: job.title,
+        companyName: job.companyName,
+        score: preScore,
+        recommended: false,
+        prefiltered: true,
+      })
+      updatePanelContent(panelHost!, {
+        mode: currentMode,
+        stats: { total: jobs.length, processed: processedCount, matched: matchedCount },
+        status: 'matching',
+        matchResults,
+        message: `粗筛未过: ${job.title} (${preScore}分)`,
+        filters: currentFilters, resumeMode: liepinResumeMode,
+      })
+      await randomDelay(200, 500)
+      continue
+    }
+
     const scoreBypassed = filters?.enableAiMatch === false
     let evaluatedMatch: MatchResult
     let preOpenedDetail: HTMLElement | null = null  // 批量模式下预打开的详情面板
@@ -518,13 +792,33 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
     } else {
       log(MOD, 'startApply', `Matching: ${job.title} @ ${job.companyName} (${job.salary})`)
 
+      // 猎聘两阶段精评前置：候选岗 fetch 详情页真实 JD（SSR JSON-LD），失败回退卡片文本
+      if (isLiepin && liepinPrefilter) {
+        updatePanelContent(panelHost!, {
+          mode: currentMode,
+          stats: { total: jobs.length, processed: processedCount, matched: matchedCount },
+          status: 'matching',
+          matchResults,
+          message: `📄 抓取JD: ${job.title}`,
+          filters: currentFilters, resumeMode: liepinResumeMode,
+        })
+        await randomDelay(300, 800)
+        const jd = await fetchJobDetailDescription(job.url)
+        if (jd && jd.length > (job.jobDescription || '').length) {
+          job.jobDescription = jd
+          log(MOD, 'startApply', `Liepin JD fetched (${jd.length} chars) for ${job.title}`)
+        } else {
+          logWarn(MOD, 'startApply', `Liepin JD fetch failed, fallback to card text: ${job.title}`)
+        }
+      }
+
       // 批量模式：先打开详情面板获取真实 JD，再做 AI 匹配评分。
-      // 搜索页的 jobDescription 只是标题+薪资的拼凑文本，真实 JD 在详情面板中。
+      // 列表页卡片的 jobDescription 只是预览（可能为空），评分由 matchingText 拼凑文本兜底；
+      // 真实 JD 在详情面板中，轮询提取成功后写入 jobDescription（评分与落库都更准确）。
       if (currentMode === 'batch') {
         preOpenedDetail = await adapter.activateJobCard(job.url, job.id, job.title, job.companyName)
         if (preOpenedDetail) {
-          await new Promise((r) => setTimeout(r, 400))
-          const fullDesc = adapter.extractJobDescriptionFromDetail(preOpenedDetail)
+          const fullDesc = await waitForJobDescription(preOpenedDetail, job.jobDescription || '', 2500)
           if (fullDesc && fullDesc.length > (job.jobDescription || '').length) {
             job.jobDescription = fullDesc
             log(MOD, 'startApply', `Real JD extracted (${fullDesc.length} chars) for scoring`)
@@ -618,6 +912,33 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
   logGroupEnd()
 }
 
+/**
+ * 轮询等待详情面板真实 JD 出现：
+ * 固定延时在 JD 异步加载慢时容易抓到空；这里每 120ms 提取一次，
+ * 直到连续两轮稳定且长度超过当前文本，或超时返回当前最佳。
+ */
+async function waitForJobDescription(
+  detail: HTMLElement,
+  current: string,
+  timeoutMs = 2500,
+): Promise<string> {
+  const deadline = Date.now() + timeoutMs
+  let best = ''
+  let stableRounds = 0
+  while (Date.now() < deadline) {
+    const text = adapter.extractJobDescriptionFromDetail(detail)
+    if (text.length > best.length) {
+      best = text
+      stableRounds = 0
+    } else if (text.length === best.length && text.length > 0) {
+      stableRounds++
+    }
+    if (best.length > current.length && stableRounds >= 2) return best
+    await new Promise((r) => setTimeout(r, 120))
+  }
+  return best
+}
+
 async function applyToJob(job: JobCard, match: MatchResult, preOpenedDetail?: HTMLElement | null): Promise<boolean> {
   log(MOD, 'applyToJob', `Applying: ${job.title} @ ${job.companyName} (score=${match.score})`)
 
@@ -642,8 +963,7 @@ async function applyToJob(job: JobCard, match: MatchResult, preOpenedDetail?: HT
 
   // 如果详情是新打开的（非预打开），补充提取 JD
   if (!preOpenedDetail) {
-    await new Promise((r) => setTimeout(r, 350))
-    const fullDesc = adapter.extractJobDescriptionFromDetail(jobDetail)
+    const fullDesc = await waitForJobDescription(jobDetail, job.jobDescription || '', 2500)
     if (fullDesc && fullDesc.length > (job.jobDescription || '').length) {
       job.jobDescription = fullDesc
     }
@@ -758,7 +1078,7 @@ async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolea
   await randomDelay(400, 800)
 
   if (detailEl) {
-    const desc = adapter.extractJobDescriptionFromDetail(detailEl)
+    const desc = await waitForJobDescription(detailEl, job.jobDescription || '', 1800)
     if (desc && desc.length > (job.jobDescription || '').length) {
       job.jobDescription = desc
     }
@@ -994,6 +1314,105 @@ async function sendResumesOnChatPage(): Promise<void> {
     resumeMode: liepinResumeMode, isChatPage: true,
     filters: currentFilters,
   })
+}
+
+// ─── Boss 聊天页：HR 经典追问智能应答 Copilot ───
+let chatObserverInterval: number | null = null
+let lastObservedHrText = ''
+let isAnalyzingHrMessage = false
+let currentCopilotData: ChatCopilotData | null = null
+
+export async function checkAndTriggerChatCopilot(): Promise<void> {
+  if (!panelHost?.isConnected) return
+  const isChat = adapter?.detectPageType?.() === 'chat' || window.location.href.includes('/web/geek/chat')
+  if (!isChat) return
+
+  const hrMsgObj = getLastHrMessageFromChat()
+  if (!hrMsgObj || !hrMsgObj.text) return
+
+  const currentText = hrMsgObj.text.trim()
+  if (currentText === lastObservedHrText || isAnalyzingHrMessage) {
+    return
+  }
+
+  lastObservedHrText = currentText
+  isAnalyzingHrMessage = true
+
+  // 1. 设置思考态
+  currentCopilotData = {
+    hrMessage: currentText,
+    loading: true,
+  }
+  updatePanelContent(panelHost, {
+    mode: currentMode,
+    status: 'idle',
+    filters: currentFilters,
+    resumeMode: liepinResumeMode,
+    isChatPage: true,
+    chatCopilot: currentCopilotData,
+  })
+
+  try {
+    // 2. 加载用户预设画像与底线、完整简历
+    const [preferences, sharedResume] = await Promise.all([
+      getCandidatePreferences(),
+      defaultResume ? Promise.resolve(defaultResume) : fetchFullResume(),
+    ])
+
+    // 3. 提取当前聊天上下文中的职位与公司名称（若页面中有渲染）
+    let jobTitle = '目标岗位'
+    let companyName = '贵司'
+    const titleEl = document.querySelector<HTMLElement>(
+      '.chat-conversation .job-title, [class*="job-name"], .chat-user .job, .chat-user-header [class*="job"]',
+    )
+    if (titleEl?.textContent?.trim()) jobTitle = titleEl.textContent.trim()
+    const compEl = document.querySelector<HTMLElement>(
+      '.chat-conversation .company-name, [class*="company-title"], .chat-user .company, .chat-user-header [class*="company"]',
+    )
+    if (compEl?.textContent?.trim()) companyName = compEl.textContent.trim()
+
+    // 4. 调用 HR Copilot 引擎生成高情商建议
+    const result = await generateHrReplyCopilot({
+      hrMessage: currentText,
+      jobTitle,
+      companyName,
+      resume: sharedResume || null,
+      preferences,
+    })
+
+    currentCopilotData = {
+      hrMessage: currentText,
+      replyText: result.replyText,
+      matchedFact: result.matchedFact,
+      bottomLineAlert: result.bottomLineAlert,
+      intent: result.intent,
+      confidence: result.confidence,
+      loading: false,
+    }
+
+    updatePanelContent(panelHost, {
+      mode: currentMode,
+      status: 'idle',
+      filters: currentFilters,
+      resumeMode: liepinResumeMode,
+      isChatPage: true,
+      chatCopilot: currentCopilotData,
+    })
+  } catch (err) {
+    logError(MOD, 'ChatCopilot', err)
+  } finally {
+    isAnalyzingHrMessage = false
+  }
+}
+
+export function startChatCopilotObserver(): void {
+  if (chatObserverInterval !== null) return
+  // 周期轮询感知会话区的 HR 最新追问（2.5 秒感知一次）
+  chatObserverInterval = window.setInterval(() => {
+    checkAndTriggerChatCopilot()
+  }, 2500)
+  // 初次即时触发一次感知
+  setTimeout(checkAndTriggerChatCopilot, 1000)
 }
 
 function stopApply(): void {

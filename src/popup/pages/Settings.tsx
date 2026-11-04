@@ -3,13 +3,15 @@ import { Card } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
 import { Toast } from '../../components/ui/toast'
 import { setSetting, getAllSettings } from '../../shared/db/settings-store'
-import { testAIConnection, BUILTIN_MODELS, getPresetById, getCustomModels, saveCustomModels, generateCustomModelId } from '../../shared/ai'
+import { testAIConnection, BUILTIN_MODELS, getPresetById, getCustomModels, saveCustomModels, generateCustomModelId, getAiUsageToday, getAiBudgetLimit, resetAiBudget } from '../../shared/ai'
 import type { ModelPreset } from '../../shared/ai'
 import { getBlacklist } from '../../shared/db/blacklist-store'
 import { exportApplications } from '../../shared/export'
 import { getAllApplications } from '../../shared/db/application-store'
 import type { PluginSettings } from '../../shared/types/settings'
 import { DEFAULT_SETTINGS } from '../../shared/types/settings'
+import { CandidatePreferencesCard } from '../components/CandidatePreferencesCard'
+import { NotificationSettingsCard } from '../components/NotificationSettingsCard'
 import {
   Key, Zap, Shield, Download, AlertTriangle,
   ChevronDown, ExternalLink, Plus, X,
@@ -25,6 +27,7 @@ export default function Settings() {
   const [customModels, setCustomModels] = useState<ModelPreset[]>([])
   const [showAddForm, setShowAddForm] = useState(false)
   const [newModel, setNewModel] = useState({ name: '', provider: '', baseUrl: '', modelName: '' })
+  const [aiUsage, setAiUsage] = useState<{ used: number; limit: number } | null>(null)
 
   const allModels = [...BUILTIN_MODELS, ...customModels]
   const selectedPreset = allModels.find(m => m.id === settings.modelPreset)
@@ -51,6 +54,19 @@ export default function Settings() {
 
     const bl = await getBlacklist()
     setBlacklistCount(bl.length)
+
+    refreshAiUsage()
+  }
+
+  async function refreshAiUsage() {
+    const [used, limit] = await Promise.all([getAiUsageToday(), getAiBudgetLimit()])
+    setAiUsage({ used, limit })
+  }
+
+  async function handleResetAiBudget() {
+    await resetAiBudget()
+    await refreshAiUsage()
+    showToast('今日 AI 调用计数已重置', 'success')
   }
 
   async function handleSave(updates: Partial<PluginSettings>) {
@@ -118,6 +134,7 @@ export default function Settings() {
     const result = await testAIConnection()
     showToast(result.message, result.success ? 'success' : 'error')
     setTesting(false)
+    refreshAiUsage()
   }
 
   async function handleExport() {
@@ -342,9 +359,28 @@ export default function Settings() {
               onChange={(e) => handleSave({ aiDailyBudget: parseInt(e.target.value) })}
               className="w-full accent-primary"
             />
+            <div className="flex items-center justify-between mt-1.5">
+              <span className={`text-[11px] ${aiUsage && aiUsage.used >= aiUsage.limit ? 'text-error font-semibold' : 'text-text-muted'}`}>
+                今日已用: {aiUsage ? `${aiUsage.used} / ${aiUsage.limit} 次` : '加载中…'}
+                {aiUsage && aiUsage.used >= aiUsage.limit && '（已超限，AI 已暂停）'}
+              </span>
+              <button
+                onClick={handleResetAiBudget}
+                className="text-[11px] text-primary-light hover:underline"
+                type="button"
+              >
+                重置今日计数
+              </button>
+            </div>
           </div>
         </div>
       </Card>
+
+      {/* HR 追问 Copilot 求职画像与底线配置 */}
+      <CandidatePreferencesCard onNotify={showToast} />
+
+      {/* 跨端实时通知推送 (Webhook: 飞书/钉钉/企微/Server酱/Bark) */}
+      <NotificationSettingsCard onNotify={showToast} />
 
       {/* Anti-bot Settings */}
       <Card>

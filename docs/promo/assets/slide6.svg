@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920" font-family="'PingFang SC','Hiragino Sans GB','Songti SC',sans-serif">
+  <rect width="1080" height="1920" fill="#FFFFFF"/>
+  <text x="540" y="240" font-size="56" font-weight="700" fill="#1E3A8A" text-anchor="middle">合适的批量谈，不合适的跳过</text>
+  <rect x="140" y="620" width="800" height="44" rx="22" fill="#E2E8F0"/>
+  <rect x="140" y="620" width="320" height="44" rx="22" fill="#FF7A2F"/>
+  <text x="540" y="710" font-size="34" fill="#475569" text-anchor="middle">已沟通 12 / 30</text>
+  <g font-size="32" font-weight="700" text-anchor="middle">
+    <rect x="160" y="830" width="240" height="84" rx="42" fill="#ECFDF5" stroke="#10B981" stroke-width="2"/><text x="280" y="882" fill="#059669">已读 5</text>
+    <rect x="420" y="830" width="240" height="84" rx="42" fill="#FFF4EC" stroke="#FF7A2F" stroke-width="2"/><text x="540" y="882" fill="#FF7A2F">沟通中 3</text>
+    <rect x="680" y="830" width="240" height="84" rx="42" fill="#EFF6FF" stroke="#1E3A8A" stroke-width="2"/><text x="800" y="882" fill="#1E3A8A">邀约 1</text>
+  </g>
+  <text x="540" y="1120" font-size="38" font-weight="700" fill="#1E3A8A" text-anchor="middle">低分岗位自动跳过，把精力留给头部机会</text>
+</svg>

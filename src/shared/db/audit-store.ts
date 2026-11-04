@@ -14,6 +14,7 @@ export interface AuditRecord {
   goal?: string
   tool?: string             // click / type / ...
   target?: string
+  taskId?: string
   permissionLevel?: 'auto' | 'confirm' | 'denied'
   result: AuditResult
   error?: string

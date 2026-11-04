@@ -3,11 +3,17 @@ import { saveAs } from 'file-saver'
 import type { Application } from '../types/application'
 import { APPLICATION_STATUS_LABELS } from '../types/application'
 import { formatDate } from '../utils'
+import { sanitizeJobText } from '../utils/text-sanitizer'
 
 export interface ExportOptions {
   applications: Application[]
   format: 'csv' | 'xlsx'
   fileName?: string
+}
+
+export function sanitizeExportText(text?: string): string {
+  if (!text) return ''
+  return sanitizeJobText(text)
 }
 
 export function exportApplications({ applications, format, fileName }: ExportOptions): void {
@@ -19,20 +25,20 @@ export function exportApplications({ applications, format, fileName }: ExportOpt
 
   const rows = applications.map((app) => [
     formatDate(app.appliedAt),
-    app.jobTitle,
-    app.companyName,
-    app.salary,
-    app.location,
-    app.experience,
-    app.education,
-    (app.tags || []).join('、'),
-    app.jobDescription || '',
+    sanitizeExportText(app.jobTitle),
+    sanitizeExportText(app.companyName),
+    sanitizeExportText(app.salary),
+    sanitizeExportText(app.location),
+    sanitizeExportText(app.experience),
+    sanitizeExportText(app.education),
+    (app.tags || []).map(sanitizeExportText).filter(Boolean).join('、'),
+    sanitizeExportText(app.jobDescription),
     APPLICATION_STATUS_LABELS[app.status],
     app.matchScore === null ? '未评分' : `${app.matchScore}分`,
-    app.matchReason || '',
-    app.bossName || '',
-    app.bossTitle || '',
-    app.notes || '',
+    sanitizeExportText(app.matchReason),
+    sanitizeExportText(app.bossName || ''),
+    sanitizeExportText(app.bossTitle || ''),
+    sanitizeExportText(app.notes || ''),
   ])
 
   const data = [headers, ...rows]

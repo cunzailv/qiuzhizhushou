@@ -17,10 +17,20 @@ function containsAny(text: string, markers?: string[]): boolean {
 }
 
 export function detectCaptcha(markers?: string[]): boolean {
+  // 只统计"真实显示"的验证码元素：隐藏、不可见或尺寸过小的容器（预加载的验证码
+  // iframe / 隐藏 div 等）不应触发暂停，否则用户看不到验证码却一直卡在"请手动完成验证"。
   const captchaElements = document.querySelectorAll(
     '[class*="captcha"], [class*="verify"], [id*="captcha"], [id*="verify"], .geetest_panel, .captcha-box'
   )
-  if (captchaElements.length > 0) return true
+  for (const el of captchaElements) {
+    if (!(el instanceof HTMLElement)) continue
+    const style = window.getComputedStyle(el)
+    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) continue
+    const rect = el.getBoundingClientRect()
+    if (rect.width < 20 || rect.height < 20) continue
+    return true
+  }
+  // 文本标记：仅当页面可见文本明确出现验证提示文案时判定
   if (containsAny(document.body?.innerText || '', markers)) return true
   return false
 }

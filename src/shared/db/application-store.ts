@@ -1,5 +1,6 @@
 import { db } from './index'
 import type { Application, ApplicationStatus } from '../types/application'
+import { sendWebhookNotification } from '../notification/webhook-notifier'
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2)
@@ -26,6 +27,7 @@ export async function saveApplication(
     id: generateId(),
     status: 'applied',
     notes: '',
+    matchScore: data.matchScore ?? null,
     appliedAt: data.appliedAt ?? now,
     updatedAt: now,
   }
@@ -42,6 +44,20 @@ export async function updateApplicationStatus(id: string, status: ApplicationSta
     updates.notes = notes
   }
   await db.applications.update(id, updates)
+
+  // 触发跨端实时推送通知（如 HR 面试邀约）
+  if (status === 'interview') {
+    db.applications.get(id).then((app) => {
+      if (app) {
+        sendWebhookNotification({
+          title: `🎉 收到面试邀约: ${app.companyName}`,
+          content: `恭喜！岗位【${app.jobTitle}】已进入面试邀约阶段！\n\n- **公司**：${app.companyName}\n- **薪资**：${app.salary || '面议'}\n- **备注**：${notes || app.notes || '暂无备注'}`,
+          type: 'interview',
+          extra: { applicationId: id, company: app.companyName, jobTitle: app.jobTitle },
+        }).catch(() => {})
+      }
+    }).catch(() => {})
+  }
 }
 
 export async function getTodayCount(): Promise<number> {
@@ -81,4 +97,8 @@ export async function getStats(): Promise<{
 
 export async function updateApplicationNotes(id: string, notes: string): Promise<void> {
   await db.applications.update(id, { notes, updatedAt: new Date().toISOString() })
+}
+
+export async function clearApplications(): Promise<void> {
+  await db.applications.clear()
 }

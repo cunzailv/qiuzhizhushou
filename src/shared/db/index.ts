@@ -125,6 +125,20 @@ export class BossZhipinDB extends Dexie {
       applyRuns: 'jobId, state, updatedAt',
       errors: 'id, createdAt, source, message',
     })
+
+    this.version(8).stores({
+      agentSkills: 'id, platform, pageType, goal, [platform+pageType+goal], [platform+goal], lastUsedAt, expiresAt',
+    }).upgrade(async (tx) => {
+      // M1：为存量技能补齐 patchSource（历史存量记录默认标记为 heuristic 启发式）
+      await tx
+        .table<AgentSkill, string>('agentSkills')
+        .toCollection()
+        .modify((skill: AgentSkill) => {
+          if (skill.patchSource === undefined) {
+            skill.patchSource = 'heuristic'
+          }
+        })
+    })
   }
 }
 

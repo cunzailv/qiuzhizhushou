@@ -12,6 +12,11 @@ export interface PluginSettings {
   maxDelay: number
   scrollDelay: number
 
+  // 分平台每日配额与延迟配置
+  platformQuotas?: Record<string, number>
+  platformDelays?: Record<string, { minDelayMs: number; maxDelayMs: number }>
+  campaignWindows?: Array<{ start: number; end: number }>
+
   // 单次扫描（采集）的最大岗位数量。0 表示不限制（扫描到页面无更多为止）。
   maxScanCount: number
 

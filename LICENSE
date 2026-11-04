@@ -19,3 +19,36 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+--------------------------------------------------------------------------------
+ADDITIONAL ETHICAL USE, ANTI-ABUSE & COMPLIANCE DISCLAIMER
+附加道德准则、防滥用与合规免责声明
+--------------------------------------------------------------------------------
+
+1. 非侵入与合规使用 (Non-Intrusive & Compliance Principle)
+   本项目（智能求职助手 / qiuzhizhushou）旨在为个人求职者提供 AI 辅助匹配、简历画像理解、
+   个性化打招呼建议与投递追踪等个人提效辅助工具，仅供个人学习、技术研究及合法正当的个人求职使用。
+   任何组织或个人不得将本项目用于任何违反国家法律法规、侵犯第三方合法权益，
+   或违反各招聘平台服务条款（Terms of Service, ToS）的行为。
+
+2. 严禁恶意滥用与黑产 (Strict Prohibition of Malicious Use & Spamming)
+   严禁利用本项目进行：
+   - 任何形式的恶意网络扫描、拒绝服务攻击（DDoS）或超出正常人类阅读频率的超高频并发请求；
+   - 批量爬取、倒卖、转售、非法泄露任何求职者简历或企业招聘方的公开/非公开商业数据；
+   - 批量群发垃圾招聘信息、违规骚扰信息或伪造虚假求职经历；
+   - 商业化闭源转售、非法封装为黑产牟利工具或实施任何形式的欺诈行为。
+
+3. 风险自担与免责 (Limitation of Liability & Assumption of Risk)
+   用户在使用自动化与打招呼功能时，应自觉遵守各大招聘平台的频率限制与使用规范，
+   自行承担由于过度使用、频率设置过快或违规操作导致的账号限制、验证码拦截、平台封禁等一切风险。
+   项目作者与贡献者不对使用本软件产生的任何直接或间接后果、账号损失、商业损失或法律责任承担连带责任。
+
+4. 隐私与数据安全保护 (Privacy & Data Protection Notice)
+   本项目默认严格执行「纯本地存储优先（Local-First）」架构，用户的简历明文、求职历史、
+   大模型 API Key 均保存在用户浏览器本地 IndexedDB / chrome.storage 沙箱环境中，
+   项目本身不架设任何远程数据采集服务器。请使用者妥善保管个人 API Key 与本地设备数据安全。
+
+5. 第三方商标与非官方背书 (Third-Party Trademarks & Non-Endorsement)
+   本项目中所提及的招聘平台名称、商标、徽标（包括但不限于 Boss直聘、猎聘、智联招聘、前程无忧、脉脉等）
+   均为其各自合法权利所有人的财产。本项目为独立的第三方开源工具，与上述任何招聘平台不存在任何官方关联、
+   投资合作或商业背书关系。

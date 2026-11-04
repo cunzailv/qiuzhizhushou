@@ -9,6 +9,10 @@
 import type { JobCard, MatchResult } from '../../types/job'
 import type { PlatformAdapter, PlatformRiskConfig, CollectOptions, PageType, CommunicationUiSnapshot } from '../types'
 import { log } from '../../utils/logger'
+import { extractLanguageFamilies, extractResumeLanguageFamilies, getHighestDegree } from '../../ai/local-matcher'
+import type { Resume } from '../../types/resume'
+import type { ApplyFilters } from '../../types/filters'
+import { parseSalaryRange } from '../../types/filters'
 
 // 猎聘专属：投简历模式开关（由 content script 在收到浮窗消息后调用）
 let resumeMode = false
@@ -22,8 +26,32 @@ export function setLiepinResumeMode(enabled: boolean): void {
 // zhaopin 搜索页和旧版列表页使用不同的 CSS 类名，需要兼容两种。
 // data-nick 属性在两个版本中保持稳定，用作解析锚点。
 
-// 卡片容器：兼容旧版 job-list-item 和新版 zhaopin 页 job-card-pc-container
-const JOB_CARD_SELECTOR = '[class*="job-list-item"], [class*="job-card-pc-container"]'
+// 卡片容器：兼容旧版 job-list-item、新版 zhaopin 页 job-card-pc-container，
+// 以及最新 zhaopin 搜索页以详情锚点 a[data-nick="job-detail-job-info"] 自身承载全部岗位信息（标题/薪资/地点/经验/学历）的情况
+const JOB_CARD_SELECTOR = [
+  '[class*="job-list-item"]',
+  '[class*="job-card-pc-container"]',
+  'a[data-nick="job-detail-job-info"]',
+].join(', ')
+
+/** 从卡片元素解析详情链接：卡片自身可能是 a[data-nick]（最新 zhaopin 页） */
+function resolveDetailLink(card: Element): HTMLAnchorElement | null {
+  if (card.matches(DETAIL_LINK_SELECTOR)) return card as HTMLAnchorElement
+  return q<HTMLAnchorElement>(DETAIL_LINK_SELECTOR, card)
+}
+
+/** 从卡片元素解析公司信息：卡片自身是 a[data-nick] 时，公司信息在所属卡片容器的父级/兄弟中 */
+function resolveCompanySection(card: Element): Element | null {
+  const inCard = q('[data-nick="job-detail-company-info"]', card)
+  if (inCard) return inCard
+  if (card.tagName === 'A') {
+    const scope = card.parentElement || document
+    return q('[data-nick="job-detail-company-info"]', scope)
+      || q('[class*="company-name"]', scope)
+      || null
+  }
+  return q('[class*="company-name"]', card) || null
+}
 
 // 职位详情链接 — data-nick 属性在所有猎聘搜索页稳定
 const DETAIL_LINK_SELECTOR = 'a[data-nick="job-detail-job-info"]'
@@ -54,6 +82,47 @@ function findButtonByText(root: ParentNode, texts: string[]): HTMLElement | null
     if (hit) return hit
   }
   return null
+}
+
+/** 归一化文本：去掉所有空白（猎聘按钮文本常带空格，如「确 定」） */
+function textOf(el: Element): string {
+  return (el.textContent || '').replace(/\s+/g, '')
+}
+
+/** 在可见元素中轮询查找并点击指定文案的按钮（忽略空白差异），超时返回 false */
+async function tryClickButton(texts: string[], timeoutMs = 3000): Promise<boolean> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    for (const el of qa<HTMLElement>('button, [role="button"], a, span')) {
+      if (el.offsetParent === null) continue
+      const t = textOf(el)
+      if (texts.includes(t)) {
+        let target: HTMLElement = el
+        if (['SPAN', 'DIV'].includes(el.tagName)) {
+          target = (el.closest('button, a, [role="button"]') as HTMLElement) || el
+        }
+        target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
+        log('[liepin]', 'tryClickButton', `Clicked "${t}" (tag=${target.tagName})`)
+        return true
+      }
+    }
+    await new Promise((r) => setTimeout(r, 300))
+  }
+  return false
+}
+
+/** 等待「确定向对方发送简历吗？」确认框消失（投递成功的标志），超时返回 false */
+async function confirmDialogGone(timeoutMs = 3500): Promise<boolean> {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const stillVisible = qa<HTMLElement>('div, span, p').some((el) => {
+      const t = textOf(el)
+      return t === '确定向对方发送简历吗' && el.offsetParent !== null
+    })
+    if (!stillVisible) return true
+    await new Promise((r) => setTimeout(r, 300))
+  }
+  return false
 }
 
 /**
@@ -95,6 +164,154 @@ function extractId(url: string): string {
     || url
 }
 
+// ─── 方案A：两阶段评分 ───
+
+/**
+ * 阶段2前置：抓取猎聘详情页完整 JD。
+ * 猎聘详情页是 SSR，HTML 内嵌 schema.org JobPosting 的 JSON-LD，
+ * description 字段包含完整岗位职责/要求。content script 同源 fetch 带 cookie，
+ * 免跳转、无新标签、无闪屏即可拿到真实 JD。失败返回空串（调用方回退卡片文本评分）。
+ */
+export async function fetchJobDetailDescription(url: string): Promise<string> {
+  try {
+    const resp = await fetch(url, { credentials: 'include' })
+    if (!resp.ok) {
+      log('[liepin]', 'fetchJobDetailDescription', `HTTP ${resp.status} for ${url}`)
+      return ''
+    }
+    const html = await resp.text()
+    const blocks = html.match(/<script\s+type="application\/ld\+json">([\s\S]*?)<\/script>/gi) || []
+    for (const block of blocks) {
+      const jsonStr = block.replace(/<script\s+type="application\/ld\+json">/i, '').replace(/<\/script>/i, '')
+      try {
+        const data = JSON.parse(jsonStr)
+        const posting = Array.isArray(data)
+          ? data.find((d) => d?.['@type'] === 'JobPosting')
+          : data
+        if (posting?.['@type'] === 'JobPosting' && typeof posting.description === 'string') {
+          const desc = posting.description.trim()
+          if (desc.length > 0) {
+            log('[liepin]', 'fetchJobDetailDescription', `JD fetched (${desc.length} chars)`)
+            return desc
+          }
+        }
+      } catch {
+        // 该 JSON-LD 块不可解析，尝试下一个
+      }
+    }
+    log('[liepin]', 'fetchJobDetailDescription', 'No JobPosting JSON-LD found')
+    return ''
+  } catch (err) {
+    log('[liepin]', 'fetchJobDetailDescription', `Fetch failed: ${err instanceof Error ? err.message : err}`)
+    return ''
+  }
+}
+
+export interface LiepinPrefilter {
+  pass: boolean
+  score: number
+  reasons: string[]
+}
+
+const PREFILTER_DEGREE_RANK: Record<string, number> = { 大专: 1, 本科: 2, 硕士: 3, 博士: 4 }
+
+/** 从猎聘卡片经验文本解析年限下限（"1-3年"→1，"3年以上"→3，"经验不限"→0） */
+function parseExperienceYears(exp: string): number {
+  if (!exp || exp.includes('经验不限') || exp.includes('不限')) return 0
+  const m = exp.match(/(\d+)\s*[-~—到至]?\s*\d*年/)
+  if (m) return Number(m[1])
+  const m2 = exp.match(/(\d+)年以上/)
+  if (m2) return Number(m2[1])
+  return 0
+}
+
+/**
+ * 阶段1：卡片粗筛（纯本地规则，无 AI 调用、无网络请求）。
+ * 猎聘搜索卡片没有 JD 正文，直接送 AI 评分只能得到 34-40 的低分且毫无区分度。
+ * 粗筛用卡片已有字段（标题/薪资/年限/学历/标签）+ 简历信息打分排序：
+ * 语言家族命中(必过) 40 + 标题关键词 15 + 薪资 15 + 年限 15 + 学历 15 + 城市 10 = 110
+ */
+export function prefilterLiepinJob(job: JobCard, resume: Resume, filters?: ApplyFilters): LiepinPrefilter {
+  const reasons: string[] = []
+  let score = 0
+
+  const jobText = `${job.title} ${job.tags.join(' ')} ${job.experience} ${job.education}`.toLowerCase()
+  const jobLangs = extractLanguageFamilies(jobText)
+  const resumeLangs = extractResumeLanguageFamilies(resume.structuredData.skills)
+
+  // 1. 语言家族（硬性：岗位提了语言但简历没有 → 直接淘汰）
+  const langHit = jobLangs.length === 0 || jobLangs.some((l) => resumeLangs.includes(l))
+  if (langHit) {
+    score += 40
+  } else {
+    reasons.push(`语言不匹配：岗位要求[${jobLangs.join('/')}]，简历未含`)
+  }
+
+  // 2. 标题关键词（用户配置的岗位关键词全部命中）
+  const titleKeywords = (filters?.jobTitles || '').trim().toLowerCase().split(/\s+/).filter(Boolean)
+  if (titleKeywords.length === 0) {
+    score += 15
+  } else {
+    const titleLower = job.title.toLowerCase()
+    if (titleKeywords.every((kw) => titleLower.includes(kw))) {
+      score += 15
+    } else {
+      reasons.push('标题未命中岗位关键词')
+    }
+  }
+
+  // 3. 薪资（用户配置下限/上限）
+  const salaryOk = (() => {
+    if (filters?.salaryMin === null && filters?.salaryMax === null) return true
+    const range = parseSalaryRange(job.salary)
+    if (!range) return true // 岗位薪资未标注，不扣分
+    const [jMin] = range
+    if (filters?.salaryMin !== null && jMin < (filters?.salaryMin ?? 0)) return false
+    if (filters?.salaryMax !== null && jMin > (filters?.salaryMax ?? 0)) return false
+    return true
+  })()
+  if (salaryOk) {
+    score += 15
+  } else {
+    reasons.push('薪资未达筛选下限')
+  }
+
+  // 4. 年限（简历年限 >= 岗位年限下限；岗位不限 → 直接给分）
+  const reqYears = parseExperienceYears(job.experience)
+  const resumeYears = resume.structuredData.yearsOfExperience || resume.profile?.yearsOfExperience || 0
+  if (reqYears === 0 || resumeYears === 0 || resumeYears >= reqYears) {
+    score += 15
+  } else {
+    reasons.push(`年限不足：岗位要求${reqYears}年，简历约${resumeYears}年`)
+  }
+
+  // 5. 学历（简历最高学历 >= 岗位要求；岗位不限 → 直接给分）
+  const reqEdu = (job.education || '').replace(/[学历及以上统招]/g, '')
+  const resumeDegree = getHighestDegree(resume)
+  if (!reqEdu || !PREFILTER_DEGREE_RANK[reqEdu]) {
+    score += 15
+  } else if (resumeDegree && resumeDegree.rank >= PREFILTER_DEGREE_RANK[reqEdu]) {
+    score += 15
+  } else {
+    reasons.push(`学历不足：岗位要求${reqEdu}，简历为${resumeDegree?.degree ?? '未知'}`)
+  }
+
+  // 6. 城市（用户配置的地点任一命中）
+  const locKeywords = (filters?.locations || '').trim().toLowerCase().split(/\s+/).filter(Boolean)
+  if (locKeywords.length === 0) {
+    score += 10
+  } else {
+    const locLower = (job.location || '').toLowerCase()
+    if (locKeywords.some((kw) => locLower.includes(kw))) {
+      score += 10
+    } else {
+      reasons.push('地点不在筛选范围')
+    }
+  }
+
+  return { pass: langHit && score >= 60, score, reasons }
+}
+
 function detectPageType(): PageType {
   const url = location.href
   // 猎聘求职端 URL 模式
@@ -115,7 +332,7 @@ function parseJobCardsFromSearchPage(): JobCard[] {
   const cards = qa(JOB_CARD_SELECTOR)
   const result: JobCard[] = []
   for (const card of cards) {
-    const linkEl = q<HTMLAnchorElement>(DETAIL_LINK_SELECTOR, card)
+    const linkEl = resolveDetailLink(card)
     const url = linkEl?.href || ''
 
     // --- Title: first .ellipsis-1 with a title attr inside the detail link ---
@@ -188,12 +405,11 @@ function parseJobCardsFromSearchPage(): JobCard[] {
     // --- Company name ---
     // 旧版：[class*="company-name"]
     // 新版：[data-nick="job-detail-company-info"] 内的第一个 span.ellipsis-1
+    // 最新 zhaopin 搜索页：卡片即 a[data-nick]，公司信息在父容器
     let companyName = (q('[class*="company-name"]', card)?.textContent || '').trim()
-    if (!companyName) {
-      const companySection = q('[data-nick="job-detail-company-info"]', card)
-      if (companySection) {
-        companyName = (q('span.ellipsis-1', companySection)?.textContent || '').trim()
-      }
+    const companySection = resolveCompanySection(card)
+    if (!companyName && companySection) {
+      companyName = (q('span.ellipsis-1', companySection)?.textContent || companySection.textContent || '').trim()
     }
 
     // --- Company logo ---
@@ -206,6 +422,7 @@ function parseJobCardsFromSearchPage(): JobCard[] {
     let bossTitle = ''
     let bossOnline = false
     const recruiterBox = q(RECRUITER_BOX_SELECTOR, card)
+      || (card.tagName === 'A' && card.parentElement ? q(RECRUITER_BOX_SELECTOR, card.parentElement) : null)
     if (recruiterBox) {
       // 旧版：recruiter-name / recruiter-title 类名
       bossName = (q('[class*="recruiter-name"]', recruiterBox)?.textContent || '').trim()
@@ -221,9 +438,9 @@ function parseJobCardsFromSearchPage(): JobCard[] {
 
     // --- Tags (company industry/size from zhaopin page) ---
     let tags: string[] = []
-    const companySection = q('[data-nick="job-detail-company-info"]', card)
-    if (companySection) {
-      const tagEls = qa('div.ellipsis-1 span, span', companySection)
+    const companySection2 = companySection || q('[data-nick="job-detail-company-info"]', card)
+    if (companySection2) {
+      const tagEls = qa('div.ellipsis-1 span, span', companySection2)
       tags = tagEls.map(el => (el.textContent || '').trim()).filter(t => t.length >= 2 && t.length <= 20)
     }
     // 也收集旧版的标签
@@ -314,10 +531,19 @@ async function collectJobCards(
     const cards = readCurrentCards()
     for (const c of cards) {
       if (collected.length >= maxJobs) break
-      if (c.url && !seen.has(c.url)) {
-        seen.add(c.url)
-        collected.push(c)
+      const key = c.id || c.url
+      if (
+        !key ||
+        seen.has(key) ||
+        options?.excludeJobIds?.has(key) ||
+        options?.excludeJobIds?.has(c.id) ||
+        options?.excludeJobIds?.has(c.url) ||
+        options?.excludeJobIds?.has(`liepin:${c.id}`)
+      ) {
+        continue
       }
+      seen.add(key)
+      collected.push(c)
     }
     onCountChange?.(collected.length)
 
@@ -363,13 +589,13 @@ async function activateJobCard(
 
   const cards = qa(JOB_CARD_SELECTOR)
   for (const el of cards) {
-    // 提取标题：兼容新旧页面
+    // 提取标题：兼容新旧页面（卡片可能是 a[data-nick] 自身）
     let title = ''
     const oldTitleEl = q('[class*="job-title-box"] [class*="ellipsis-1"]', el)
     if (oldTitleEl) {
       title = (oldTitleEl.textContent || '').trim()
     } else {
-      const linkEl = q(DETAIL_LINK_SELECTOR, el)
+      const linkEl = resolveDetailLink(el)
       if (linkEl) {
         const ellipsisEls = qa('.ellipsis-1', linkEl)
         const titled = ellipsisEls.find(e => e.hasAttribute('title'))
@@ -377,12 +603,12 @@ async function activateJobCard(
       }
     }
 
-    // 提取公司名：兼容新旧页面
+    // 提取公司名：兼容新旧页面（卡片是 a[data-nick] 时从父容器找）
     let company = (q('[class*="company-name"]', el)?.textContent || '').trim()
     if (!company) {
-      const companySection = q('[data-nick="job-detail-company-info"]', el)
+      const companySection = resolveCompanySection(el)
       if (companySection) {
-        company = (q('span.ellipsis-1', companySection)?.textContent || '').trim()
+        company = (q('span.ellipsis-1', companySection)?.textContent || companySection.textContent || '').trim()
       }
     }
 
@@ -407,9 +633,11 @@ async function activateJobCard(
   await new Promise((r) => setTimeout(r, 600))
 
   // hover 招聘者区域（右侧头像+姓名，聊一聊按钮出现在这里）
+  const cardScope = card.tagName === 'A' && card.parentElement ? card.parentElement : card
   const rightBox = q('[class*="job-card-right-box"]', card)
     || q('[class*="recruiter-info-box"]', card)
     || q('[class*="recruiter-photo"]', card)
+    || (cardScope !== card ? q('[class*="job-card-right-box"], [class*="recruiter-info-box"], [class*="recruiter-photo"]', cardScope) : null)
   if (rightBox) {
     triggerHover(rightBox as HTMLElement)
   }
@@ -417,15 +645,15 @@ async function activateJobCard(
   triggerHover(card as HTMLElement)
   await new Promise((r) => setTimeout(r, 1000))
 
-  // 在卡片内查找「聊一聊」按钮
-  // 策略：先找 button/a，再用文字匹配 span/div，找不到就把所有元素检查一遍
+  // 在卡片（或其父容器）内查找「聊一聊」按钮
+  const btnScope: ParentNode = cardScope !== card ? cardScope : card
   let btn: HTMLElement | null = null
 
   // 优先：button / a 标签 + 文字匹配
-  btn = findButtonByText(card, ['聊一聊'])
+  btn = findButtonByText(btnScope, ['聊一聊'])
   if (!btn) {
     // 次选：搜索所有 span/div 的文字精确等于「聊一聊」
-    const allEls = qa<HTMLElement>('span, div, button, a', card)
+    const allEls = qa<HTMLElement>('span, div, button, a', btnScope)
     for (const el of allEls) {
       const text = (el.textContent || '').replace(/\s+/g, '')
       if (text === '聊一聊') {
@@ -518,7 +746,7 @@ async function fillGreetingMessage(
   input.dispatchEvent(new Event('change', { bubbles: true }))
   await new Promise((r) => setTimeout(r, 500))
 
-  // 投简历模式：点「发简历」→ 点「立即投递」→ 关闭弹窗
+  // 投简历模式：点「发简历」→（「立即投递」）→ 点最终确认「确定」→ 验证成功
   if (resumeMode) {
     // 限定在弹窗内搜索（避免点到页面外同名元素导致跳转到 wow.liepin.com）
     const modal = q('.ant-im-modal, [class*="im-dialog"], [class*="chat-modal"], [class*="ant-modal"]')
@@ -526,44 +754,54 @@ async function fillGreetingMessage(
 
     // 1. 找「发简历」— 必须在弹窗范围内
     let sendBtn: HTMLElement | null = null
-    for (const el of qa<HTMLElement>('span', searchRoot)) {
-      if ((el.textContent || '').trim() === '发简历') {
+    for (const el of qa<HTMLElement>('span, button', searchRoot)) {
+      if (textOf(el) === '发简历') {
         sendBtn = el.closest('[class*="action"]') as HTMLElement | null || el
         break
       }
     }
 
     if (sendBtn) {
-      // beforeunload 拦截所有页面跳转
+      // beforeunload 拦截所有页面跳转（投递成功猎聘可能跳转/刷新，避免中断）
       const preventNav = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
-      window.addEventListener('beforeunload', preventNav)
 
+      window.addEventListener('beforeunload', preventNav)
       sendBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
       log('[liepin]', 'fillGreetingMessage', 'Clicked 发简历')
-      await new Promise((r) => setTimeout(r, 2000))
+      await new Promise((r) => setTimeout(r, 1500))
       window.removeEventListener('beforeunload', preventNav)
 
-      // 2. 找「立即投递」button
-      let confirmBtn: HTMLElement | null = null
-      for (const el of qa<HTMLElement>('button', document)) {
-        if ((el.textContent || '').trim() === '立即投递') { confirmBtn = el; break }
+      // 2. 尝试「立即投递」（旧版流程按钮），找不到不阻断，继续找最终确认
+      const clickedImmediate = await tryClickButton(['立即投递'], 3000)
+      if (clickedImmediate) {
+        await new Promise((r) => setTimeout(r, 1200))
       }
 
-      if (confirmBtn) {
-        window.addEventListener('beforeunload', preventNav)
-        confirmBtn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }))
-        log('[liepin]', 'fillGreetingMessage', 'Clicked 立即投递')
-        await new Promise((r) => setTimeout(r, 1500))
-        window.removeEventListener('beforeunload', preventNav)
-      } else {
-        log('[liepin]', 'fillGreetingMessage', '立即投递 not found')
+      // 3. 点最终确认：猎聘会弹「确定向对方发送简历吗？」，按钮文案为「确定」（可能带空格）
+      const confirmed = await tryClickButton(['确定', '确认', '确认投递', '好的'], 4000)
+      if (!confirmed) {
+        log('[liepin]', 'fillGreetingMessage', '最终确认按钮未找到，投递未完成')
+        await closeAnyModal()
+        return false
       }
+
+      // 4. 验证确认框消失 = 投递成功；失败则不返回成功（避免假投递落库）
+      const done = await confirmDialogGone()
+      if (!done) {
+        log('[liepin]', 'fillGreetingMessage', '确认框未消失，投递可能未完成')
+        await closeAnyModal()
+        return false
+      }
+
+      log('[liepin]', 'fillGreetingMessage', 'Resume submitted (confirmed)')
     } else {
       log('[liepin]', 'fillGreetingMessage', '发简历 not found in modal')
+      await closeAnyModal()
+      return false
     }
   }
 
-  // 关闭所有弹窗
+  // 关闭所有残留弹窗（投递成功后通常已关闭）
   await closeAnyModal()
   log('[liepin]', 'fillGreetingMessage', resumeMode ? 'Resume submitted and modal closed' : 'Greeting filled and modal closed')
   return true

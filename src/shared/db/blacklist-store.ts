@@ -5,7 +5,8 @@ function generateId(): string {
 }
 
 export async function getBlacklist(): Promise<BlacklistItem[]> {
-  return db.blacklist.orderBy('addedAt').reverse().toArray()
+  const all = await db.blacklist.toArray()
+  return all.sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || ''))
 }
 
 export async function addToBlacklist(companyName: string, reason: string): Promise<BlacklistItem> {

@@ -1,6 +1,6 @@
 import { getSetting } from '../db/settings-store'
 import { getPresetById } from './model-presets'
-import { consumeAiCall } from './ai-budget'
+import { consumeAiCall, getAiBudgetLimit, getAiUsageToday } from './ai-budget'
 import { recordError } from '../db/error-store'
 interface ChatCompletionResponse {
   choices: Array<{ message: { content: string } }>
@@ -42,7 +42,8 @@ async function resolveAISettings(): Promise<{ baseUrl: string; apiKey: string; m
 export async function chatCompletion(
   systemPrompt: string,
   userMessage: string,
-  temperature = 0.3
+  temperature = 0.3,
+  opts?: { bypassBudget?: boolean }
 ): Promise<string> {
   const { baseUrl, apiKey, modelName } = await resolveAISettings()
 
@@ -51,10 +52,13 @@ export async function chatCompletion(
   }
 
   // C4：每日 AI 预算护栏——超限直接返回空串，由调用方回退本地逻辑
-  const remaining = await consumeAiCall()
-  if (remaining < 0) {
-    console.warn(`[AI-BUDGET] 今日 AI 调用已超预算（剩余 ${remaining}），本次调用跳过，回退本地逻辑`)
-    return ''
+  // 测试连接等诊断调用可通过 bypassBudget 跳过护栏
+  if (!opts?.bypassBudget) {
+    const remaining = await consumeAiCall()
+    if (remaining < 0) {
+      console.warn(`[AI-BUDGET] 今日 AI 调用已超预算（剩余 ${remaining}），本次调用跳过，回退本地逻辑`)
+      return ''
+    }
   }
 
   const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`
@@ -125,16 +129,82 @@ export async function testAIConnection(): Promise<{ success: boolean; message: s
   if (!apiKey) return { success: false, message: '请先配置 API Key' }
   if (!baseUrl) return { success: false, message: '请先选择或配置 AI 模型' }
 
-  const result = await chatCompletion(
-    '你是一个助手，用中文简短回复。',
-    '请回复"连接成功"',
-    0
-  )
-
-  if (result) {
-    return { success: true, message: `模型 ${modelName} 连接成功` }
+  // 预算护栏：超限是"静默跳过"的常见误报源，先明确提示而不是笼统报连接失败
+  const [used, limit] = await Promise.all([getAiUsageToday(), getAiBudgetLimit()])
+  if (used >= limit) {
+    return {
+      success: false,
+      message: `今日 AI 调用已达上限（${used}/${limit}），请调高预算或在设置页重置今日计数`,
+    }
   }
-  return { success: false, message: '连接失败，请检查 API Key 和网络' }
+
+  const url = `${baseUrl.replace(/\/$/, '')}/chat/completions`
+  const body = JSON.stringify({
+    model: modelName,
+    messages: [
+      { role: 'system', content: '你是一个助手，用中文简短回复。' },
+      { role: 'user', content: '请回复"连接成功"' },
+    ],
+    temperature: 0,
+    max_tokens: 50,
+  })
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 30000)
+  let response: Response
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body,
+      signal: controller.signal,
+    })
+  } catch (err) {
+    clearTimeout(timeout)
+    const msg = err instanceof Error ? err.message : String(err)
+    const reason =
+      err instanceof Error && err.name === 'AbortError'
+        ? '请求超时（30 秒），请检查网络'
+        : `网络请求失败：${msg}`
+    void recordError({ source: 'ai.api', message: `testAIConnection ${reason}` })
+    return { success: false, message: reason }
+  }
+  clearTimeout(timeout)
+
+  if (!response.ok) {
+    let detail = ''
+    try {
+      detail = (await response.text()).slice(0, 160)
+    } catch {
+      // ignore
+    }
+    let reason: string
+    if (response.status === 401 || response.status === 403) {
+      reason = `API Key 无效或已过期（HTTP ${response.status}）`
+    } else if (response.status === 402) {
+      reason = '账户余额不足或欠费（HTTP 402）'
+    } else if (response.status === 429) {
+      reason = '请求过于频繁或触发限流（HTTP 429），请稍后再试'
+    } else {
+      reason = `接口返回错误（HTTP ${response.status}）：${detail || '无响应内容'}`
+    }
+    void recordError({ source: 'ai.api', message: `testAIConnection ${reason}` })
+    return { success: false, message: reason }
+  }
+
+  try {
+    const data: ChatCompletionResponse = await response.json()
+    const content = data.choices?.[0]?.message?.content
+    if (content) {
+      return { success: true, message: `模型 ${modelName} 连接成功` }
+    }
+    return { success: false, message: '接口响应异常：未返回内容，请检查模型名是否正确' }
+  } catch {
+    return { success: false, message: '接口响应解析失败，请检查接口地址是否兼容 OpenAI 格式' }
+  }
 }
 
 /**

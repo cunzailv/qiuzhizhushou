@@ -3,11 +3,13 @@ import { Card } from '../../components/ui/card'
 import { Button } from '../../components/ui/button'
 import { Toast } from '../../components/ui/toast'
 import { getSetting, setSetting, getAllSettings } from '../../shared/db/settings-store'
-import { testAIConnection, BUILTIN_MODELS, getPresetById, getCustomModels, saveCustomModels, generateCustomModelId } from '../../shared/ai'
+import { testAIConnection, BUILTIN_MODELS, getPresetById, getCustomModels, saveCustomModels, generateCustomModelId, getAiUsageToday, getAiBudgetLimit, resetAiBudget } from '../../shared/ai'
 import type { ModelPreset } from '../../shared/ai'
 import type { PluginSettings } from '../../shared/types/settings'
 import { DEFAULT_SETTINGS } from '../../shared/types/settings'
 import { getPlatformsMeta } from '../../shared/platform'
+import { CandidatePreferencesCard } from '../../popup/components/CandidatePreferencesCard'
+import { NotificationSettingsCard } from '../../popup/components/NotificationSettingsCard'
 import { Key, Zap, Shield, ChevronDown, ExternalLink, AlertTriangle, Globe, Plus, X, Bug, Trash2 } from 'lucide-react'
 
 export default function Settings() {
@@ -22,6 +24,7 @@ export default function Settings() {
   const [newModel, setNewModel] = useState({ name: '', provider: '', baseUrl: '', modelName: '' })
   const [permissionApply, setPermissionApply] = useState<'auto' | 'confirm' | 'denied'>('confirm')
   const [permissionSend, setPermissionSend] = useState<'auto' | 'confirm' | 'denied'>('confirm')
+  const [aiUsage, setAiUsage] = useState<{ used: number; limit: number } | null>(null)
 
   const allModels = [...BUILTIN_MODELS, ...customModels]
   const selectedPreset = allModels.find(m => m.id === settings.modelPreset)
@@ -49,6 +52,18 @@ export default function Settings() {
     setPermissionSend(ps)
     const cm = await getCustomModels()
     setCustomModels(cm)
+    refreshAiUsage()
+  }
+
+  async function refreshAiUsage() {
+    const [used, limit] = await Promise.all([getAiUsageToday(), getAiBudgetLimit()])
+    setAiUsage({ used, limit })
+  }
+
+  async function handleResetAiBudget() {
+    await resetAiBudget()
+    await refreshAiUsage()
+    showToast('今日 AI 调用计数已重置', 'success')
   }
 
   async function setPermissionLevel(key: 'permission_apply' | 'permission_send', level: 'auto' | 'confirm' | 'denied') {
@@ -127,6 +142,7 @@ export default function Settings() {
     const result = await testAIConnection()
     showToast(result.message, result.success ? 'success' : 'error')
     setTesting(false)
+    refreshAiUsage()
   }
 
   function showToast(message: string, type: 'success' | 'error' | 'warning' | 'info') {
@@ -320,6 +336,19 @@ export default function Settings() {
                 <ExternalLink className="w-3 h-3" />
               </a>
             )}
+            <div className="flex items-center justify-between mt-1.5">
+              <span className={`text-xs ${aiUsage && aiUsage.used >= aiUsage.limit ? 'text-error font-semibold' : 'text-text-muted'}`}>
+                今日 AI 已用: {aiUsage ? `${aiUsage.used} / ${aiUsage.limit} 次` : '加载中…'}
+                {aiUsage && aiUsage.used >= aiUsage.limit && '（已超限，AI 已暂停）'}
+              </span>
+              <button
+                onClick={handleResetAiBudget}
+                className="text-xs text-primary-light hover:underline"
+                type="button"
+              >
+                重置今日计数
+              </button>
+            </div>
           </div>
 
           {/* Custom model fields */}
@@ -362,6 +391,12 @@ export default function Settings() {
           </label>
         </div>
       </Card>
+
+      {/* HR 追问 Copilot 求职画像与底线配置 */}
+      <CandidatePreferencesCard onNotify={showToast} />
+
+      {/* 跨端实时通知推送 (Webhook: 飞书/钉钉/企微/Server酱/Bark) */}
+      <NotificationSettingsCard onNotify={showToast} />
 
       {/* Anti-bot */}
       <Card>

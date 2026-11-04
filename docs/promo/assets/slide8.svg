@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920" font-family="'PingFang SC','Hiragino Sans GB','Songti SC',sans-serif">
+  <rect width="1080" height="1920" fill="#0F172A"/>
+  <text x="540" y="520" font-size="70" font-weight="700" fill="#FFFFFF" text-anchor="middle">开源免费，自己就能装</text>
+  <rect x="130" y="720" width="820" height="120" rx="24" fill="#FF7A2F"/>
+  <text x="540" y="796" font-size="40" font-weight="700" fill="#FFFFFF" text-anchor="middle">cunzailv/qiuzhizhushou</text>
+  <text x="540" y="930" font-size="34" fill="#CBD5E1" text-anchor="middle">GitHub 搜索即可获取完整源码</text>
+  <text x="540" y="1520" font-size="30" fill="#64748B" text-anchor="middle">微信 AQuan12070310 · 备注「求职助手」</text>
+</svg>

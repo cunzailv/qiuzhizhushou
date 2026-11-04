@@ -3,6 +3,7 @@ import { chatCompletion } from './api-client'
 import { getPrompt } from '../db/prompt-store'
 import { getSetting } from '../db/settings-store'
 import type { JobCard, JdRequirements, JdSkill } from '../types/job'
+import { getJobScoringText } from '../types/job'
 
 // ─── 本地解析工具（可单测） ───
 
@@ -116,15 +117,16 @@ function extractJdSkills(text: string, sections: Map<string, string>): JdSkill[]
 }
 
 export function analyzeJdLocally(job: JobCard): Omit<JdRequirements, 'source' | 'parsedAt'> {
-  const text = [job.title, ...job.tags, job.jobDescription].filter(Boolean).join('\n')
+  const jdText = getJobScoringText(job)
+  const text = [job.title, ...job.tags, jdText].filter(Boolean).join('\n')
   const sections = splitIntoSections(text)
-  const salary = parseSalaryRange([job.salary, job.jobDescription].filter(Boolean).join(' '))
+  const salary = parseSalaryRange([job.salary, jdText].filter(Boolean).join(' '))
   return {
     responsibilities: toLines(sections.get('responsibilities') || ''),
     hardRequirements: toLines(sections.get('hardRequirements') || ''),
     niceToHave: toLines(sections.get('niceToHave') || ''),
-    education: parseEducationRequirement([job.education, job.jobDescription].filter(Boolean).join(' ')),
-    experienceYears: parseExperienceYears([job.experience, job.jobDescription].filter(Boolean).join(' ')),
+    education: parseEducationRequirement([job.education, jdText].filter(Boolean).join(' ')),
+    experienceYears: parseExperienceYears([job.experience, jdText].filter(Boolean).join(' ')),
     salaryMin: salary?.min ?? null,
     salaryMax: salary?.max ?? null,
     skills: extractJdSkills(text, sections),
@@ -169,7 +171,7 @@ async function tryAIAnalyze(job: JobCard): Promise<Omit<JdRequirements, 'source'
 标签: ${job.tags.join('、')}
 
 【JD全文】
-${job.jobDescription || ''}
+${getJobScoringText(job) || ''}
 
 请按 Agent 思维流程输出结构化 JD JSON。`
 

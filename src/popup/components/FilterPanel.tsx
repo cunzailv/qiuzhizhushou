@@ -1,9 +1,10 @@
 import React from 'react'
 import {
   Search, MapPin, DollarSign, GraduationCap, Filter,
-  Shield, Sparkles, ChevronDown, ChevronUp,
+  Shield, Sparkles, ChevronDown, ChevronUp, Clock,
 } from 'lucide-react'
 import type { ApplyFilters } from '../../shared/types/filters'
+import { PUBLISH_TIME_OPTIONS } from '../../shared/types/filters'
 
 interface FilterPanelProps {
   filters: ApplyFilters
@@ -115,6 +116,25 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
             value={filters.excludeKeywords}
             onChange={(v) => onChange({ excludeKeywords: v })}
           />
+
+          {/* Publish / Active Time Freshness */}
+          <div>
+            <div className="flex items-center gap-1.5 mb-1">
+              <Clock className="w-3 h-3 text-primary-light" />
+              <span className="text-[11px] text-text-muted">活跃/发布时间（筛选近期待招岗位）</span>
+            </div>
+            <select
+              value={filters.publishTime || 'week'}
+              onChange={(e) => onChange({ publishTime: e.target.value })}
+              className="input-field text-xs py-1.5 w-full bg-surface-dark"
+            >
+              {PUBLISH_TIME_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
 
           {/* AI Match Toggle */}
           <div className="flex items-center justify-between py-1">

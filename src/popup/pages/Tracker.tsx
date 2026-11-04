@@ -5,7 +5,8 @@ import { getAllApplications, updateApplicationStatus } from '../../shared/db/app
 import type { Application, ApplicationStatus } from '../../shared/types/application'
 import { APPLICATION_STATUS_LABELS } from '../../shared/types/application'
 import { formatRelativeTime } from '../../shared/utils/date'
-import { Search, Building2, Clock } from 'lucide-react'
+import { sanitizeJobText } from '../../shared/utils/text-sanitizer'
+import { Search, Building2, Clock, ExternalLink, ChevronLeft, ChevronRight } from 'lucide-react'
 
 const STATUS_FILTERS: Array<{ label: string; value: ApplicationStatus | 'all' }> = [
   { label: '全部', value: 'all' },
@@ -16,15 +17,23 @@ const STATUS_FILTERS: Array<{ label: string; value: ApplicationStatus | 'all' }>
   { label: '不合适', value: 'rejected' },
 ]
 
+const PAGE_SIZE = 8
+
 export default function Tracker() {
   const [applications, setApplications] = useState<Application[]>([])
   const [filterStatus, setFilterStatus] = useState<ApplicationStatus | 'all'>('all')
   const [search, setSearch] = useState('')
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
 
   useEffect(() => {
     loadApplications()
   }, [])
+
+  // 筛选或搜索变化时回到第一页
+  useEffect(() => {
+    setPage(1)
+  }, [filterStatus, search])
 
   async function loadApplications() {
     const apps = await getAllApplications()
@@ -46,6 +55,16 @@ export default function Tracker() {
     await loadApplications()
   }
 
+  function openJobDetail(app: Application) {
+    if (!app.jobId) return
+    const url = `https://www.zhipin.com/job_detail/${app.jobId}.html`
+    if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
+      chrome.tabs.create({ url }).catch(() => window.open(url, '_blank'))
+    } else {
+      window.open(url, '_blank')
+    }
+  }
+
   const filtered = applications.filter((app) => {
     if (filterStatus !== 'all' && app.status !== filterStatus) return false
     if (search) {
@@ -57,6 +76,10 @@ export default function Tracker() {
     }
     return true
   })
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const currentPage = Math.min(page, totalPages)
+  const paginated = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
   function getStatusVariant(status: ApplicationStatus): 'default' | 'success' | 'danger' | 'warning' | 'info' {
     const map: Record<string, 'default' | 'success' | 'danger' | 'warning' | 'info'> = {
@@ -105,13 +128,13 @@ export default function Tracker() {
 
       {/* Applications List */}
       <div className="space-y-2 max-h-[400px] overflow-y-auto">
-        {filtered.length === 0 ? (
+        {paginated.length === 0 ? (
           <p className="text-xs text-text-muted text-center py-8">暂无匹配的沟通记录</p>
         ) : (
-          filtered.map((app) => (
+          paginated.map((app) => (
             <Card
               key={app.id}
-              className="p-3 cursor-pointer"
+              className="p-3 cursor-pointer hover:brightness-95 transition-[filter]"
               onClick={() => setExpandedId(expandedId === app.id ? null : app.id)}
             >
               <div className="flex items-start gap-3">
@@ -119,15 +142,38 @@ export default function Tracker() {
                   <Building2 className="w-4 h-4 text-primary-light" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-medium text-text-primary truncate">{app.jobTitle}</p>
-                    <Badge variant={getStatusVariant(app.status)}>
-                      {APPLICATION_STATUS_LABELS[app.status]}
-                    </Badge>
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-text-primary truncate">{sanitizeJobText(app.jobTitle)}</p>
+                    <div
+                      className="flex items-center gap-1.5 shrink-0"
+                      onClick={(e) => {
+                        if (app.jobId) {
+                          e.stopPropagation()
+                          openJobDetail(app)
+                        }
+                      }}
+                      title={app.jobId ? "在新标签页查看职位原网页" : undefined}
+                    >
+                      {app.jobId && <ExternalLink className="w-3.5 h-3.5 text-text-muted hover:text-primary-light" />}
+                      <Badge variant={getStatusVariant(app.status)}>
+                        {APPLICATION_STATUS_LABELS[app.status]}
+                      </Badge>
+                    </div>
                   </div>
-                  <p className="text-xs text-text-muted mt-0.5">{app.companyName}</p>
+                  <p className="text-xs text-text-muted mt-0.5 flex items-center justify-between gap-2">
+                    <span className="truncate">{sanitizeJobText(app.companyName)}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setExpandedId(expandedId === app.id ? null : app.id)
+                      }}
+                      className="shrink-0 text-[11px] text-primary-light hover:underline"
+                    >
+                      {expandedId === app.id ? '收起' : '详情'}
+                    </button>
+                  </p>
                   <div className="flex items-center gap-2 mt-1">
-                    <span className="text-[11px] text-text-muted">{app.salary}</span>
+                    <span className="text-[11px] text-text-muted">{sanitizeJobText(app.salary)}</span>
                     <span className="text-[11px] text-text-muted">·</span>
                     <span className="text-[11px] text-text-muted flex items-center gap-1">
                       <Clock className="w-2.5 h-2.5" />
@@ -147,7 +193,7 @@ export default function Tracker() {
                     </span>
                   </div>
                   {app.matchReason && (
-                    <p className="text-xs text-text-secondary">{app.matchReason}</p>
+                    <p className="text-xs text-text-secondary whitespace-pre-wrap">{sanitizeJobText(app.matchReason)}</p>
                   )}
                   {/* Status Change Buttons */}
                   <div className="flex gap-1 flex-wrap pt-1">
@@ -174,6 +220,31 @@ export default function Tracker() {
           ))
         )}
       </div>
+
+      {/* Pagination */}
+      {filtered.length > 0 && (
+        <div className="flex items-center justify-between pt-1 select-none">
+          <button
+            disabled={currentPage <= 1}
+            onClick={() => setPage(currentPage - 1)}
+            className="flex items-center gap-0.5 px-2 py-1 text-[11px] rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-text-secondary hover:text-text-primary hover:bg-black/5"
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+            上一页
+          </button>
+          <span className="text-[11px] text-text-muted">
+            {filtered.length} 条 · 第 {currentPage} / {totalPages} 页
+          </span>
+          <button
+            disabled={currentPage >= totalPages}
+            onClick={() => setPage(currentPage + 1)}
+            className="flex items-center gap-0.5 px-2 py-1 text-[11px] rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-text-secondary hover:text-text-primary hover:bg-black/5"
+          >
+            下一页
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   )
 }

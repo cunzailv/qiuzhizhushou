@@ -42,6 +42,26 @@ export function getPlatformsMeta(): Array<{ id: string; name: string; icon: stri
   return PLATFORMS.map((p) => ({ id: p.id, name: p.name, icon: p.icon }))
 }
 
+// 平台直达入口所需的完整信息（含官网/工作台地址与 URL 匹配器）。
+// popup 用它渲染「平台直达」快捷条，点击即可跳转对应平台官网。
+export interface PlatformEntry {
+  id: string
+  name: string
+  icon: string
+  homeUrl: string
+  matchesUrl: (url: string) => boolean
+}
+
+export function getPlatformEntries(): PlatformEntry[] {
+  return PLATFORMS.map((p) => ({
+    id: p.id,
+    name: p.name,
+    icon: p.icon,
+    homeUrl: p.homeUrl,
+    matchesUrl: (url: string) => p.matchesUrl(url),
+  }))
+}
+
 export function getPlatformById(id: string): PlatformAdapter | undefined {
   return PLATFORMS.find((p) => p.id === id)
 }

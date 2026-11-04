@@ -9,6 +9,9 @@ export interface JobCard {
   education: string
   tags: string[]
   jobDescription: string
+  // 评分/分析用文本（列表页卡片场景下为标题+薪资+标签的拼凑文本，用于匹配兜底；
+  // 详情页或投递时提取到真实 JD 后，评分统一优先使用 jobDescription）
+  matchingText?: string
   bossName: string
   bossTitle: string
   bossOnline: boolean
@@ -18,6 +21,19 @@ export interface JobCard {
   platformId?: string
   // A2: AI JD 理解产物（职责/硬性要求/加分项/技能分级/薪资年限学历）
   requirements?: JdRequirements
+}
+
+/**
+ * 评分/分析用的岗位文本：
+ * 优先真实 JD（jobDescription，详情页提取后通常比拼凑文本长），
+ * 否则回退列表页拼凑的匹配文本（matchingText），保证搜索卡片场景评分不退化。
+ */
+export function getJobScoringText(job: Pick<JobCard, 'jobDescription' | 'matchingText'>): string {
+  const raw = (job.jobDescription || '').trim()
+  const fallback = (job.matchingText || '').trim()
+  if (!raw) return fallback
+  if (!fallback) return raw
+  return raw.length >= fallback.length ? raw : fallback
 }
 
 // ─── A2: AI JD 理解（结构化岗位要求） ───

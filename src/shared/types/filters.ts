@@ -1,6 +1,6 @@
 // Apply filters used before starting the auto-apply flow
 export interface ApplyFilters {
-  /** 岗位名称关键词（空格分隔多个关键词，AND 逻辑） */
+  /** 岗位名称关键词（空格或逗号分隔，OR 匹配） */
   jobTitles: string
   /** 工作地点关键词（空格分隔） */
   locations: string
@@ -12,8 +12,10 @@ export interface ApplyFilters {
   experience: string
   /** 学历要求：不限/大专/本科/硕士/博士 */
   education: string
-  /** 排除关键词（公司名中包含则不投，空格分隔） */
+  /** 排除关键词（公司名或职位中包含则不投，空格分隔） */
   excludeKeywords: string
+  /** 发布与活跃时间筛选：all(不限) / today(今日活跃) / 3days(3日内) / week(本周) / month(本月) */
+  publishTime?: string
   /** 是否启用 AI 匹配评分 */
   enableAiMatch: boolean
   /** 最低 AI 匹配分数（低于此分不投） */
@@ -28,9 +30,18 @@ export const DEFAULT_FILTERS: ApplyFilters = {
   experience: '',
   education: '',
   excludeKeywords: '',
+  publishTime: 'week',
   enableAiMatch: true,
   minMatchScore: 60,
 }
+
+export const PUBLISH_TIME_OPTIONS = [
+  { value: 'all', label: '不限时间' },
+  { value: 'today', label: '刚刚/今日活跃' },
+  { value: '3days', label: '3日内活跃' },
+  { value: 'week', label: '本周活跃（推荐）' },
+  { value: 'month', label: '本月活跃' },
+]
 
 export const EXPERIENCE_OPTIONS = [
   { value: '', label: '不限' },

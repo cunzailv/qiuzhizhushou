@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="600" viewBox="0 0 1080 600" font-family="'PingFang SC','Hiragino Sans GB','Songti SC',sans-serif">
+  <rect width="1080" height="600" fill="#FFFFFF"/>
+  <text x="540" y="62" font-size="30" font-weight="700" fill="#1E3A8A" text-anchor="middle">边界：我们做什么，不做什么</text>
+  <rect x="50"  y="110" width="460" height="430" rx="20" fill="#ECFDF5" stroke="#10B981" stroke-width="2"/>
+  <text x="280" y="162" font-size="26" font-weight="700" fill="#059669" text-anchor="middle">工具做的事</text>
+  <g font-size="22" fill="#334155">
+    <text x="90"  y="220">✓  读取公开岗位信息</text>
+    <text x="90"  y="280">✓  辅助生成个性化话术</text>
+    <text x="90"  y="340">✓  本地保存你的数据</text>
+    <text x="90"  y="400">✓  帮你算匹配分与差距</text>
+    <text x="90"  y="460">✓  遵守平台频率限制</text>
+  </g>
+  <rect x="570" y="110" width="460" height="430" rx="20" fill="#FEF2F2" stroke="#EF4444" stroke-width="2"/>
+  <text x="800" y="162" font-size="26" font-weight="700" fill="#DC2626" text-anchor="middle">工具不做的事</text>
+  <g font-size="22" fill="#334155">
+    <text x="610" y="220">✕  不绕过平台验证</text>
+    <text x="610" y="280">✕  不模拟登录 / 批量注册</text>
+    <text x="610" y="340">✕  不出售你的数据</text>
+    <text x="610" y="400">✕  不承诺拿到 offer</text>
+    <text x="610" y="460">✕  不鼓励无脑海投</text>
+  </g>
+  <line x1="540" y1="110" x2="540" y2="540" stroke="#CBD5E1" stroke-width="2" stroke-dasharray="8 8"/>
+  <text x="540" y="555" font-size="16" fill="#94A3B8" text-anchor="middle">边界</text>
+</svg>

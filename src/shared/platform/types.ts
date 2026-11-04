@@ -25,6 +25,8 @@ export interface CollectOptions {
   onCountChange?: (count: number) => void
   // 返回 true 时立即中止采集（用于响应用户的「停止」操作）。
   shouldCancel?: () => boolean
+  // 排除已存在的职位唯一标识（用于自动补仓时只采集全新未处理岗位）
+  excludeJobIds?: Set<string>
 }
 
 // 统一平台适配器接口：所有招聘平台（Boss直聘、猎聘等）均实现该接口，

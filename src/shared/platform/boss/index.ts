@@ -21,7 +21,17 @@ import {
   clickSendResume,
   selectAndSendResume,
   closeChatDialog,
+  getLastHrMessageFromChat,
+  fillChatInputAndSend,
+  dismissUnexpectedModals,
+  isNegativeButton,
+  isPositiveApplyButton,
 } from './action-simulator'
+export {
+  dismissUnexpectedModals,
+  isNegativeButton,
+  isPositiveApplyButton,
+}
 export type { ChatContact } from './action-simulator'
 import type { PlatformAdapter, PlatformRiskConfig } from '../types'
 
@@ -68,4 +78,6 @@ export {
   clickSendResume,
   selectAndSendResume,
   closeChatDialog,
+  getLastHrMessageFromChat,
+  fillChatInputAndSend,
 }

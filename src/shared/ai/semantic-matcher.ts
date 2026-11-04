@@ -3,6 +3,7 @@ import { getPrompt } from '../db/prompt-store'
 import { computeLocalMatch } from './local-matcher'
 import type { Resume } from '../types/resume'
 import type { JobCard, MatchResult, MatchDimensions } from '../types/job'
+import { getJobScoringText } from '../types/job'
 
 const SYSTEM_PROMPT = `你是专业的招聘匹配分析师。将求职者简历与招聘岗位做语义匹配分析。
 
@@ -48,7 +49,7 @@ export async function matchWithSemanticAI(resume: Resume, job: JobCard): Promise
 经验要求: ${job.experience}（下限${job.requirements?.experienceYears ?? '未知'}年）
 学历要求: ${job.requirements?.education || job.education || '未知'}
 标签: ${job.tags.join(', ')}
-岗位描述: ${job.jobDescription.substring(0, 1200)}
+岗位描述: ${getJobScoringText(job).substring(0, 1200)}
 
 请按 Agent 思维流程分析匹配度并输出 JSON。`
 

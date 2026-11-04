@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920" font-family="'PingFang SC','Hiragino Sans GB','Songti SC',sans-serif">
+  <rect width="1080" height="1920" fill="#FFFFFF"/>
+  <text x="540" y="220" font-size="56" font-weight="700" fill="#1E3A8A" text-anchor="middle">投得少了，回得多了</text>
+  <g text-anchor="middle" font-size="40" font-weight="700" fill="#FFFFFF">
+    <rect x="90"  y="360" width="900" height="130" rx="12" fill="#FF7A2F"/><text x="540" y="440">已投递 30</text>
+    <rect x="210" y="520" width="660" height="130" rx="12" fill="#FF8A3D"/><text x="540" y="600">HR 已读 12 · 40%</text>
+    <rect x="330" y="680" width="420" height="130" rx="12" fill="#F97316"/><text x="540" y="760">沟通中 6 · 20%</text>
+    <rect x="410" y="840" width="260" height="130" rx="12" fill="#EA580C"/><text x="540" y="920">面试邀约 3 · 10%</text>
+  </g>
+  <text x="540" y="1120" font-size="36" font-weight="700" fill="#1E3A8A" text-anchor="middle">每一层流失，指向不同的优化方向</text>
+</svg>

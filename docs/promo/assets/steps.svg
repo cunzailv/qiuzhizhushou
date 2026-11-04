@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="700" viewBox="0 0 1080 700" font-family="'PingFang SC','Hiragino Sans GB','Songti SC',sans-serif">
+  <defs>
+    <linearGradient id="og" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FF9A3D"/>
+      <stop offset="1" stop-color="#FF7A2F"/>
+    </linearGradient>
+  </defs>
+  <rect width="1080" height="700" fill="#FFFFFF"/>
+  <text x="540" y="70" font-size="32" font-weight="700" fill="#1E3A8A" text-anchor="middle">三步开始用</text>
+  <g>
+    <rect x="30"  y="140" width="320" height="480" rx="20" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="2"/>
+    <rect x="380" y="140" width="320" height="480" rx="20" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="2"/>
+    <rect x="730" y="140" width="320" height="480" rx="20" fill="#F8FAFC" stroke="#E2E8F0" stroke-width="2"/>
+    <circle cx="190"  cy="220" r="40" fill="url(#og)"/><text x="190"  y="234" font-size="40" font-weight="700" fill="#FFFFFF" text-anchor="middle">1</text>
+    <circle cx="540"  cy="220" r="40" fill="url(#og)"/><text x="540"  y="234" font-size="40" font-weight="700" fill="#FFFFFF" text-anchor="middle">2</text>
+    <circle cx="890"  cy="220" r="40" fill="url(#og)"/><text x="890"  y="234" font-size="40" font-weight="700" fill="#FFFFFF" text-anchor="middle">3</text>
+    <text x="190"  y="320" font-size="26" font-weight="700" fill="#1E3A8A" text-anchor="middle">克隆仓库</text>
+    <text x="540"  y="320" font-size="26" font-weight="700" fill="#1E3A8A" text-anchor="middle">构建扩展</text>
+    <text x="890"  y="320" font-size="26" font-weight="700" fill="#1E3A8A" text-anchor="middle">加载浏览器</text>
+    <g font-size="18" fill="#475569" text-anchor="middle">
+      <text x="190" y="380">git clone 项目到本地</text>
+      <text x="190" y="412">获取完整开源源码</text>
+      <text x="190" y="444">完全免费，可自改</text>
+      <text x="540" y="380">npm install &amp;&amp; build</text>
+      <text x="540" y="412">生成 dist 目录</text>
+      <text x="540" y="444">约 1 分钟完成</text>
+      <text x="890" y="380">扩展页开开发者模式</text>
+      <text x="890" y="412">选 dist 立即使用</text>
+      <text x="890" y="444">无需上架应用商店</text>
+    </g>
+  </g>
+</svg>

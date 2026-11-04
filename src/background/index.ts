@@ -9,9 +9,44 @@ import { setSharedResumeSummary } from '../shared/db/shared-state'
 import { resetDailyCounter } from '../shared/antiBot'
 import { log, logError, logGroup, logGroupEnd } from '../shared/utils/logger'
 import { butlerRunDaily, getActiveFollowUps } from '../shared/agent/butler'
+import { campaignService } from './campaign-service'
+import { appendTasksToCampaign } from '../shared/agent/queue-store'
+import { checkAllPlatformsAuth, checkPlatformAuth } from '../shared/platform/auth-checker'
+import {
+  generateDailyButlerReport,
+  getTodayDateStr,
+} from '../shared/agent/butler/daily-report-generator'
+import {
+  getDailyReport,
+  listDailyReports,
+  getDailyReportConfig,
+  saveDailyReportConfig,
+  listEvolutionProposals,
+  acceptEvolutionProposal,
+  rejectEvolutionProposal,
+} from '../shared/db/butler-evolution-store'
+import { runInductionAnalysis } from '../shared/agent/butler/induction-engine'
+import {
+  recordError,
+  listErrors,
+  clearErrors,
+  getErrorCount,
+  installGlobalErrorCapture,
+} from '../shared/db/error-store'
+import { sanitizeJobCard, sanitizeJobText } from '../shared/utils/text-sanitizer'
+import { dispatchButlerChatMessage } from '../shared/agent/butler/chat-to-action'
+import {
+  findBestSkillDirect,
+  upsertSkillDirect,
+  recordSkillFailDirect,
+} from '../shared/agent/skill-memory'
+import type { AgentSkill } from '../shared/agent/types'
 import type { JobCard, MatchResult } from '../shared/types/job'
 
 const MOD = 'Background'
+
+// 全局捕获 background 抛出的异常与未处理 Promise rejection
+installGlobalErrorCapture()
 
 // Listen for installation
 chrome.runtime.onInstalled.addListener(() => {
@@ -31,7 +66,13 @@ chrome.runtime.onInstalled.addListener(() => {
   chrome.alarms.create('butler-daily', {
     periodInMinutes: 1440,
   })
-  log(MOD, 'installed', 'Alarms created: daily-reset (24h), interview-check (30min), butler-daily (24h)')
+
+  // 定时检查是否到达设定的 xx 点生成“管家日报”
+  chrome.alarms.create('butler-daily-report-check', {
+    periodInMinutes: 10,
+  })
+
+  log(MOD, 'installed', 'Alarms created: daily-reset, interview-check, butler-daily, butler-daily-report-check')
 })
 
 // Handle alarms
@@ -52,7 +93,40 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
     log(MOD, 'alarm', 'Running butler daily scan...')
     await runButlerScan()
   }
+
+  if (alarm.name === 'apply-tick') {
+    log(MOD, 'alarm', 'Running campaign tick...')
+    await campaignService.tick()
+  }
+
+  if (alarm.name === 'butler-daily-report-check') {
+    await checkDailyReportSchedule()
+  }
 })
+
+/** 检查是否到达预设的 xx 点自动生成“管家日报” */
+async function checkDailyReportSchedule(): Promise<void> {
+  try {
+    const config = await getDailyReportConfig()
+    if (!config.autoGenerate) return
+
+    const today = getTodayDateStr()
+    if (config.lastGeneratedDate === today) return
+
+    const [targetHour, targetMin] = (config.scheduledTime || '18:00').split(':').map((s) => parseInt(s, 10))
+    const now = new Date()
+    const currentHour = now.getHours()
+    const currentMin = now.getMinutes()
+
+    // 若当前时间已到达或超过设定的定时点（如 18:00）
+    if (currentHour > targetHour || (currentHour === targetHour && currentMin >= targetMin)) {
+      log(MOD, 'daily-report-alarm', `Triggering scheduled daily report at ${config.scheduledTime} for ${today}`)
+      await generateDailyButlerReport('scheduled', today)
+    }
+  } catch (err) {
+    logError(MOD, 'checkDailyReportSchedule', err)
+  }
+}
 
 /** 管家每日扫描：跟进建议生成 → 通知（建议+确认，不自动发送） */
 async function runButlerScan(): Promise<{ success: boolean; data?: unknown; error?: string }> {
@@ -137,6 +211,250 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true // Keep channel open for async response
   }
 
+  // Campaign 自动化流水线控制消息
+  if (message.type === 'START_CAMPAIGN') {
+    log(MOD, 'START_CAMPAIGN', 'Starting campaign from popup/options')
+    campaignService.start(
+      message.payload?.quotas,
+      message.payload?.enabledPlatforms,
+      message.payload?.windows,
+    )
+      .then((cmp) => sendResponse({ success: true, data: cmp }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'TOGGLE_PLATFORM') {
+    const { platform, enabled } = message.payload || {}
+    campaignService.togglePlatform(platform, enabled)
+      .then((cmp) => sendResponse({ success: true, data: cmp }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'APPEND_CAMPAIGN_LOG') {
+    const { message: logMsg, level } = message.payload || {}
+    campaignService.log(logMsg, level)
+      .then(() => sendResponse({ success: true }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'UPDATE_CAMPAIGN_WINDOWS') {
+    const windows = message.payload?.windows || []
+    campaignService.updateWindows(windows)
+      .then((cmp) => sendResponse({ success: true, data: cmp }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'UPDATE_CAMPAIGN_INTERVAL') {
+    const interval = message.payload?.interval
+    campaignService.updateInterval(interval)
+      .then((cmp) => sendResponse({ success: true, data: cmp }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'CHECK_PLATFORMS_AUTH') {
+    checkAllPlatformsAuth()
+      .then((authMap) => sendResponse({ success: true, data: authMap }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'TRIGGER_AUTO_COLLECT') {
+    campaignService.triggerAutoCollect()
+      .then((res) => sendResponse({ success: true, data: res }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'CLEAR_PENDING_TASKS') {
+    campaignService.clearPending(message.payload?.platform, message.payload?.recollect !== false)
+      .then((res) => sendResponse({ success: true, data: res }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'PAUSE_CAMPAIGN') {
+    log(MOD, 'PAUSE_CAMPAIGN', 'Pausing campaign')
+    campaignService.pause(message.payload?.reason || 'user')
+      .then((cmp) => sendResponse({ success: true, data: cmp }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'RESUME_CAMPAIGN') {
+    log(MOD, 'RESUME_CAMPAIGN', 'Resuming campaign')
+    campaignService.resume()
+      .then((cmp) => sendResponse({ success: true, data: cmp }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'ABORT_CAMPAIGN') {
+    log(MOD, 'ABORT_CAMPAIGN', 'Aborting campaign')
+    campaignService.abort()
+      .then((cmp) => sendResponse({ success: true, data: cmp }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'GET_CAMPAIGN_STATS') {
+    campaignService.getStats()
+      .then((stats) => sendResponse({ success: true, data: stats }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'APPEND_CAMPAIGN_TASKS') {
+    const tasks = message.payload?.tasks || []
+    appendTasksToCampaign(tasks)
+      .then((count) => sendResponse({ success: true, count }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  // ─── 管家日报与复盘消息路由 ───
+  if (message.type === 'GET_DAILY_REPORT') {
+    getDailyReport(message.payload?.date)
+      .then((report) => sendResponse({ success: true, data: report }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'LIST_DAILY_REPORTS') {
+    listDailyReports(message.payload?.limit || 14)
+      .then((reports) => sendResponse({ success: true, data: reports }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'GENERATE_DAILY_REPORT') {
+    generateDailyButlerReport('manual', message.payload?.date)
+      .then((report) => sendResponse({ success: true, data: report }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'GET_DAILY_REPORT_CONFIG') {
+    getDailyReportConfig()
+      .then((cfg) => sendResponse({ success: true, data: cfg }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'UPDATE_DAILY_REPORT_CONFIG') {
+    saveDailyReportConfig(message.payload || {})
+      .then((cfg) => sendResponse({ success: true, data: cfg }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  // ─── 高级进化策略提案消息路由 ───
+  if (message.type === 'LIST_EVOLUTION_PROPOSALS') {
+    listEvolutionProposals(message.payload?.status || 'all')
+      .then((proposals) => sendResponse({ success: true, data: proposals }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'ACCEPT_EVOLUTION_PROPOSAL') {
+    acceptEvolutionProposal(message.payload?.id, message.payload?.note)
+      .then((res) => sendResponse(res))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'REJECT_EVOLUTION_PROPOSAL') {
+    rejectEvolutionProposal(message.payload?.id, message.payload?.note)
+      .then(() => sendResponse({ success: true }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'RUN_INDUCTION_ANALYSIS') {
+    runInductionAnalysis()
+      .then((proposals) => sendResponse({ success: true, data: proposals }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  // ─── 页面端悬浮管家中控对话路由 ───
+  if (message.type === 'DISPATCH_BUTLER_CHAT') {
+    dispatchButlerChatMessage(message.payload?.text || '', message.payload?.pendingApproval)
+      .then((reply) => sendResponse({ success: true, data: reply }))
+      .catch((err) => sendResponse({ success: false, error: String(err?.message || err) }))
+    return true
+  }
+
+  // ─── 异常与 Bug 日志留痕路由 ───
+  if (message.type === 'RECORD_ERROR') {
+    recordError(message.payload || {})
+      .then(() => sendResponse({ success: true }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'LIST_ERRORS') {
+    listErrors(message.payload?.limit || 100)
+      .then((records) => sendResponse({ success: true, data: records }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'CLEAR_ERRORS') {
+    clearErrors()
+      .then(() => sendResponse({ success: true }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'GET_ERROR_COUNT') {
+    getErrorCount()
+      .then((count) => sendResponse({ success: true, count }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  // ─── 自愈韧性智能体技能热修复路由 (Self-Healing Skill Memory) ───
+  if (message.type === 'GET_BEST_SKILL') {
+    const { platform, pageType, goal } = (message.payload || {}) as {
+      platform: string
+      pageType: string
+      goal: string
+    }
+    findBestSkillDirect(platform, pageType, goal)
+      .then((skill) => sendResponse({ success: true, data: skill }))
+      .catch((err) => {
+        logError(MOD, 'GET_BEST_SKILL', err)
+        sendResponse({ success: false, error: String(err?.message || err) })
+      })
+    return true
+  }
+
+  if (message.type === 'UPSERT_SKILL') {
+    upsertSkillDirect(message.payload || {})
+      .then((saved) => sendResponse({ success: true, data: saved }))
+      .catch((err) => {
+        logError(MOD, 'UPSERT_SKILL', err)
+        sendResponse({ success: false, error: String(err?.message || err) })
+      })
+    return true
+  }
+
+  if (message.type === 'RECORD_SKILL_FAIL') {
+    const skill = (message.payload?.skill || message.payload) as AgentSkill
+    recordSkillFailDirect(skill)
+      .then(() => sendResponse({ success: true }))
+      .catch((err) => {
+        logError(MOD, 'RECORD_SKILL_FAIL', err)
+        sendResponse({ success: false, error: String(err?.message || err) })
+      })
+    return true
+  }
+
   // Content script requests default resume from extension's IndexedDB
   if (message.type === 'GET_DEFAULT_RESUME') {
     logGroup(MOD, 'GET_DEFAULT_RESUME')
@@ -188,7 +506,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       appliedAt?: string
     }
     const { job, match, resumeId, platformId, appliedAt } = payload
-    if (!job || !match || !resumeId) {
+    if (!job || !match) {
       sendResponse({ success: false, error: 'Invalid application payload' })
       return false
     }
@@ -196,23 +514,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     getApplicationByJobId(job.id)
       .then((existing) => {
         if (existing) return existing
+        const cleanCard = sanitizeJobCard(job)
         return saveApplication({
-          jobId: job.id,
-          jobTitle: job.title,
-          companyName: job.companyName,
-          companyLogo: job.companyLogo,
-          salary: job.salary,
-          location: job.location,
-          experience: job.experience,
-          education: job.education,
-          tags: job.tags,
-          jobDescription: job.jobDescription,
-          resumeId,
-          matchScore: match.scoreBypassed ? null : match.score,
-          matchReason: match.recommendation,
-          bossName: job.bossName,
-          bossTitle: job.bossTitle,
-          platformId: platformId || job.platformId || 'unknown',
+          jobId: cleanCard.id,
+          jobTitle: cleanCard.title,
+          companyName: cleanCard.companyName,
+          companyLogo: cleanCard.companyLogo,
+          salary: cleanCard.salary,
+          location: cleanCard.location,
+          experience: cleanCard.experience,
+          education: cleanCard.education,
+          tags: cleanCard.tags,
+          jobDescription: sanitizeJobText(cleanCard.jobDescription),
+          resumeId: resumeId || 'default-resume',
+          matchScore: match.scoreBypassed ? null : (match.score ?? null),
+          matchReason: sanitizeJobText(match.recommendation),
+          bossName: sanitizeJobText(cleanCard.bossName),
+          bossTitle: sanitizeJobText(cleanCard.bossTitle),
+          platformId: platformId || cleanCard.platformId || 'unknown',
           appliedAt,
         })
       })

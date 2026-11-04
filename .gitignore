@@ -40,6 +40,8 @@ playwright-report
 # Project local data (not source code)
 .codebuddy/
 .agents/
+.workbuddy/
+video_production/
 *.bak
 
 # Creative design process files
