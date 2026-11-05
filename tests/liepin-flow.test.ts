@@ -131,15 +131,31 @@ async function readAppliedPlatforms(): Promise<string[]> {
   const worker = await currentWorker()
   return worker.evaluate(async () => {
     return new Promise<string[]>((resolve, reject) => {
+      // 读库连接必须及时关闭：长期持有会阻塞 Dexie 的升级事务，
+      // 导致 SAVE_APPLICATION 写库与本次读取互相等待（曾造成 200s 超时）。
       const request = indexedDB.open('BossZhipinAssistant')
-      request.onerror = () => reject(request.error)
+      const timer = setTimeout(() => reject(new Error('indexedDB.open timeout')), 5_000)
+      const settle = <T>(fn: (value: T) => void, value: T) => {
+        clearTimeout(timer)
+        fn(value)
+      }
+      request.onblocked = () => settle(reject, new Error('indexedDB.open blocked by upgrade'))
+      request.onerror = () => settle(reject, request.error ?? new Error('open failed'))
       request.onsuccess = () => {
-        const transaction = request.result.transaction('applications', 'readonly')
+        const db = request.result
+        if (!db.objectStoreNames.contains('applications')) {
+          db.close()
+          settle(resolve, [])
+          return
+        }
+        const transaction = db.transaction('applications', 'readonly')
         const getAll = transaction.objectStore('applications').getAll()
-        getAll.onerror = () => reject(getAll.error)
-        getAll.onsuccess = () => resolve(
-          (getAll.result ?? []).map((app) => app.platformId).filter(Boolean),
-        )
+        getAll.onerror = () => { db.close(); settle(reject, getAll.error ?? new Error('getAll failed')) }
+        getAll.onsuccess = () => {
+          const platforms = (getAll.result ?? []).map((app) => app.platformId).filter(Boolean)
+          db.close()
+          settle(resolve, platforms)
+        }
       }
     })
   })
@@ -201,7 +217,13 @@ describe('猎聘 E2E · fixture 页面', () => {
     let applied = false
     while (Date.now() < deadline) {
       try {
-        lastPlatforms = await readAppliedPlatforms()
+        // 单次读取也加硬超时，避免 worker.evaluate 因 DB 升级阻塞而永久挂起
+        lastPlatforms = await Promise.race([
+          readAppliedPlatforms(),
+          new Promise<string[]>((_, reject) =>
+            setTimeout(() => reject(new Error('readAppliedPlatforms timeout')), 8_000),
+          ),
+        ])
         lastError = ''
         if (lastPlatforms.includes('liepin')) {
           applied = true

@@ -83,3 +83,15 @@ export function isAssistantTaskCancelled(
 ): boolean {
   return cancelFlag || state.panelState === 'closed'
 }
+
+/**
+ * 「关闭浮窗 = 关闭 AIbot」是一次运行时动作，不是永久偏好。
+ * 页面重新加载 / 扩展重启时，残留的 closed 应恢复为展开，AIbot 仍保持停止。
+ */
+export function normalizeInitialPanelState(
+  state: AssistantControlState,
+): AssistantControlState {
+  return state.panelState === 'closed'
+    ? { ...state, panelState: 'expanded' }
+    : state
+}

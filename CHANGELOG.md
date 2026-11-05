@@ -11,7 +11,7 @@
 - **任务级取消信号**：`TaskRunnerCallbacks` 增加 `shouldCancel`，`executeCampaignTask` 在任务开始、点击投递前、写库前三处检查，取消时返回「已取消：AIbot 已关闭」，不再继续投递或写库
 - **关闭竞态防护**：关闭动作在 content 本地立即置 `runStopped` 与 `assistantState.panelState = 'closed'`，不等 `storage.onChanged` 回传；新增纯函数 `isAssistantTaskCancelled(state, flag)`，即便广播未送达、后台恰好又派发新任务并重置本地标记，只要统一状态仍是 `closed` 就立即取消。bot 重新展开/收缩时自动解除取消标记
 - **运行时模式可切**：运行中不再锁定模式 / AI 评分 / 简历模式开关，切换后从下一个任务起生效；`EXECUTE_APPLY` 默认模式由硬编码 `recommend` 改为读取统一状态
-- **回归测试**：新增 `tests/assistant-control.test.ts`（9 用例）：默认状态、patch 可读、相同值不重复写、订阅与取消订阅、自愈白名单不误伤浮窗、三态切换，以及关闭竞态防护 3 例（本地标记置位 / `closed` 状态兜底 / 展开与收缩不误取消）
+- **回归测试**：新增 `tests/assistant-control.test.ts`（10 用例）：默认状态、patch 可读、相同值不重复写、订阅与取消订阅、自愈白名单不误伤浮窗、三态切换，、关闭竞态防护 3 例（本地标记置位 / `closed` 状态兜底 / 展开与收缩不误取消）与关闭状态归一化 1 例
 
 ### Changed
 
@@ -26,12 +26,14 @@
 - **浮窗运行一段时间后消失**：`dismissUnexpectedModals` 新增 `isExtensionOwnedUi`，扫描 dialogs / masks / 高 `z-index` fixed div 时跳过 `#boss-assistant-panel`、`#boss-assistant-trigger` 及其子节点
 - **悬浮窗配置无法提前设置、只能精确投递**：AIbot 配置面板现在可提前选择批量沟通 / 精确推荐，配置与页面浮窗同一份状态
 - **悬浮窗停止无效**：停止不再只改页面内 `isApplying`，而是走后台 `shutdown` + 广播 `ASSISTANT_CANCEL`，后台 campaign 与当前 content script 任务一起终止；同时本地立即置 `runStopped = true`，让老链路收尾显示「已停止沟通」而非「沟通完成」
+- **关闭状态跨页面残留**：关闭浮窗是运行时动作而非永久偏好；`normalizeInitialPanelState()` 在新页面加载时把残留的 `closed` 恢复为展开并同步写回 storage，浮窗配置改由 content 直接写 `chrome.storage.local` 单一真源，消除「关闭后立刻点恢复入口」的消息往返竞态
+- **猎聘浏览器 E2E 200s 超时**：`readAppliedPlatforms()` 用 `indexedDB.open()` 读库后长期不关闭连接，正好阻塞 `SAVE_APPLICATION` 的 Dexie 升级事务，写库与读库互等；现读完立即 `db.close()`，补齐 `onblocked`、缺失 `applications` 表的兜底，并加 5s open 超时与 8s 单次读取硬超时，避免整个用例挂死
 
 ### Validation
 
 - `npm run lint`：0 error（42 warnings，为遗留 `explicit-any` 与 unused eslint-disable 技术债）
 - `npx tsc -b`：0 error
-- `npx vitest run tests`：**54 files / 727 tests passed**（在 718 基线上新增 9 个统一控制状态用例），含 10 个 `headless:false` 浏览器 E2E 套件
+- `npx vitest run tests`：**54 files / 728 tests passed**（在 718 基线上新增 10 个统一控制状态用例），含 10 个 `headless:false` 浏览器 E2E 套件
 - `npx vite build`：success；`dist/manifest.json` = 1.1.1（95 文件），浏览器 E2E 加载该产物
 - `dist.crx` 以原 `dist.pem` 重新打包为 1.1.1，扩展 ID（公钥指纹 `322abd1abace1ee048e85832a1616956`）保持不变
 

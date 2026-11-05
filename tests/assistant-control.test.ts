@@ -9,6 +9,7 @@ import {
   patchAssistantState,
   subscribeAssistantState,
   isAssistantTaskCancelled,
+  normalizeInitialPanelState,
 } from '../src/shared/assistant-state'
 import { dismissUnexpectedModals } from '../src/shared/platform/boss/action-simulator'
 import { createFloatingPanel, setPanelState } from '../src/content/inject-ui'
@@ -160,5 +161,15 @@ describe('关闭竞态防护', () => {
     expect(isAssistantTaskCancelled(DEFAULT_ASSISTANT_STATE, false)).toBe(false)
     const collapsed = { ...DEFAULT_ASSISTANT_STATE, panelState: 'collapsed' as const }
     expect(isAssistantTaskCancelled(collapsed, false)).toBe(false)
+  })
+})
+
+describe('关闭状态不跨页面持久化', () => {
+  it('读取到 closed 时恢复为展开，其它形态保持不变', () => {
+    const closed = { ...DEFAULT_ASSISTANT_STATE, panelState: 'closed' as const }
+    expect(normalizeInitialPanelState(closed).panelState).toBe('expanded')
+    expect(normalizeInitialPanelState(DEFAULT_ASSISTANT_STATE).panelState).toBe('expanded')
+    const collapsed = { ...DEFAULT_ASSISTANT_STATE, panelState: 'collapsed' as const }
+    expect(normalizeInitialPanelState(collapsed).panelState).toBe('collapsed')
   })
 })

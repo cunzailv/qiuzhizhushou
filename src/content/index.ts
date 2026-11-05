@@ -25,6 +25,8 @@ import {
   DEFAULT_ASSISTANT_STATE,
   getAssistantState,
   isAssistantTaskCancelled,
+  normalizeInitialPanelState,
+  patchAssistantState,
   subscribeAssistantState,
   type AssistantControlState,
   type PanelState,
@@ -195,11 +197,9 @@ function syncFromAssistantState(state: AssistantControlState): void {
 
 /** 写统一控制状态（后台负责广播给 popup / 其他 tab） */
 function writeAssistantState(patch: Partial<AssistantControlState>): void {
-  try {
-    Promise.resolve(
-      chrome.runtime.sendMessage({ type: 'ASSISTANT_CONTROL', payload: { action: 'patch', patch } }),
-    ).catch(() => {})
-  } catch { /* 预期内异常，安全忽略 */ }
+  // 直接写 storage 单一真源，避免经 background 消息往返产生竞态
+  // （例如关闭后立刻点恢复入口，旧值可能覆盖新值）
+  void patchAssistantState(patch).catch(() => {})
 }
 
 /** 关闭浮窗 = 关闭 bot：立即中止本地链路并通知后台终止流水线 */
@@ -241,7 +241,12 @@ async function init(): Promise<void> {
 
     // Apply the user's configured one-click defaults before showing the panel.
     await loadApplyDefaultsFromSettings()
-    assistantState = await getAssistantState()
+    const storedState = await getAssistantState()
+    assistantState = normalizeInitialPanelState(storedState)
+    if (storedState.panelState === 'closed') {
+      // 上次「关闭浮窗」不应让本次打开页面继续隐藏；同步写回，配置页也会跟着恢复
+      await patchAssistantState({ panelState: 'expanded' }).catch(() => {})
+    }
 
     if (defaultResume) {
       log(MOD, 'init', `Resume loaded: ${defaultResume.name}`)

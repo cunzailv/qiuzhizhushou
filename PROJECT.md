@@ -53,7 +53,7 @@
 >
 > **质量收尾基线（2026-11-05）**：`npx vitest run tests` 53 文件 / 718 用例全绿；`npm run lint` 0 error；`npx tsc -b` 0 error；`npx vite build` success。补齐猎聘测试覆盖与 CI 可靠性修复后重新验收。
 >
-> **统一控制基线（2026-11-05，v1.1.1）**：新增 F 层「悬浮窗 / AIbot 统一控制状态」，页面浮窗与后台 campaign 共用 `assistant-state` 单一真源；悬浮窗支持右侧收缩三态、配置页双向同步、关闭即终止 bot 与当前任务。`npx vitest run tests` 54 文件 / 727 用例全绿；`npm run lint` 0 error；`npx tsc -b` 0 error；`npx vite build` success。
+> **统一控制基线（2026-11-05，v1.1.1）**：新增 F 层「悬浮窗 / AIbot 统一控制状态」，页面浮窗与后台 campaign 共用 `assistant-state` 单一真源；悬浮窗支持右侧收缩三态、配置页双向同步、关闭即终止 bot 与当前任务。`npx vitest run tests` 54 文件 / 728 用例全绿；`npm run lint` 0 error；`npx tsc -b` 0 error；`npx vite build` success。
 
 ---
 
