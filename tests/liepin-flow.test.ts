@@ -193,24 +193,29 @@ describe('猎聘 E2E · fixture 页面', () => {
       { timeout: 45_000 },
     ).toBe('clicked')
 
-    // 投递流水线写库略晚于按钮点击；全量并发运行时耗时更长，
-    // service worker 重启时重试而非直接失败
+    // 投递流水线写库略晚于按钮点击；CI runner 较慢且 service worker 可能重启，
+    // 这里手写轮询以便把最后一次异常与浏览器日志完整带进失败信息
     let lastPlatforms: string[] = []
-    await expect.poll(
-      async () => {
-        try {
-          lastPlatforms = await readAppliedPlatforms()
-          return lastPlatforms.includes('liepin')
-        } catch {
-          return false
+    let lastError = ''
+    const deadline = Date.now() + 150_000
+    let applied = false
+    while (Date.now() < deadline) {
+      try {
+        lastPlatforms = await readAppliedPlatforms()
+        lastError = ''
+        if (lastPlatforms.includes('liepin')) {
+          applied = true
+          break
         }
-      },
-      { timeout: 60_000, interval: 1000 },
-    ).toBe(true)
+      } catch (error) {
+        lastError = error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000))
+    }
     expect(
-      lastPlatforms,
-      `applications 未记录 liepin。BROWSER_LOGS:\n${browserLogs.slice(-60).join('\n')}`,
-    ).toContain('liepin')
+      applied,
+      `applications 未记录 liepin。lastPlatforms=${JSON.stringify(lastPlatforms)} lastError=${lastError}\nBROWSER_LOGS:\n${browserLogs.slice(-80).join('\n')}`,
+    ).toBe(true)
     await page.close()
-  }, 120_000)
+  }, 200_000)
 })

@@ -2,8 +2,8 @@ import { defineConfig, configDefaults } from 'vitest/config'
 import path from 'path'
 
 // 浏览器 E2E 需要 headed Chromium + 已构建的 dist 扩展。
-// CI 上若 Chromium 下载失败，ci.yml 会写入 SKIP_BROWSER_E2E=1，
-// 此时仅跳过这些套件，其余逻辑/单测门禁照常执行；本地运行不受影响。
+// SKIP_BROWSER_E2E=1 仅作为本地应急开关：跳过这些套件，逻辑/单测照常执行。
+// CI 固定 ubuntu-24.04 并完整执行这些套件，Chromium 装不上会直接让 job 失败。
 const BROWSER_E2E_SUITES = [
   '**/tests/aibot-browser-e2e.test.ts',
   '**/tests/butler-flow.test.ts',
@@ -17,6 +17,9 @@ const BROWSER_E2E_SUITES = [
   '**/tests/liepin-flow.test.ts',
 ]
 
+// GitHub runner 的 CPU / 图形栈较弱，CI 上单线程跑避免多个 headed Chromium 抢占资源
+const maxThreads = process.env.CI ? 1 : 2
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -29,12 +32,12 @@ export default defineConfig({
       : configDefaults.exclude,
     testTimeout: 30000,
     hookTimeout: 30000,
-    maxThreads: 2,
+    maxThreads,
     minThreads: 1,
     poolOptions: {
       threads: {
         minThreads: 1,
-        maxThreads: 2,
+        maxThreads,
       },
     },
   },

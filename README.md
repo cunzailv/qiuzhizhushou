@@ -183,7 +183,7 @@ npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用�
 每个功能阶段（A/B/C/D/E/UI）都包含浏览器级 E2E 验收（加载 `dist` 扩展 → 真实页面注入 → 截图断言）。
 自愈架构另有 Tier 5 白盒对抗压测（并发清理、DB 写失败、500+ 条淘汰、畸形载荷）。
 
-> CI 说明：`lint-and-build` 执行 lint + build；`test` job 在 Chromium 可下载时跑全量，下载失败时自动跳过 10 个浏览器 E2E 套件（`SKIP_BROWSER_E2E=1`），仍执行 43 文件 / 685 个逻辑用例，保证逻辑门禁始终可用。浏览器 E2E 依赖 headed Chromium 与已构建的 `dist`，以本地全量验收为准。
+> CI 说明：两个 job 固定 `ubuntu-24.04`（`ubuntu-latest` 已迁移到 26.04，Playwright 1.60 不支持该平台的 Chromium 构建）。`lint-and-build` 执行 lint + build；`test` job 用 `xvfb-run -a` 跑全量测试，含 10 个 `headless:false` 浏览器 E2E 套件。Chromium 安装重试 3 次（带 `--with-deps`），仍失败则直接让 job 失败，不再静默跳过；`SKIP_BROWSER_E2E=1` 仅作为本地应急开关保留。浏览器 E2E 是「真实 Chromium + `page.route` 模拟页面」，不等于真实站点 / 真实账号实测。
 
 ## 📝 更新日志
 
