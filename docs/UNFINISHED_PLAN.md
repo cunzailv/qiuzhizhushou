@@ -10,7 +10,8 @@
 |--------|------|
 | 4 个核心自愈测试基线 | 110 passed |
 | 新增 4 个测试文件 | 59 passed（mission 17 / diagnostics 19 / m3 压测 10 / m4 压测 13） |
-| `npx vitest run` 全量 | 51 文件 / 697 用例全绿 |
+| `npx vitest run` 全量 | 51 文件 / 697 用例全绿（归档时基线） |
+| 本轮质量收尾后（2026-11-05） | 53 文件 / 718 用例全绿 |
 | `npx tsc -b` | 零 error |
 | `npm run build` | 零构建错误（2361 modules） |
 | `git push origin main` | `2be85ed..bd7464a` 成功 |
@@ -245,7 +246,7 @@ void recordSelfHealingEvent({
 npx vitest run
 ```
 
-**实际结果：51 个测试文件 / 697 用例全部通过**（含 M3/M4 新增的 4 个测试文件）。
+**实际结果：51 个测试文件 / 697 用例全部通过**（含 M3/M4 新增的 4 个测试文件；归档时基线，本轮补测后为 53 文件 / 718 用例）。
 
 > **已确认：** `tests/e2e-self-healing.test.ts`（端到端真实 DOM 测试）同样通过，无遗留待处理项。
 

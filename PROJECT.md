@@ -50,6 +50,8 @@
 | M5 | 全量自动化测试验收与对抗性加固 | 100% 通过 E2E 完整套件 (Tiers 1-4) + Tier 5 白盒对抗性测试加固 | M1, M2, M3, M4 | ✅ DONE |
 
 > **验收基线（2026-11-05，commit `bd7464a`）**：`npx vitest run` 51 文件 / 697 用例全绿；`npx tsc -b` 零 error；`npm run build` 零构建错误。M1–M5 已全部合并至 `main` 并推送 GitHub。
+>
+> **质量收尾基线（2026-11-05）**：`npx vitest run tests` 53 文件 / 718 用例全绿；`npm run lint` 0 error；`npx tsc -b` 0 error；`npx vite build` success。补齐猎聘测试覆盖与 CI 可靠性修复后重新验收。
 
 ---
 

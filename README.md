@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-697%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-718%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -175,8 +175,8 @@ tests/                  # 94 个测试用例（含浏览器 E2E）
 ## 🧪 测试与验收
 
 ```bash
-npm test                                       # tsc -b + vite build + 全部 697 个测试用例
-npx vitest run                                  # 全量单测/E2E：51 文件 / 697 用例
+npm test                                       # tsc -b + vite build + 全部 718 个测试用例
+npx vitest run                                  # 全量单测/E2E：53 文件 / 718 用例
 npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用例（基线 110 + 新增 36）
 ```
 

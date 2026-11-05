@@ -1,6 +1,6 @@
 {
   "name": "qiuzhizhushou",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": false,
   "description": "多平台智能求职助手 — 支持 Boss直聘、猎聘的 AI 驱动的自动打招呼与简历投递 Chrome 扩展（求职者端）",
   "type": "module",
