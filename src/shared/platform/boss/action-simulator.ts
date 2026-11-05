@@ -3,6 +3,17 @@
 import { randomDelay } from '../../antiBot'
 import type { JobCard, MatchResult } from '../../types/job'
 import type { CollectOptions } from '../types'
+import {
+  findBestSkill,
+  upsertSkill,
+  recordSkillFail,
+  buildSelectorFingerprint,
+} from '../../agent/skill-memory'
+import type { AgentSkill } from '../../agent/types'
+import { chatCompletion, checkAIConfigured } from '../../ai/api-client'
+import { recordError } from '../../db/error-store'
+// M4 诊断埋点：与本地同名的审计日志函数区分开，写入 auditLogs(source='self_healing')
+import { recordSelfHealingEvent as recordDiagnosticEvent } from '../../db/diagnostics-store'
 
 export interface CommunicationUiSnapshot {
   inputs: Set<Element>
@@ -12,6 +23,45 @@ export interface CommunicationUiSnapshot {
   inputSelector?: string
   sendButton?: string
   applyButtons?: number
+}
+
+export interface FuzzyMatchResult {
+  matched: boolean
+  score: number // 0.0 - 1.0
+  titleScore: number
+  companyScore: number
+  reasons: string[]
+}
+
+export interface ActivateCardFallbackOptions {
+  allowDirectUrl?: boolean
+  fuzzyThreshold?: number
+  maxDetailWaitMs?: number
+}
+
+export interface ResilientClickContext {
+  platform: string
+  jobTitle: string
+  company: string
+  allowLlm?: boolean
+  llmTimeoutMs?: number
+}
+
+export interface ResilientClickResult {
+  success: boolean
+  path: 'skill_memory' | 'standard_heuristic' | 'semantic_heuristic' | 'llm_perception' | 'local_heuristic_revert' | 'failed'
+  usedSkill?: AgentSkill
+}
+
+export interface CandidateButtonInfo {
+  index: number
+  tag: string
+  text: string
+  className: string
+  role?: string
+  ariaLabel?: string
+  ka?: string
+  element: HTMLElement
 }
 
 export const BOSS_APPLY_SELECTORS = [
@@ -50,15 +100,22 @@ export function isNegativeButton(el: Element): boolean {
     '投诉',
     '收藏',
     '已收藏',
+    '关注',
+    '已关注',
     '分享',
     '点赞',
     '关闭',
     '取消',
+    '暂不',
+    '放弃',
     '停止招聘',
     '已停止招聘',
     '职位已关闭',
     '职位已下线',
     '已下架',
+    '已暂停招聘',
+    '该职位已暂停沟通',
+    '停止接受新沟通',
     '减少此类推荐',
     '不想看',
   ]
@@ -69,15 +126,18 @@ export function isNegativeButton(el: Element): boolean {
     }
   }
 
-  // 属性维度的负向过滤（如 dislike, shield, collect, share 等）
+  // 属性维度的负向过滤（如 dislike, shield, collect, share, follow 等）
   if (
     ka.includes('dislike') ||
     ka.includes('shield') ||
     ka.includes('report') ||
     ka.includes('collect') ||
     ka.includes('share') ||
+    ka.includes('follow') ||
     className.includes('dislike') ||
-    className.includes('op-btn-dislike')
+    className.includes('op-btn-dislike') ||
+    className.includes('btn-cancel') ||
+    className.includes('follow')
   ) {
     return true
   }
@@ -132,92 +192,373 @@ export function isPositiveApplyButton(el: Element): boolean {
   return false
 }
 
+// ============================================================================
+// 意外弹窗与遮罩脱困系统 (Unexpected Modals & Overlay De-blocking Engine)
+// ============================================================================
+
+/** 弹窗选择器合集：覆盖主流招聘平台、组件库与自研浮层 */
+const MODAL_CONTAINER_SELECTORS = [
+  '.dialog-wrap',
+  '[role="dialog"]',
+  '[role="alertdialog"]',
+  '[aria-modal="true"]',
+  '.boss-dialog',
+  '[class*="dialog-box"]',
+  '[class*="dialog-container"]',
+  '.dialog-lib-box',
+  '.chat-dialog',
+  '.boss-popup',
+  '[class*="popup-wrap"]',
+  '[class*="popup-box"]',
+  '[class*="modal-wrap"]',
+  '[class*="modal-dialog"]',
+  '[class*="modal-container"]',
+  '.ant-modal',
+  '.el-dialog',
+  '.el-dialog__wrapper',
+  '[class*="guide-dialog"]',
+  '[class*="banner-dialog"]',
+].join(', ')
+
+/** 遮罩层选择器合集：覆盖各平台与主流 UI 库的半透明全屏背景 */
+const MASK_BACKDROP_SELECTORS = [
+  '.dialog-mask',
+  '.modal-backdrop',
+  '.v-modal',
+  '.mask',
+  '[class*="dialog-mask"]',
+  '[class*="modal-backdrop"]',
+  '[class*="v-modal"]',
+  '[class*="popup-mask"]',
+  '[class*="ant-modal-mask"]',
+  '[class*="el-overlay"]',
+  '[class*="modal-overlay"]',
+  '[class*="backdrop"]',
+].join(', ')
+
+/** 常见非正向/关闭/取消文案启发式白名单 */
+const DISMISS_BUTTON_TEXTS = [
+  '取消',
+  '放弃',
+  '暂不',
+  '我知道了',
+  '知道了',
+  '关闭',
+  '忽略',
+  '下次再说',
+  '暂不体验',
+  '暂不参与',
+  '再看看',
+  '退出',
+  '拒绝',
+  '跳过',
+  '稍后再说',
+]
+
+/** 干扰/负向/非核心阻塞弹窗关键词 */
+const UNEXPECTED_MODAL_KEYWORDS = [
+  // 负向反馈与减少推荐
+  '不合适的原因',
+  '为什么不合适',
+  '减少此类推荐',
+  '选择原因',
+  '不感兴趣',
+  '不想看该',
+  '屏蔽该公司',
+  '不喜欢',
+  '不再显示',
+  '关闭推荐',
+  // 客户端/APP 推广与升级通知
+  '下载APP',
+  '下载客户端',
+  '扫码下载',
+  '体验新版',
+  '新版本上线',
+  '升级提示',
+  '立即升级',
+  '更新提示',
+  '版本更新',
+  '升级新版',
+  '安装客户端',
+  '系统升级',
+  // 调研问卷与活动浮层
+  '问卷调研',
+  '满意度评价',
+  '求职体验调研',
+  '求职反馈',
+  '活动详情',
+  '新人专享',
+  '抽奖',
+  '体验问卷',
+  '给个好评',
+  // 非关键提醒与引导
+  '防骗提醒',
+  '求职安全提醒',
+  '安全防范小贴士',
+  '温馨提示',
+  '新手引导',
+  '功能推荐',
+  '隐私政策更新',
+  '服务协议更新',
+]
+
 /**
- * 自动识别并关闭页面上的意外阻塞性弹窗（例如“请选择不合适的原因”、“减少此类推荐”、“求职反馈”等）
- * 解除页面遮罩锁定，保证自动化与用户操作不被卡死。
+ * 判断是否属于必须严格保护的正向交互弹窗或高危风控验证（严禁误杀）
+ */
+function isProtectedDialog(el: HTMLElement): boolean {
+  const text = el.textContent || ''
+
+  // 1. 正常打招呼开聊弹窗（包含输入框或打招呼关键词）
+  const hasGreetingText =
+    text.includes('打招呼') ||
+    text.includes('开聊') ||
+    text.includes('发送打招呼语') ||
+    text.includes('编辑打招呼语') ||
+    text.includes('发送简历') ||
+    text.includes('打个招呼')
+  const hasGreetingInput = !!el.querySelector(
+    'textarea, div[contenteditable="true"], input[type="text"], [class*="chat-input"], [class*="greeting"]'
+  )
+  if (hasGreetingText && (hasGreetingInput || el.classList.contains('chat-dialog') || el.className.includes('chat'))) {
+    return true
+  }
+
+  // 2. 真实安全风控滑块验证（需交由风控模块或人工介入，不可静默强关）
+  const hasCaptchaMarker =
+    text.includes('滑块验证') ||
+    text.includes('请完成安全验证') ||
+    text.includes('滑动验证') ||
+    text.includes('安全验证') ||
+    text.includes('验证码') ||
+    !!el.querySelector('.geetest_holder, [class*="geetest"], [class*="captcha"], #nc_container, [class*="baxia"]')
+  if (hasCaptchaMarker) {
+    return true
+  }
+
+  // 3. 每日沟通上限硬阻断（由风控检测器统一感知并停止整场任务，不作为普通弹窗强关）
+  if (text.includes('沟通上限') || text.includes('沟通次数已达上限') || (text.includes('已达上限') && text.includes('沟通'))) {
+    return true
+  }
+
+  // 4. 主岗位详情展示抽屉（非阻塞性弹窗）
+  if (
+    (el.classList.contains('job-detail-box') || el.classList.contains('job-detail-container')) &&
+    !el.getAttribute('role')?.includes('dialog')
+  ) {
+    return true
+  }
+
+  return false
+}
+
+/**
+ * 自动识别并关闭页面上的意外阻塞性弹窗（例如“请选择不合适的原因”、“升级提示”、“APP推荐”、“问卷”等）
+ * 解除半透明遮罩与 body 滚动/指针锁定，保证自动化与用户操作畅通无阻。
+ *
+ * @param doc 目标文档（默认为 document）
+ * @returns boolean 若有任何弹窗关闭、遮罩清除或视图复原，返回 true；若页面无任何阻塞，返回 false。
  */
 export function dismissUnexpectedModals(doc: Document = document): boolean {
   let dismissed = false
 
   try {
-    // 1. 查找可能包含不合适/反馈/干扰选项的模态弹窗
-    const dialogs = Array.from(
-      doc.querySelectorAll<HTMLElement>(
-        '.dialog-wrap, [role="dialog"], .boss-dialog, [class*="dialog-box"], [class*="dialog-container"], .dialog-lib-box, .chat-dialog, .boss-popup'
-      )
-    )
+    if (!doc || !doc.body) return false
+
+    // 1. 扫描页面中所有潜在弹窗
+    const dialogs = Array.from(doc.querySelectorAll<HTMLElement>(MODAL_CONTAINER_SELECTORS))
 
     for (const dialog of dialogs) {
-      if (dialog.offsetWidth === 0 && dialog.offsetHeight === 0 && dialog.getClientRects().length === 0) {
+      // 忽略不可见元素
+      if (
+        dialog.offsetWidth === 0 &&
+        dialog.offsetHeight === 0 &&
+        (!dialog.getClientRects || dialog.getClientRects().length === 0)
+      ) {
+        continue
+      }
+
+      // 保护正向打招呼与风控验证弹窗
+      if (isProtectedDialog(dialog)) {
         continue
       }
 
       const text = dialog.textContent || ''
-      // 判断是否属于干扰类或不合适原因弹窗（注意不要误关正常的开聊打招呼输入弹窗）
-      const isDislikeModal =
-        text.includes('不合适的原因') ||
-        text.includes('为什么不合适') ||
-        text.includes('减少此类推荐') ||
-        text.includes('选择原因') ||
-        text.includes('不感兴趣') ||
-        text.includes('不想看该')
+      const isKnownUnexpected = UNEXPECTED_MODAL_KEYWORDS.some((kw) => text.includes(kw))
+      const hasDialogRole =
+        dialog.getAttribute('role') === 'dialog' ||
+        dialog.getAttribute('role') === 'alertdialog' ||
+        dialog.getAttribute('aria-modal') === 'true'
 
-      if (isDislikeModal) {
-        // 优先点击“取消”按钮
+      // 若命中干扰关键词，或属于非保护的通用浮层弹窗
+      if (isKnownUnexpected || hasDialogRole) {
+        // Step 1: 优先点击“取消”/“我知道了”等文本型按钮
         const cancelBtn = Array.from(
-          dialog.querySelectorAll<HTMLElement>('button, a, span, [role="button"]')
+          dialog.querySelectorAll<HTMLElement>('button, a, span, [role="button"], div')
         ).find((el) => {
           const t = el.textContent?.trim() || ''
-          return t === '取消' || t === '放弃' || t === '暂不' || el.classList.contains('btn-cancel')
+          return (
+            DISMISS_BUTTON_TEXTS.includes(t) ||
+            el.classList.contains('btn-cancel') ||
+            el.className.includes('cancel') ||
+            el.className.includes('dismiss')
+          )
         })
 
         if (cancelBtn) {
-          cancelBtn.click()
-          dismissed = true
-        } else {
-          // 点击右上角关闭图标
-          const closeBtn = dialog.querySelector<HTMLElement>(
-            '.icon-close, .dialog-close, .iboss-close, [aria-label="Close"], .close, [class*="close"]'
-          )
-          if (closeBtn) {
-            closeBtn.click()
+          try {
+            cancelBtn.click()
             dismissed = true
+          } catch {}
+        } else {
+          // Step 2: 查找关闭图标（.icon-close, SVG, unicode × 等）
+          const closeBtn = Array.from(
+            dialog.querySelectorAll<HTMLElement>(
+              'button, a, span, i, [role="button"], ' +
+                '.icon-close, .dialog-close, .iboss-close, .boss-popup__close, .ant-modal-close, .el-dialog__close, ' +
+                '[aria-label*="close" i], [aria-label*="关闭"], [title*="关闭"], [title*="close" i], ' +
+                '.close, [class*="close" i], [class*="Close"], button svg, a svg'
+            )
+          ).find((el) => {
+            const t = el.textContent?.trim() || ''
+            return (
+              t === '×' ||
+              t === '✕' ||
+              t === '✖' ||
+              t === '╳' ||
+              t === 'X' ||
+              t === 'x' ||
+              el.tagName.toLowerCase() === 'svg' ||
+              !!el.querySelector('svg') ||
+              el.className.toLowerCase().includes('close') ||
+              el.getAttribute('aria-label')?.toLowerCase().includes('close')
+            )
+          })
+
+          if (closeBtn) {
+            try {
+              closeBtn.click()
+              dismissed = true
+            } catch {}
           }
         }
 
-        // 发送 ESC 键兜底
+        // Step 3: 发送 ESC 键盘事件兜底
         try {
-          window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }))
-          doc.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', keyCode: 27, bubbles: true }))
+          const escEvent = new KeyboardEvent('keydown', {
+            key: 'Escape',
+            code: 'Escape',
+            keyCode: 27,
+            which: 27,
+            bubbles: true,
+            cancelable: true,
+          })
+          dialog.dispatchEvent(escEvent)
+          const targetWin = doc.defaultView || window
+          targetWin.dispatchEvent(escEvent)
+          doc.dispatchEvent(escEvent)
         } catch {}
 
-        // 如果弹窗依然没有关闭，强行隐藏该异常弹窗及其背景遮罩，彻底解除页面卡死
+        // Step 4: 强制隐藏/清除仍残留的弹窗 DOM 节点，防止卡死
         if (
           dialog.isConnected &&
-          (dialog.offsetWidth > 0 || dialog.offsetHeight > 0 || dialog.getClientRects().length > 0)
+          dialog.style.display !== 'none' &&
+          (dialog.offsetWidth > 0 || dialog.offsetHeight > 0 || (dialog.getClientRects && dialog.getClientRects().length > 0))
         ) {
           dialog.style.display = 'none'
+          dialog.style.pointerEvents = 'none'
           dismissed = true
         }
       }
     }
 
-    // 2. 清理遗留的孤立遮罩层（如果弹窗已经隐藏但遮罩还在）
-    const masks = doc.querySelectorAll<HTMLElement>('.dialog-mask, .modal-backdrop, .v-modal')
-    for (const mask of Array.from(masks)) {
-      if (mask.offsetWidth > 0 || mask.offsetHeight > 0 || mask.getClientRects().length > 0) {
-        // 检查页面上是否还有正在展示的正向弹窗（如聊天窗口）
-        const hasActiveChatDialog = Array.from(doc.querySelectorAll<HTMLElement>('.chat-dialog, .dialog-wrap')).some(
-          d => (d.offsetWidth > 0 || d.offsetHeight > 0 || d.getClientRects().length > 0) && (d.textContent || '').includes('打招呼')
-        )
-        if (!hasActiveChatDialog) {
+    // 2. 检查页面是否存在正在活跃的正向交互弹窗
+    const hasActiveChatDialog = Array.from(
+      doc.querySelectorAll<HTMLElement>('.chat-dialog, .dialog-wrap, [class*="chat-modal"]')
+    ).some(
+      (d) =>
+        isProtectedDialog(d) &&
+        d.style.display !== 'none' &&
+        (d.offsetWidth > 0 || d.offsetHeight > 0 || (d.getClientRects && d.getClientRects().length > 0))
+    )
+
+    // 3. 清理遗留的孤立遮罩层与全屏高 z-index 阻塞浮层
+    if (!hasActiveChatDialog) {
+      const masks = doc.querySelectorAll<HTMLElement>(MASK_BACKDROP_SELECTORS)
+      for (const mask of Array.from(masks)) {
+        if (mask.style.display === 'none') continue
+        if (mask.offsetWidth > 0 || mask.offsetHeight > 0 || (mask.getClientRects && mask.getClientRects().length > 0)) {
           mask.style.display = 'none'
+          mask.style.pointerEvents = 'none'
+          dismissed = true
+        }
+      }
+
+      // 探测高 z-index (>= 1000) 的全屏固定定位遮蔽层
+      const fixedDivs = doc.querySelectorAll<HTMLElement>('div[style*="fixed"], div[style*="z-index"]')
+      for (const div of Array.from(fixedDivs)) {
+        if (div.style.display === 'none') continue
+        const style = div.style
+        const zIndex = parseInt(style.zIndex, 10)
+        if (
+          (style.position === 'fixed' || style.position === 'absolute') &&
+          zIndex >= 1000 &&
+          (div.offsetWidth > 0 || div.offsetHeight > 0)
+        ) {
+          div.style.display = 'none'
+          div.style.pointerEvents = 'none'
+          dismissed = true
+        }
+      }
+    }
+
+    // 4. 彻底复原 Body 与 DocumentElement 视口滚动与交互（解除 scroll freeze / pointer-events freeze）
+    if (!hasActiveChatDialog) {
+      if (doc.body) {
+        if (doc.body.style.overflow === 'hidden') {
+          doc.body.style.overflow = ''
+          dismissed = true
+        }
+        if (doc.body.style.position === 'fixed') {
+          doc.body.style.position = ''
+          dismissed = true
+        }
+        if (doc.body.style.pointerEvents === 'none') {
+          doc.body.style.pointerEvents = ''
+          dismissed = true
+        }
+        const lockClasses = ['modal-open', 'dialog-open', 'has-modal', 'popup-show', 'overflow-hidden']
+        for (const cls of lockClasses) {
+          if (doc.body.classList.contains(cls)) {
+            doc.body.classList.remove(cls)
+            dismissed = true
+          }
+        }
+      }
+
+      if (doc.documentElement) {
+        if (doc.documentElement.style.overflow === 'hidden') {
+          doc.documentElement.style.overflow = ''
+          dismissed = true
+        }
+        if (doc.documentElement.style.pointerEvents === 'none') {
+          doc.documentElement.style.pointerEvents = ''
           dismissed = true
         }
       }
     }
   } catch {
-    // 忽略异常
+    // 任务优先保障：永不向外抛出异常
+  }
+
+  // M4 埋点：弹窗/遮罩/滚动锁死被强制清除时记录归因（fire-and-forget，不阻断主链路）
+  if (dismissed) {
+    void recordDiagnosticEvent({
+      platform: 'boss',
+      category: 'modal_dismissed',
+      triggerDescription: '检测到意外弹窗、全屏遮罩或视口滚动锁死',
+      bypassPath: 'force_dismiss_and_viewport_restore',
+      success: true,
+    }).catch(() => {})
   }
 
   return dismissed
@@ -227,7 +568,9 @@ export function dismissUnexpectedModals(doc: Document = document): boolean {
  * 健壮查找所有可见的沟通/投递按钮（选择器 + 文案启发式双重探测，且严格排除任何负向/不合适按钮）
  */
 export function findApplyButtons(root: Document | Element = document): HTMLElement[] {
-  const elements = Array.from(root.querySelectorAll<HTMLElement>(APPLY_SELECTOR))
+  const scope = root || (typeof document !== 'undefined' ? document : null)
+  if (!scope) return []
+  const elements = Array.from(scope.querySelectorAll<HTMLElement>(APPLY_SELECTOR))
   const set = new Set<HTMLElement>()
 
   for (const el of elements) {
@@ -238,7 +581,7 @@ export function findApplyButtons(root: Document | Element = document): HTMLEleme
 
   // 兜底：通过常见沟通文案（立即沟通、继续沟通、聊一聊、立即投递等）查找交互按钮
   const clickableCandidates = Array.from(
-    root.querySelectorAll<HTMLElement>('a, button, [role="button"], span.btn, div.btn, [class*="btn"]')
+    scope.querySelectorAll<HTMLElement>('a, button, [role="button"], span.btn, div.btn, [class*="btn"]')
   )
   for (const el of clickableCandidates) {
     if (isPositiveApplyButton(el)) {
@@ -266,6 +609,46 @@ export function findApplyButtons(root: Document | Element = document): HTMLEleme
     return 0
   })
 
+  return validButtons
+}
+
+/**
+ * 严格基于预设选择器配置查找沟通/投递按钮 (Tier 1 专用，排除无预设类名的普通元素)
+ */
+export function findConfiguredApplyButtons(root: Document | Element = document): HTMLElement[] {
+  const scope = root || (typeof document !== 'undefined' ? document : null)
+  if (!scope) return []
+  const elements = Array.from(scope.querySelectorAll<HTMLElement>(APPLY_SELECTOR))
+  const validButtons = elements.filter((el) => {
+    if (el.hasAttribute('disabled') || el.classList.contains('disabled') || el.getAttribute('aria-disabled') === 'true') {
+      return false
+    }
+    if (isNegativeButton(el)) {
+      // M4 埋点：isNegativeButton 的实际拦截分支（纯函数本身保持无副作用）
+      // 记录预设选择器命中却因负面语义被拦下的节点，避免误点"不合适"复发。
+      void recordDiagnosticEvent({
+        platform: 'boss',
+        category: 'negative_button_blocked',
+        triggerDescription: '预设选择器命中候选节点，但被负面按钮黑名单拦截，已中止点击',
+        bypassPath: 'negative_blacklist_block',
+        failedSelector: APPLY_SELECTOR,
+        buttonText: (el.textContent || '').trim().slice(0, 40),
+        success: true,
+      }).catch(() => {})
+      return false
+    }
+    if (!isPositiveApplyButton(el)) return false
+    return el.offsetWidth > 0 || el.offsetHeight > 0 || (el.getClientRects && el.getClientRects().length > 0)
+  })
+  validButtons.sort((a, b) => {
+    const textA = (a.textContent || '').trim()
+    const textB = (b.textContent || '').trim()
+    const isPrimaryA = textA.includes('立即沟通') || a.classList.contains('btn-startchat')
+    const isPrimaryB = textB.includes('立即沟通') || b.classList.contains('btn-startchat')
+    if (isPrimaryA && !isPrimaryB) return -1
+    if (!isPrimaryA && isPrimaryB) return 1
+    return 0
+  })
   return validButtons
 }
 
@@ -321,35 +704,480 @@ export async function clickElement(
   return { success: false, count: 0 }
 }
 
-export async function clickApplyButton(jobCard: HTMLElement): Promise<boolean> {
-  // 0. 先行清理任何意外遮罩或干扰弹窗
+// ============================================================================
+// 按钮点击多阶弹性降级与技能热修复 (Button Resilience & Multi-Tier Fallback Engine)
+// ============================================================================
+
+export const WHITELIST_PRIMARY = ['立即沟通', '打招呼', '聊一聊', '投递简历', '继续沟通']
+export const WHITELIST_SYNONYMS = ['立即投递', '发消息', '与Boss沟通', '开聊', '去开聊', 'apply', 'chat', '发起对话', '发送意向', '发起交谈']
+export const COMMUNICATIVE_KEYWORDS = ['沟通', '投递', '聊', '对话', '交谈', '意向', '申请', '开聊', '联系', '打招呼', '发信', 'apply', 'chat']
+
+/** 记录自愈审计日志到 db.errors 并通知 runtime */
+export async function recordSelfHealingEvent(payload: {
+  source: string
+  message: string
+  context?: string
+}): Promise<void> {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
+      chrome.runtime.sendMessage({
+        type: 'RECORD_ERROR',
+        payload,
+      }).catch?.(() => {})
+    }
+  } catch {}
+  try {
+    await recordError(payload)
+  } catch {}
+}
+
+/** 提取可见、未禁用、非黑名单的交互候选按钮 */
+export function extractCandidateButtons(root: ParentNode): CandidateButtonInfo[] {
+  if (!root) return []
+  const elements = Array.from(
+    root.querySelectorAll<HTMLElement>(
+      'button, a, [role="button"], span.btn, div.btn, [class*="btn"], input[type="button"], input[type="submit"]'
+    )
+  )
+  const candidates: CandidateButtonInfo[] = []
+  const seen = new Set<HTMLElement>()
+
+  for (const el of elements) {
+    if (seen.has(el)) continue
+    seen.add(el)
+
+    if (
+      el.offsetWidth === 0 &&
+      el.offsetHeight === 0 &&
+      (!el.getClientRects || el.getClientRects().length === 0)
+    ) {
+      continue
+    }
+    if (el.hasAttribute('disabled') || el.classList.contains('disabled') || el.getAttribute('aria-disabled') === 'true') {
+      continue
+    }
+    if (isNegativeButton(el)) {
+      continue
+    }
+
+    const text = (el.textContent || '').trim().replace(/\s+/g, ' ')
+    const className = typeof el.className === 'string' ? el.className.trim() : ''
+    const role = el.getAttribute('role') || undefined
+    const ariaLabel = el.getAttribute('aria-label') || el.getAttribute('title') || undefined
+    const ka = el.getAttribute('ka') || undefined
+
+    candidates.push({
+      index: candidates.length,
+      tag: el.tagName.toLowerCase(),
+      text: text.slice(0, 40),
+      className: className.slice(0, 100),
+      role,
+      ariaLabel,
+      ka,
+      element: el,
+    })
+
+    if (candidates.length >= 15) break
+  }
+
+  return candidates
+}
+
+/** 语义文案黑白名单启发式探测 (Tier 2) */
+export function findWhitelistCandidate(candidates: CandidateButtonInfo[]): CandidateButtonInfo | null {
+  let best: CandidateButtonInfo | null = null
+  let maxScore = 0
+
+  for (const c of candidates) {
+    const text = c.text.replace(/\s+/g, '')
+    const lower = text.toLowerCase()
+    let score = 0
+
+    for (const w of WHITELIST_PRIMARY) {
+      if (text === w) score = Math.max(score, 100)
+      else if (text.includes(w) || lower.includes(w.toLowerCase())) score = Math.max(score, 80)
+    }
+
+    if (score === 0) {
+      for (const s of WHITELIST_SYNONYMS) {
+        if (text === s) score = Math.max(score, 75)
+        else if (text.includes(s) || lower.includes(s.toLowerCase())) score = Math.max(score, 60)
+      }
+    }
+
+    if (score > 0) {
+      if (c.tag === 'button') score += 10
+      if (/startchat|chat|apply/i.test(c.className) || (c.ka && /chat|apply/i.test(c.ka))) score += 10
+      if (score > maxScore) {
+        maxScore = score
+        best = c
+      }
+    }
+  }
+
+  return best
+}
+
+/** LLM 感知决策降级 (Tier 3) */
+export async function selectButtonViaLlm(
+  candidates: CandidateButtonInfo[],
+  context: { platform: string; jobTitle: string; company: string },
+  timeoutMs = 8000
+): Promise<{ candidate: CandidateButtonInfo; reason: string } | null> {
+  if (candidates.length === 0) return null
+
+  const serialized = candidates.map((c) => ({
+    index: c.index,
+    tag: c.tag,
+    text: c.text,
+    className: c.className,
+    role: c.role,
+    ariaLabel: c.ariaLabel,
+    ka: c.ka,
+  }))
+
+  const systemPrompt = [
+    'You are an intelligent web UI perception agent.',
+    'Identify which candidate button is the genuine button to initiate communication or apply for the job position.',
+    'Strictly avoid negative action buttons (e.g. close, cancel, dislike, report, favorite, follow).',
+    'Respond ONLY with a JSON object in this format: {"selectedIndex": <number or null>, "confidence": <number between 0 and 1>, "reason": "<brief explanation>"}',
+    'If none of the candidates is a valid communicate/apply button, return {"selectedIndex": null, "confidence": 0, "reason": "No valid button found"}.',
+  ].join(' ')
+
+  const userMessage = [
+    `Target Job Title: "${context.jobTitle}"`,
+    `Target Company: "${context.company}"`,
+    'Candidate Interactive Elements:',
+    JSON.stringify(serialized, null, 2),
+  ].join('\n')
+
+  let raw = ''
+  try {
+    const callPromise = chatCompletion(systemPrompt, userMessage, 0.1)
+    const timeoutPromise = new Promise<string>((_, reject) =>
+      setTimeout(() => reject(new Error('LLM timeout')), timeoutMs)
+    )
+    raw = await Promise.race([callPromise, timeoutPromise])
+  } catch (err) {
+    return null
+  }
+
+  if (!raw || typeof raw !== 'string') return null
+
+  try {
+    const match = raw.match(/\{[\s\S]*?\}/)
+    if (!match) return null
+    const parsed = JSON.parse(match[0])
+    if (
+      typeof parsed.selectedIndex === 'number' &&
+      parsed.selectedIndex >= 0 &&
+      parsed.selectedIndex < candidates.length
+    ) {
+      const chosen = candidates[parsed.selectedIndex]
+      if (isNegativeButton(chosen.element)) return null
+      return { candidate: chosen, reason: parsed.reason || 'LLM perception decision' }
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
+/** 本地启发式规则安全兜底与任务连续性保障 (Tier 4) */
+export function rankCandidatesLocally(candidates: CandidateButtonInfo[]): CandidateButtonInfo | null {
+  let best: CandidateButtonInfo | null = null
+  let bestScore = 0
+
+  for (const c of candidates) {
+    if (isNegativeButton(c.element)) continue
+    let score = 0
+    const text = c.text.replace(/\s+/g, '')
+    const lower = text.toLowerCase()
+
+    for (const kw of COMMUNICATIVE_KEYWORDS) {
+      if (text.includes(kw) || lower.includes(kw.toLowerCase())) {
+        score += 40
+        break
+      }
+    }
+
+    if (/chat|apply|startchat|contact/i.test(c.className)) score += 25
+    if (c.ka && /chat|apply/i.test(c.ka)) score += 25
+    if (c.tag === 'button') score += 15
+    if (c.role === 'button') score += 10
+    if (text.length >= 2 && text.length <= 10) score += 10
+
+    if (score > bestScore) {
+      bestScore = score
+      best = c
+    }
+  }
+
+  return bestScore > 0 ? best : null
+}
+
+/**
+ * 按钮点击多阶弹性降级体系：
+ * Tier 0: Skill Memory 技能记忆优先复用 (0ms 瞬时热修复)
+ * Tier 1: 预设类名常规选择器点击 (.btn-startchat)
+ * Tier 2: 语义文本黑白名单启发式探测 + 动态技能沉淀
+ * Tier 3: LLM 候选感知与决策降级 + 动态技能沉淀
+ * Tier 4: 本地规则安全兜底回退 + 任务连续性保障
+ */
+export async function clickApplyButtonWithResilience(
+  jobCard: HTMLElement,
+  context: ResilientClickContext
+): Promise<ResilientClickResult> {
   dismissUnexpectedModals()
 
-  // 1. 优先在目标卡片/详情面板内部寻找沟通按钮
-  const cardButtons = findApplyButtons(jobCard)
-  for (const btn of cardButtons) {
-    if (isPositiveApplyButton(btn) && !isNegativeButton(btn)) {
-      await randomDelay(500, 1500)
-      btn.click()
-      await randomDelay(300, 600)
-      dismissUnexpectedModals()
-      return true
+  const platform = context.platform || 'boss'
+  const pageType = 'job_detail'
+  const goal = 'click_apply'
+
+  // ─── Tier 0: Skill Memory Cache ───
+  try {
+    const cachedSkill = await findBestSkill(platform, pageType, goal)
+    if (cachedSkill && cachedSkill.steps && cachedSkill.steps.length > 0) {
+      const targetSelector =
+        cachedSkill.steps[0].action?.target?.value ||
+        cachedSkill.fingerprint?.cssSelector ||
+        cachedSkill.selectorSignature
+
+      if (targetSelector) {
+        const targetEl =
+          jobCard?.querySelector<HTMLElement>(targetSelector) ||
+          document.querySelector<HTMLElement>(targetSelector)
+
+        if (
+          targetEl &&
+          (targetEl.offsetWidth > 0 || targetEl.offsetHeight > 0 || (targetEl.getClientRects && targetEl.getClientRects().length > 0)) &&
+          !targetEl.hasAttribute('disabled') &&
+          !targetEl.classList.contains('disabled') &&
+          targetEl.getAttribute('aria-disabled') !== 'true' &&
+          !isNegativeButton(targetEl)
+        ) {
+          targetEl.click()
+          await recordSelfHealingEvent({
+            source: `self-healing.skill_patch.${platform}`,
+            message: `[Self-Healing] click_apply: Skill memory hit -> Reused cached selector: ${targetSelector}`,
+            context: JSON.stringify({
+              category: 'skill_patch',
+              action: 'click_apply',
+              mitigation: `Reused cached selector: ${targetSelector}`,
+              selector: targetSelector,
+              skillId: cachedSkill.id,
+              ...context,
+            }),
+          })
+          dismissUnexpectedModals()
+          return { success: true, path: 'skill_memory', usedSkill: cachedSkill }
+        } else {
+          await recordSkillFail(cachedSkill)
+        }
+      }
     }
+  } catch (err) {
+    // 降级至 Tier 1
   }
 
-  // 2. 兜底：若 jobCard 容器判定过窄，在整个 document 中查找沟通按钮
-  const docButtons = findApplyButtons(document)
-  for (const btn of docButtons) {
-    if (isPositiveApplyButton(btn) && !isNegativeButton(btn)) {
-      await randomDelay(500, 1500)
-      btn.click()
-      await randomDelay(300, 600)
-      dismissUnexpectedModals()
-      return true
-    }
+  // ─── Tier 1: Configured Default Selector ───
+  const standardButtons = jobCard ? findConfiguredApplyButtons(jobCard) : []
+  if (standardButtons.length > 0) {
+    standardButtons[0].click()
+    dismissUnexpectedModals()
+    return { success: true, path: 'standard_heuristic' }
+  }
+  const docStandardButtons = findConfiguredApplyButtons(document)
+  if (docStandardButtons.length > 0) {
+    docStandardButtons[0].click()
+    dismissUnexpectedModals()
+    return { success: true, path: 'standard_heuristic' }
   }
 
-  return false
+  // 提取候选按钮供 Tiers 2, 3, 4 使用
+  const cardCandidates = jobCard ? extractCandidateButtons(jobCard) : []
+  const candidates = cardCandidates.length > 0 ? cardCandidates : extractCandidateButtons(document)
+
+  // ─── Tier 2: 语义文本白名单启发式探测 ───
+  const whitelistCandidate = findWhitelistCandidate(candidates)
+  if (whitelistCandidate) {
+    whitelistCandidate.element.click()
+    const selector = buildSelectorFingerprint(whitelistCandidate.element, jobCard || undefined)
+    try {
+      await upsertSkill({
+        platform,
+        pageType,
+        goal,
+        steps: [
+          {
+            thinking: `Semantic text heuristic matched: "${whitelistCandidate.text}"`,
+            action: { type: 'click', target: { kind: 'css_selector', value: selector } },
+          },
+        ],
+        selectorSignature: selector,
+        patchSource: 'heuristic',
+        remediationNotes: `Discovered apply button via semantic text heuristic: "${whitelistCandidate.text}"`,
+        fingerprint: {
+          cssSelector: selector,
+          buttonText: whitelistCandidate.text,
+          signature: `${platform}:${pageType}:${goal}:${selector}`,
+        },
+      })
+    } catch {}
+
+    await recordSelfHealingEvent({
+      source: `self-healing.button_fallback.${platform}`,
+      message: `[Self-Healing] click_apply: Conventional selector failed -> Selected element ${selector} ("${whitelistCandidate.text}") and hot-patched to agentSkills`,
+      context: JSON.stringify({
+        category: 'button_fallback',
+        action: 'click_apply',
+        mitigation: `Selected element ${selector} ("${whitelistCandidate.text}") and hot-patched to agentSkills`,
+        selector,
+        buttonText: whitelistCandidate.text,
+        ...context,
+      }),
+    })
+    // M4 埋点 · Tier 2：预设选择器失效，语义启发式命中
+    void recordDiagnosticEvent({
+      platform,
+      category: 'button_heuristic',
+      triggerDescription: '预设沟通按钮选择器未命中，降级为语义文本白名单启发式',
+      bypassPath: 'semantic_text_whitelist',
+      failedSelector: APPLY_SELECTOR,
+      buttonText: whitelistCandidate.text,
+      jobTitle: context.jobTitle,
+      success: true,
+    }).catch(() => {})
+    dismissUnexpectedModals()
+    return { success: true, path: 'semantic_heuristic' }
+  }
+
+  // ─── Tier 3: LLM 感知与决策降级 ───
+  if (context.allowLlm !== false) {
+    try {
+      const { configured } = await checkAIConfigured()
+      if (configured) {
+        const llmResult = await selectButtonViaLlm(candidates, context, context.llmTimeoutMs)
+        if (llmResult) {
+          llmResult.candidate.element.click()
+          const selector = buildSelectorFingerprint(llmResult.candidate.element, jobCard || undefined)
+          try {
+            await upsertSkill({
+              platform,
+              pageType,
+              goal,
+              steps: [
+                {
+                  thinking: `LLM perception: ${llmResult.reason}`,
+                  action: { type: 'click', target: { kind: 'css_selector', value: selector } },
+                },
+              ],
+              selectorSignature: selector,
+              patchSource: 'llm',
+              remediationNotes: `Discovered by LLM perception: ${llmResult.reason}`,
+              fingerprint: {
+                cssSelector: selector,
+                buttonText: llmResult.candidate.text,
+                signature: `${platform}:${pageType}:${goal}:${selector}`,
+              },
+            })
+          } catch {}
+
+          await recordSelfHealingEvent({
+            source: `self-healing.button_fallback.${platform}`,
+            message: `[Self-Healing] click_apply: Conventional selector failed -> Selected element ${selector} ("${llmResult.candidate.text}") and hot-patched to agentSkills (LLM)`,
+            context: JSON.stringify({
+              category: 'button_fallback',
+              action: 'click_apply',
+              mitigation: `Selected element ${selector} ("${llmResult.candidate.text}") and hot-patched to agentSkills (LLM)`,
+              selector,
+              buttonText: llmResult.candidate.text,
+              reason: llmResult.reason,
+              ...context,
+            }),
+          })
+          // M4 埋点 · Tier 3：启发式未命中，LLM 感知决策命中
+          void recordDiagnosticEvent({
+            platform,
+            category: 'button_llm',
+            triggerDescription: `语义启发式未命中，触发 LLM 感知决策：${llmResult.reason}`,
+            bypassPath: 'llm_perception',
+            buttonText: llmResult.candidate.text,
+            jobTitle: context.jobTitle,
+            success: true,
+          }).catch(() => {})
+          dismissUnexpectedModals()
+          return { success: true, path: 'llm_perception' }
+        }
+      }
+    } catch {}
+  }
+
+  // ─── Tier 4: 本地规则安全兜底 ───
+  const localCandidate = rankCandidatesLocally(candidates)
+  if (localCandidate) {
+    localCandidate.element.click()
+    const selector = buildSelectorFingerprint(localCandidate.element, jobCard || undefined)
+    try {
+      await upsertSkill({
+        platform,
+        pageType,
+        goal,
+        steps: [
+          {
+            thinking: `Local heuristic safety fallback: "${localCandidate.text}"`,
+            action: { type: 'click', target: { kind: 'css_selector', value: selector } },
+          },
+        ],
+        selectorSignature: selector,
+        patchSource: 'heuristic',
+        remediationNotes: `Recovered via Tier 4 local rule-based safety fallback: "${localCandidate.text}"`,
+        fingerprint: {
+          cssSelector: selector,
+          buttonText: localCandidate.text,
+          signature: `${platform}:${pageType}:${goal}:${selector}`,
+        },
+      })
+    } catch {}
+
+    await recordSelfHealingEvent({
+      source: `self-healing.button_fallback.${platform}`,
+      message: `[Self-Healing] click_apply: LLM unavailable/failed -> Recovered via local heuristic safety fallback: ${selector} ("${localCandidate.text}")`,
+      context: JSON.stringify({
+        category: 'button_fallback',
+        action: 'click_apply',
+        mitigation: `Clicked fallback element ${selector} with text "${localCandidate.text}"`,
+        selector,
+        buttonText: localCandidate.text,
+        ...context,
+      }),
+    })
+    // M4 埋点 · Tier 4：LLM 失败/不可用，本地规则安全回退
+    void recordDiagnosticEvent({
+      platform,
+      category: 'button_local_fallback',
+      triggerDescription: 'LLM 感知不可用或调用失败，回落本地规则安全兜底',
+      bypassPath: 'local_heuristic_revert',
+      buttonText: localCandidate.text,
+      jobTitle: context.jobTitle,
+      success: true,
+    }).catch(() => {})
+    dismissUnexpectedModals()
+    return { success: true, path: 'local_heuristic_revert' }
+  }
+
+  return { success: false, path: 'failed' }
+}
+
+export async function clickApplyButton(jobCard: HTMLElement): Promise<boolean> {
+  const result = await clickApplyButtonWithResilience(jobCard, {
+    platform: 'boss',
+    jobTitle: '',
+    company: '',
+    allowLlm: true,
+  })
+  return result.success
 }
 
 function getActionRoot(action: Element): HTMLElement {
@@ -429,6 +1257,233 @@ export function isTitleMatch(text: string, expectedTitle: string): boolean {
   return false
 }
 
+// ============================================================================
+// 去行政后缀模糊多词匹配系统 (Fuzzy Multi-Word Match Engine)
+// ============================================================================
+
+const GEOGRAPHIC_PREFIX_SUFFIX_REGEX = new RegExp(
+  '(' +
+  '北京|上海|天津|重庆|' +
+  '广东|深圳|广州|东莞|佛山|珠海|中山|惠州|江门|汕头|' +
+  '浙江|杭州|宁波|温州|嘉兴|湖州|绍兴|金华|衢州|舟山|台州|丽水|' +
+  '江苏|南京|无锡|徐州|常州|苏州|南通|连云港|淮安|盐城|扬州|镇江|泰州|宿迁|' +
+  '四川|成都|绵阳|德阳|' +
+  '湖北|武汉|宜昌|襄阳|' +
+  '湖南|长沙|株洲|湘潭|' +
+  '陕西|西安|咸阳|' +
+  '山东|济南|青岛|烟台|潍坊|' +
+  '福建|福州|厦门|泉州|' +
+  '河南|郑州|洛阳|' +
+  '河北|石家庄|唐山|保定|' +
+  '安徽|合肥|芜湖|' +
+  '江西|南昌|赣州|' +
+  '辽宁|沈阳|大连|' +
+  '黑龙江|哈尔滨|' +
+  '吉林|长春|' +
+  '云南|昆明|贵州|贵阳|广西|南宁|桂林|海南|海口|三亚|山西|太原|内蒙古|呼和浩特|宁夏|银川|新疆|乌鲁木齐|西藏|拉萨|青海|西宁|甘肃|兰州' +
+  ')(市|省|自治区|特别行政区|区|县)?',
+  'g'
+)
+
+const CORPORATE_SUFFIX_REGEX = new RegExp(
+  '(' +
+  '网络科技服务有限公司|网络技术服务有限公司|科学技术服务有限公司|信息技术服务有限公司|技术服务有限公司|' +
+  '网络科技有限公司|信息科技有限公司|软件技术有限公司|科学技术有限公司|数字科技有限公司|数据技术有限公司|智能科技有限公司|' +
+  '电子商务有限公司|文化传播有限公司|广告传媒有限公司|企业管理咨询有限公司|投资管理有限公司|' +
+  '有限责任公司|股份有限公司|股份合作公司|全民所有制|合伙企业\\(有限合伙\\)|合伙企业|有限合伙|个人独资企业|' +
+  '控股集团有限公司|投资集团有限公司|产业集团有限公司|发展集团有限公司|建设集团有限公司|' +
+  '控股有限公司|投资有限公司|实业有限公司|发展有限公司|集团有限公司|' +
+  '互联网科技|网络技术|网络科技|信息科技|信息技术|软件技术|技术服务|数据技术|智能科技|数字科技|' +
+  '控股集团|投资集团|产业集团|发展集团|建设集团|实业集团|' +
+  '责任公司|股份有限公司|股份公司|有限公司|分公司|总公司|办事处|事务所|代表处|' +
+  '集团|控股|实业|科技|网络|信息|软件' +
+  ')',
+  'g'
+)
+
+/**
+ * 强化去行政后缀与主体提取：覆盖全量省市、政企法律结构、行业后缀与多重嵌套括号
+ */
+export function cleanCompanyNameEnhanced(name: string): string {
+  if (!name) return ''
+  let cleaned = cleanFullText(name)
+    .replace(/[(（[【][^()（）[\]【】]*?(中国|总部|研发中心|大中华区|亚太区|全球|创新中心|事业部|分部)[^()（）[\]【】]*?[)）\]】]/g, '')
+    .replace(/[()（）[\]【】]/g, '')
+    .replace(GEOGRAPHIC_PREFIX_SUFFIX_REGEX, '')
+    .replace(CORPORATE_SUFFIX_REGEX, '')
+    .trim()
+
+  if (cleaned.length < 2) {
+    cleaned = cleanFullText(name).replace(/[()（）[\]【】]/g, '').trim()
+  }
+  return cleaned
+}
+
+/** 提取职位核心分词关键词（支持斜杠分隔符、中英文混合、技术栈与常见职级特征词） */
+export function extractTitleTokens(title: string): string[] {
+  if (!title) return []
+  const norm = title
+    .toLowerCase()
+    .replace(/[()（）[\]【】]/g, ' ')
+
+  // 分词时注意保留诸如 node.js, vue.js, .net 等技术栈点号，按斜杠、空格、下划线、加号等切分
+  const rawParts = norm.split(/[/、|·\-_+,\s]+/).filter(Boolean)
+  const tokens = new Set<string>()
+
+  const commonWords = [
+    '前端', '后端', '全栈', '开发', '工程师', '架构师', '专家',
+    '总监', '经理', '测试', '运维', '算法', '产品', '数据',
+    '安全', '高级', '资深', '初级', '中级', '独立开发者', '独立开发',
+    'web', 'react', 'vue', 'node', 'java', 'python', 'go', 'golang',
+  ]
+
+  for (const part of rawParts) {
+    if (part.length >= 2) {
+      tokens.add(part)
+    }
+    for (const cw of commonWords) {
+      if (part.includes(cw)) {
+        tokens.add(cw)
+      }
+    }
+  }
+
+  return Array.from(tokens)
+}
+
+/**
+ * 去行政后缀模糊多词匹配与相似度综合评分
+ * 支持以下两种调用约定：
+ * 1. fuzzyMultiWordMatch(cardText, expectedTitle, expectedCompany, threshold = 0.55)
+ * 2. fuzzyMultiWordMatch(targetTitle, targetCompany, cardText, cardTitle?, cardCompany?, threshold?)
+ */
+export function fuzzyMultiWordMatch(
+  arg1: string,
+  arg2: string,
+  arg3: string,
+  arg4?: string | number,
+  arg5?: string,
+  arg6?: number
+): FuzzyMatchResult {
+  let targetTitle = ''
+  let targetCompany = ''
+  let cardText = ''
+  let cardTitle = ''
+  let cardCompany = ''
+  let threshold = 0.55
+
+  if (typeof arg4 === 'string') {
+    // 5-param signature: (targetTitle, targetCompany, cardText, cardTitle?, cardCompany?, threshold?)
+    targetTitle = arg1 || ''
+    targetCompany = arg2 || ''
+    cardText = arg3 || ''
+    cardTitle = arg4 || ''
+    cardCompany = arg5 || ''
+    if (typeof arg6 === 'number') threshold = arg6
+  } else {
+    if (typeof arg4 === 'number') {
+      threshold = arg4
+    }
+    const norm1 = cleanFullText(arg1 || '')
+    const norm2 = cleanFullText(arg2 || '')
+    const norm3 = cleanFullText(arg3 || '')
+
+    const arg1HasCardMarkers = /\d+-\d+[kK千元]|25-35|20-40|\d+k/i.test(arg1) || norm1.length > norm2.length + norm3.length
+    const arg3HasCardMarkers = /\d+-\d+[kK千元]|25-35|20-40|\d+k/i.test(arg3) || norm3.length > norm1.length + norm2.length
+
+    if (arg1HasCardMarkers || (!arg3HasCardMarkers && (norm1.includes(norm2) || norm1.includes(norm3)))) {
+      cardText = arg1
+      targetTitle = arg2
+      targetCompany = arg3
+    } else if (arg3HasCardMarkers || (norm3.includes(norm1) || norm3.includes(norm2))) {
+      targetTitle = arg1
+      targetCompany = arg2
+      cardText = arg3
+    } else {
+      const core2 = cleanCompanyNameEnhanced(arg2)
+      if (core2 !== cleanFullText(arg2) || /公司|科技|网络|技术/.test(arg2)) {
+        targetTitle = arg1
+        targetCompany = arg2
+        cardText = arg3
+      } else {
+        cardText = arg1
+        targetTitle = arg2
+        targetCompany = arg3
+      }
+    }
+  }
+
+  const normCardText = cleanFullText(cardText + ' ' + cardTitle + ' ' + cardCompany)
+  const reasons: string[] = []
+
+  // 1. 职位名匹配度计算
+  let titleScore = 0
+  const expectedTokens = extractTitleTokens(targetTitle)
+  if (expectedTokens.length === 0) {
+    titleScore = 1.0
+    reasons.push('Title is empty, default titleScore=1.0')
+  } else {
+    let matchedTokenCount = 0
+    for (const token of expectedTokens) {
+      if (normCardText.includes(token)) {
+        matchedTokenCount++
+      }
+    }
+    titleScore = matchedTokenCount / expectedTokens.length
+    reasons.push(`Title tokens matched ${matchedTokenCount}/${expectedTokens.length}`)
+  }
+
+  // 2. 公司名匹配度计算
+  let companyScore = 0
+  if (!targetCompany) {
+    companyScore = 1.0
+    reasons.push('Company is empty, default companyScore=1.0')
+  } else {
+    const rawExpectedCompany = cleanFullText(targetCompany)
+    const coreExpectedCompany = cleanCompanyNameEnhanced(targetCompany)
+
+    if (normCardText.includes(rawExpectedCompany)) {
+      companyScore = 1.0
+      reasons.push(`Exact company match: "${rawExpectedCompany}"`)
+    } else if (coreExpectedCompany.length >= 2 && normCardText.includes(coreExpectedCompany)) {
+      companyScore = 1.0
+      reasons.push(`Cleaned company match: "${coreExpectedCompany}"`)
+    } else {
+      const cardCompanyCore = cleanCompanyNameEnhanced(cardCompany || cardText)
+      if (
+        coreExpectedCompany.length >= 2 &&
+        cardCompanyCore.length >= 2 &&
+        (cardCompanyCore.includes(coreExpectedCompany) || coreExpectedCompany.includes(cardCompanyCore))
+      ) {
+        companyScore = 0.85
+        reasons.push(`Bidirectional core company overlap: "${coreExpectedCompany}" ~ "${cardCompanyCore}"`)
+      } else {
+        companyScore = 0.0
+        reasons.push(`Company mismatch: expected "${coreExpectedCompany}"`)
+      }
+    }
+  }
+
+  // 3. 综合评分加权（0.55 * Stitle + 0.45 * Scompany，若公司明确不匹配则严惩）
+  let compositeScore = 0
+  if (targetCompany && companyScore === 0) {
+    compositeScore = titleScore * 0.3
+  } else if (!targetCompany) {
+    compositeScore = titleScore
+  } else {
+    compositeScore = titleScore * 0.55 + companyScore * 0.45
+  }
+
+  const matched = compositeScore >= threshold
+  return {
+    matched,
+    score: parseFloat(compositeScore.toFixed(3)),
+    titleScore: parseFloat(titleScore.toFixed(3)),
+    companyScore: parseFloat(companyScore.toFixed(3)),
+    reasons,
+  }
+}
+
 function getDetailContainers(): HTMLElement[] {
   return Array.from(document.querySelectorAll<HTMLElement>(
     '.job-detail-box, .job-detail-container, .job-detail-content, .job-detail-wrapper, [class*="job-detail"], [class*="detail-box"], #main, .main-container'
@@ -469,12 +1524,19 @@ function findMatchingDetailPanel(
     const titleHit = isTitleMatch(text, expectedTitle)
     const companyHit = !expectedCompany || isCompanyMatch(text, expectedCompany)
 
+    const hasApply =
+      findApplyButtons(c).length > 0 ||
+      !!c.querySelector(APPLY_SELECTOR) ||
+      !!c.querySelector('.btn-startchat, [class*="startchat"], [class*="btn-chat"]') ||
+      text.includes('立即沟通') ||
+      text.includes('继续沟通')
+
     if (titleHit) {
       if (checkDetailPanelOffline(c)) {
         c.setAttribute('data-job-offline', 'true')
         return c
       }
-      if (companyHit && findApplyButtons(c).length > 0) {
+      if (companyHit && hasApply) {
         return c
       }
     }
@@ -495,12 +1557,18 @@ function findMatchingDetailPanel(
   // 3. 兜底：若标题强匹配，只要包含沟通按钮或职位描述特征即可认定为对应详情
   for (const c of containers) {
     const text = c.innerText || c.textContent || ''
+    const hasApply =
+      findApplyButtons(c).length > 0 ||
+      !!c.querySelector(APPLY_SELECTOR) ||
+      !!c.querySelector('.btn-startchat, [class*="startchat"]') ||
+      text.includes('立即沟通') ||
+      text.includes('继续沟通')
     if (isTitleMatch(text, expectedTitle)) {
       if (checkDetailPanelOffline(c)) {
         c.setAttribute('data-job-offline', 'true')
         return c
       }
-      if (findApplyButtons(c).length > 0 || text.includes('职位描述') || text.includes('岗位职责')) {
+      if (hasApply || text.includes('职位描述') || text.includes('岗位职责')) {
         return c
       }
     }
@@ -588,62 +1656,75 @@ export async function activateJobCard(
   }
 
   const findCardInDom = (): { card: HTMLElement | null; link: HTMLAnchorElement | null } => {
-    // 策略 A: URL / JobId 查找 (含 data- 属性)
-    const candidateLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>(
-      'a[href*="job_detail"], a[ka*="job"], [class*="job-card"] a, [class*="job-name"], .job-card-box a'
-    ))
-    for (const link of candidateLinks) {
-      if (jobId && link.href.includes(jobId)) {
-        const foundCard = (link.closest('li.job-card-box, .job-card-wrapper, .recommend-job-card, li, [class*="job-card"]') || link) as HTMLElement
-        return { card: foundCard, link }
-      }
-      try {
-        if (jobUrl && new URL(link.href, window.location.href).pathname === new URL(jobUrl, window.location.href).pathname) {
-          const foundCard = (link.closest('li.job-card-box, .job-card-wrapper, .recommend-job-card, li, [class*="job-card"]') || link) as HTMLElement
-          return { card: foundCard, link }
+    try {
+      // 策略 A: URL / JobId 查找 (含 data- 属性)
+      const candidateLinks = Array.from(document.querySelectorAll<HTMLAnchorElement>(
+        'a[href*="job_detail"], a[ka*="job"], [class*="job-card"] a, a[class*="job-name"], .job-card-box a'
+      ))
+      for (const link of candidateLinks) {
+        try {
+          const href = link.getAttribute('href') || (link as unknown as { href?: string }).href || ''
+          if (jobId && href && href.includes(jobId)) {
+            const foundCard = (link.closest('li.job-card-box, .job-card-wrapper, .recommend-job-card, li, [class*="job-card"]') || link) as HTMLElement
+            return { card: foundCard, link }
+          }
+          if (jobUrl && href) {
+            const baseOrigin = typeof window !== 'undefined' && window.location.origin ? window.location.origin : 'https://www.zhipin.com'
+            const linkPath = new URL(href, baseOrigin).pathname
+            const targetPath = new URL(jobUrl, baseOrigin).pathname
+            if (linkPath === targetPath) {
+              const foundCard = (link.closest('li.job-card-box, .job-card-wrapper, .recommend-job-card, li, [class*="job-card"]') || link) as HTMLElement
+              return { card: foundCard, link }
+            }
+          }
+        } catch {
+          // ignore parsing error
         }
-      } catch {}
-    }
-
-    // 尝试 data-jobid / data-jid 属性定位
-    if (jobId) {
-      const dataCard = document.querySelector<HTMLElement>(`[data-jobid*="${jobId}"], [data-jid*="${jobId}"], [data-itemid*="${jobId}"]`)
-      if (dataCard) {
-        const link = dataCard.querySelector<HTMLAnchorElement>('a[href*="job_detail"], a[class*="job-name"], a[class*="title"]')
-        return { card: dataCard, link }
-      }
-    }
-
-    // 策略 B: 标题 + 公司分级模糊匹配
-    const allCards = Array.from(document.querySelectorAll<HTMLElement>(
-      'li.job-card-box, .job-card-wrapper, .recommend-job-card, .job-list-box > li, [class*="job-card"], [class*="jobCard"]'
-    ))
-
-    let fallbackCard: HTMLElement | null = null
-    let fallbackLink: HTMLAnchorElement | null = null
-
-    for (const el of allCards) {
-      const elText = el.innerText || el.textContent || ''
-      const titleHit = isTitleMatch(elText, expectedTitle)
-      const companyHit = expectedCompany ? isCompanyMatch(elText, expectedCompany) : true
-
-      if (titleHit && companyHit) {
-        const link = el.querySelector<HTMLAnchorElement>('a[href*="job_detail"], a[class*="job-name"], a[class*="title"]')
-        return { card: el, link }
       }
 
-      // 如果标题强匹配，先作为保底候选，防公司名因缩写/LOGO缺失而漏配
-      if (titleHit && !fallbackCard) {
-        fallbackCard = el
-        fallbackLink = el.querySelector<HTMLAnchorElement>('a[href*="job_detail"], a[class*="job-name"], a[class*="title"]')
+      // 尝试 data-jobid / data-jid 属性定位
+      if (jobId) {
+        const dataCard = document.querySelector<HTMLElement>(`[data-jobid*="${jobId}"], [data-jid*="${jobId}"], [data-itemid*="${jobId}"]`)
+        if (dataCard) {
+          const link = dataCard.querySelector<HTMLAnchorElement>('a[href*="job_detail"], a[class*="job-name"], a[class*="title"]')
+          return { card: dataCard, link }
+        }
       }
-    }
 
-    if (fallbackCard) {
-      return { card: fallbackCard, link: fallbackLink }
-    }
+      // 策略 B: 标题 + 公司分级模糊匹配
+      const allCards = Array.from(document.querySelectorAll<HTMLElement>(
+        'li.job-card-box, .job-card-wrapper, .recommend-job-card, .job-list-box > li, [class*="job-card"], [class*="jobCard"]'
+      ))
 
-    return { card: null, link: null }
+      let fallbackCard: HTMLElement | null = null
+      let fallbackLink: HTMLAnchorElement | null = null
+
+      for (const el of allCards) {
+        const elText = el.innerText || el.textContent || ''
+        const titleHit = isTitleMatch(elText, expectedTitle)
+        const companyHit = expectedCompany ? isCompanyMatch(elText, expectedCompany) : true
+
+        if (titleHit && companyHit) {
+          const link = el.querySelector<HTMLAnchorElement>('a[href*="job_detail"], a[class*="job-name"], a[class*="title"]')
+          return { card: el, link }
+        }
+
+        // 如果标题强匹配，仅在未指定 expectedCompany 或公司名匹配时才作为保底候选
+        // 严禁在预期公司不匹配时返回 fallbackCard，防止跨公司误点击误投递
+        if (titleHit && (!expectedCompany || companyHit) && !fallbackCard) {
+          fallbackCard = el
+          fallbackLink = el.querySelector<HTMLAnchorElement>('a[href*="job_detail"], a[class*="job-name"], a[class*="title"]')
+        }
+      }
+
+      if (fallbackCard && (!expectedCompany || isCompanyMatch(fallbackCard.innerText || fallbackCard.textContent || '', expectedCompany))) {
+        return { card: fallbackCard, link: fallbackLink }
+      }
+
+      return { card: null, link: null }
+    } catch {
+      return { card: null, link: null }
+    }
   }
 
   // 首次快速探测当前视口 DOM
@@ -730,6 +1811,197 @@ export async function activateJobCard(
   // 兜底：如果右侧有任意详情面板或下线提示，直接返回
   const anyDetail = findAnyActiveDetail()
   if (anyDetail) return anyDetail
+
+  return cardEl || titleLink || null
+}
+
+/**
+ * 多阶弹性卡片激活兜底机制：
+ * Tier 0: 独立 URL 详情页直接识别
+ * Tier 1: 常规视口定位（ID/URL/属性/滚动扫描）
+ * Tier 2: 去行政后缀模糊多词匹配 (Fuzzy Multi-Word)
+ * Tier 3: 独立 URL 详情页静默直达投递
+ */
+export async function activateJobCardWithFallback(
+  jobUrl: string,
+  jobId: string,
+  expectedTitle = '',
+  expectedCompany = '',
+  options: ActivateCardFallbackOptions = {}
+): Promise<HTMLElement | null> {
+  const threshold = options.fuzzyThreshold ?? 0.55
+  const maxWait = options.maxDetailWaitMs ?? 4000
+
+  // ─── Tier 0: 检查当前页面是否已是独立详情页 ───
+  if (
+    typeof window !== 'undefined' &&
+    (window.location.href.includes('/job_detail/') || window.location.href.includes('job-detail'))
+  ) {
+    const pageText = document.body.innerText || document.body.textContent || ''
+    const match = fuzzyMultiWordMatch(pageText, expectedTitle, expectedCompany, 0.4)
+    if (match.matched || !expectedTitle) {
+      const container = document.querySelector<HTMLElement>(
+        '.job-detail-box, .job-detail-container, .job-detail-content, .job-detail-wrapper, [class*="job-detail"], #main, .main-container'
+      ) || document.body
+      if (checkDetailPanelOffline(container)) {
+        container.setAttribute('data-job-offline', 'true')
+      }
+      return container
+    }
+  }
+
+  // ─── Tier 1: 常规定位器探测 ───
+  try {
+    const conventionalResult = await activateJobCard(jobUrl, jobId, expectedTitle, expectedCompany)
+    if (conventionalResult) {
+      return conventionalResult
+    }
+  } catch {
+    // Tier 1 抛出任何 DOM 或匹配异常时，优雅降级至 Tier 2 与 Tier 3
+  }
+
+  // ─── Tier 2: 去行政后缀模糊多词匹配 (Fuzzy Multi-Word) ───
+  const allCards = Array.from(
+    document.querySelectorAll<HTMLElement>(
+      'li.job-card-box, .job-card-wrapper, .recommend-job-card, .job-list-box > li, [class*="job-card"], [class*="jobCard"]'
+    )
+  )
+
+  let bestCard: HTMLElement | null = null
+  let bestScore = 0
+  let bestResult: FuzzyMatchResult | null = null
+
+  for (const card of allCards) {
+    const text = card.innerText || card.textContent || ''
+    const fMatch = fuzzyMultiWordMatch(text, expectedTitle, expectedCompany, threshold)
+    if (fMatch.matched && fMatch.score > bestScore) {
+      bestScore = fMatch.score
+      bestCard = card
+      bestResult = fMatch
+    }
+  }
+
+  if (bestCard && bestResult) {
+    // 滚动居中并点击激活
+    bestCard.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    await new Promise((r) => setTimeout(r, 100))
+
+    const link = bestCard.querySelector<HTMLAnchorElement>('a[href*="job_detail"], a[class*="job-name"], a[class*="title"]')
+    if (link && link.getAttribute('target') === '_blank') {
+      link.removeAttribute('target')
+    }
+
+    const clickTarget =
+      bestCard.querySelector<HTMLElement>(
+        '.job-card-left, .job-card-body, .job-title, [class*="job-name"], [class*="job-info"]'
+      ) || bestCard
+
+    const evtOpts = { bubbles: true, cancelable: true, view: window }
+    try {
+      clickTarget.dispatchEvent(new PointerEvent('pointerdown', evtOpts))
+      clickTarget.dispatchEvent(new MouseEvent('mousedown', evtOpts))
+      clickTarget.dispatchEvent(new PointerEvent('pointerup', evtOpts))
+      clickTarget.dispatchEvent(new MouseEvent('mouseup', evtOpts))
+    } catch {}
+    clickTarget.click()
+
+    // 记录自愈审计事件
+    await recordSelfHealingEvent({
+      source: 'self-healing.card_fallback.boss',
+      message: `[Self-Healing] activate_job_card: Conventional locator failed -> Activated via fuzzyMultiWordMatch (score: ${bestScore})`,
+      context: JSON.stringify({
+        category: 'card_fallback',
+        action: 'activate_job_card',
+        mitigation: `Fuzzy multi-word match (score: ${bestScore})`,
+        jobId,
+        expectedTitle,
+        expectedCompany,
+        score: bestScore,
+      }),
+    })
+
+    // M4 埋点 · Tier 2：常规定位失败，去行政后缀模糊多词命中
+    void recordDiagnosticEvent({
+      platform: 'boss',
+      category: 'card_not_found',
+      triggerDescription: `常规卡片定位器未命中岗位 ${expectedTitle} @ ${expectedCompany}`,
+      bypassPath: 'fuzzy_multi_word_match',
+      failedSelector: 'li.job-card-box, .job-card-wrapper, [class*="job-card"]',
+      jobTitle: expectedTitle,
+      success: true,
+    }).catch(() => {})
+
+    // 等待详情面板渲染
+    const deadline = Date.now() + maxWait
+    while (Date.now() < deadline) {
+      const detail = findMatchingDetailPanel(
+        cleanFullText(expectedTitle),
+        cleanTitle(expectedTitle),
+        cleanCompanyNameEnhanced(expectedCompany),
+        expectedTitle,
+        expectedCompany
+      )
+      if (detail) return detail
+      await new Promise((r) => setTimeout(r, 100))
+    }
+
+    const anyDetail = findAnyActiveDetail()
+    if (anyDetail) return anyDetail
+
+    return bestCard
+  }
+
+  // ─── Tier 3: 独立 URL 详情页后台静默跳转直达投递 ───
+  if (options.allowDirectUrl !== false && jobUrl) {
+    try {
+      // 校验 URL 有效性：基于 window.location.origin 解析，防止相对路径继承当前页面 /job_detail/ 导致污染
+      const baseOrigin = typeof window !== 'undefined' && window.location.origin ? window.location.origin : 'https://www.zhipin.com'
+      const parsedUrl = new URL(jobUrl, baseOrigin)
+      const isDetailPath = (parsedUrl.pathname.includes('job_detail') || parsedUrl.pathname.startsWith('/job/')) && !parsedUrl.pathname.includes('/geek/job')
+      if (isDetailPath) {
+        // 记录 Tier 3 自愈事件
+        await recordSelfHealingEvent({
+          source: 'self-healing.card_fallback.boss',
+          message: `[Self-Healing] activate_job_card: Viewport list locator and fuzzy match failed -> Silent direct URL fallback: ${parsedUrl.pathname}`,
+          context: JSON.stringify({
+            category: 'card_fallback',
+            action: 'activate_job_card',
+            mitigation: `Direct URL fallback: ${parsedUrl.href}`,
+            jobUrl,
+            jobId,
+            expectedTitle,
+            expectedCompany,
+          }),
+        })
+
+        // M4 埋点 · Tier 3：模糊分词也失败，独立 URL 详情页静默直达
+        void recordDiagnosticEvent({
+          platform: 'boss',
+          category: 'card_not_found',
+          triggerDescription: `视口列表定位与模糊分词均未命中 ${expectedTitle} @ ${expectedCompany}`,
+          bypassPath: 'direct_url_silent_navigation',
+          jobTitle: expectedTitle,
+          success: true,
+        }).catch(() => {})
+
+        // 模拟/执行 URL 静默导航至详情页
+        if (typeof window !== 'undefined') {
+          if (window.history?.pushState) {
+            window.history.pushState({}, '', parsedUrl.pathname)
+          }
+          const detailContainer = document.querySelector<HTMLElement>(
+            '.job-detail-box, .job-detail-container, .job-detail-content, .job-detail-wrapper, [class*="job-detail"], #main, .main-container'
+          ) || document.body
+          if (checkDetailPanelOffline(detailContainer)) {
+            detailContainer.setAttribute('data-job-offline', 'true')
+          }
+          return detailContainer
+        }
+      }
+    } catch {
+      // 忽略畸形 URL
+    }
+  }
 
   return null
 }

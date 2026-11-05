@@ -23,12 +23,16 @@ import {
   Bug,
   Trash2,
   ChevronDown,
+  Wrench,
 } from 'lucide-react'
 import { buildStrategy, DEFAULT_DAILY_QUOTA } from '../../shared/agent/butler/butler-planner'
 import { buildReview } from '../../shared/agent/butler/review-planner'
 import { getActiveFollowUps, getRecentDecisions } from '../../shared/db/butler-store'
 import { getAllApplications } from '../../shared/db/application-store'
 import { getSetting } from '../../shared/db/settings-store'
+import { getDeveloperFixSuggestions } from '../../shared/db/diagnostics-store'
+import { CATEGORY_LABELS } from '../../shared/types/diagnostics'
+import type { DeveloperFixSuggestion, FixPriority } from '../../shared/types/diagnostics'
 import { log } from '../../shared/utils/logger'
 import type { ButlerStrategy, FollowUpSuggestion, DecisionLog } from '../../shared/types/butler'
 import type { ApplyFilters } from '../../shared/types/filters'
@@ -38,6 +42,17 @@ import type { ErrorRecord } from '../../shared/db/index'
 import ButlerChatView from '../components/ButlerChatView'
 
 const MOD = 'ButlerTab'
+
+/** 开发者待修建议 · 优先级视觉映射 */
+const FIX_PRIORITY_STYLE: Record<
+  FixPriority,
+  { label: string; badge: string; dot: string }
+> = {
+  critical: { label: 'CRITICAL', badge: 'bg-red-100 text-red-700 border-red-300', dot: 'bg-red-500' },
+  high: { label: 'HIGH', badge: 'bg-orange-100 text-orange-700 border-orange-300', dot: 'bg-orange-500' },
+  medium: { label: 'MEDIUM', badge: 'bg-amber-100 text-amber-700 border-amber-200', dot: 'bg-amber-400' },
+  low: { label: 'LOW', badge: 'bg-slate-100 text-slate-600 border-slate-200', dot: 'bg-slate-400' },
+}
 
 function loadUserProfile(): Promise<{
   jobTitles: string[]
@@ -54,7 +69,7 @@ function loadUserProfile(): Promise<{
 }
 
 export default function Butler() {
-  const [subTab, setSubTab] = useState<'chat' | 'daily_report' | 'evolution' | 'strategy' | 'decisions' | 'errors'>('chat')
+  const [subTab, setSubTab] = useState<'chat' | 'daily_report' | 'evolution' | 'strategy' | 'decisions' | 'errors' | 'fixes'>('chat')
 
   // 1. 日报状态
   const [dailyReport, setDailyReport] = useState<ButlerDailyReport | null>(null)
@@ -87,6 +102,12 @@ export default function Butler() {
   const [errorFilter, setErrorFilter] = useState<'all' | 'boss' | 'campaign' | 'other'>('all')
   const [expandedErrorId, setExpandedErrorId] = useState<string | null>(null)
   const [copiedError, setCopiedError] = useState(false)
+
+  // 5. 开发者待修清单状态（M4 · 自愈事件自动归因）
+  const [fixSuggestions, setFixSuggestions] = useState<DeveloperFixSuggestion[]>([])
+  const [loadingFixes, setLoadingFixes] = useState(false)
+  const [copiedFixes, setCopiedFixes] = useState(false)
+  const [expandedFixKey, setExpandedFixKey] = useState<string | null>(null)
 
   // ─── 数据加载 ───
 
@@ -161,6 +182,19 @@ export default function Butler() {
     }
   }, [])
 
+  const fetchFixes = useCallback(async () => {
+    setLoadingFixes(true)
+    try {
+      const data = await getDeveloperFixSuggestions()
+      setFixSuggestions(Array.isArray(data) ? data : [])
+    } catch (e) {
+      log(MOD, 'fetchFixes error', e)
+      setFixSuggestions([])
+    } finally {
+      setLoadingFixes(false)
+    }
+  }, [])
+
   const handleClearErrors = async () => {
     try {
       await chrome.runtime.sendMessage({ type: 'CLEAR_ERRORS' })
@@ -182,6 +216,39 @@ export default function Butler() {
     navigator.clipboard.writeText(text)
     setCopiedError(true)
     setTimeout(() => setCopiedError(false), 2000)
+  }
+
+  /** 生成可直接粘贴到 GitHub Issue 的 Markdown 待修清单 */
+  const handleCopyFixesMarkdown = () => {
+    if (fixSuggestions.length === 0) return
+    const lines: string[] = [
+      `## 开发者待修清单（自动归因）· ${new Date().toISOString().slice(0, 10)}`,
+      '',
+      `> 共 ${fixSuggestions.length} 条聚合建议 · 基于运行时自愈事件自动归因，按修复优先级排序。`,
+      '',
+    ]
+
+    fixSuggestions.forEach((s, i) => {
+      const style = FIX_PRIORITY_STYLE[s.priority] ?? FIX_PRIORITY_STYLE.low
+      lines.push(`### ${i + 1}. [${style.label}] ${s.fixTitle}（${s.occurrences} 次）`, '')
+      lines.push(`- **平台**：${s.platform}`)
+      lines.push(`- **类别**：${CATEGORY_LABELS[s.category] ?? s.category}`)
+      lines.push(`- **最近触发**：${s.lastOccurredAt}`)
+      lines.push(`- **建议**：${s.fixDescription}`)
+      lines.push(
+        s.failedSelectors.length > 0
+          ? `- **失败选择器**：${s.failedSelectors.map((v) => `\`${v}\``).join(', ')}`
+          : '- **失败选择器**：无',
+      )
+      if (s.buttonTexts.length > 0) {
+        lines.push(`- **相关按钮文本**：${s.buttonTexts.map((v) => `\`${v}\``).join(', ')}`)
+      }
+      lines.push('')
+    })
+
+    navigator.clipboard.writeText(lines.join('\n').trim())
+    setCopiedFixes(true)
+    setTimeout(() => setCopiedFixes(false), 2000)
   }
 
   const refreshBase = useCallback(async () => {
@@ -222,14 +289,18 @@ export default function Butler() {
     void fetchDailyReport()
     void fetchProposals()
     void fetchErrors()
+    void fetchFixes()
     void refreshBase()
-  }, [fetchDailyReport, fetchProposals, fetchErrors, refreshBase])
+  }, [fetchDailyReport, fetchProposals, fetchErrors, fetchFixes, refreshBase])
 
   useEffect(() => {
     if (subTab === 'errors') {
       void fetchErrors()
     }
-  }, [subTab, fetchErrors])
+    if (subTab === 'fixes') {
+      void fetchFixes()
+    }
+  }, [subTab, fetchErrors, fetchFixes])
 
   // ─── 日报操作 ───
 
@@ -455,6 +526,23 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
             {errorCount > 0 && (
               <span className="px-1 py-0.2 text-[9px] rounded-full bg-red-100 text-red-600 font-bold">
                 {errorCount}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setSubTab('fixes')}
+            className={`px-2 py-1 rounded-md font-medium transition cursor-pointer flex items-center gap-1 ${
+              subTab === 'fixes'
+                ? 'bg-white shadow-2xs text-amber-700 font-bold'
+                : 'text-text-muted hover:text-text-primary'
+            }`}
+          >
+            <Wrench className="w-3 h-3 text-amber-600" />
+            待修清单
+            {fixSuggestions.length > 0 && (
+              <span className="px-1 py-0.2 text-[9px] rounded-full bg-red-500 text-white font-bold">
+                {fixSuggestions.length}
               </span>
             )}
           </button>
@@ -1213,6 +1301,131 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                     </div>
                   )
                 })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── 视图 5：开发者待修清单（M4 · 自愈事件自动归因） ─── */}
+      {subTab === 'fixes' && (
+        <div className="space-y-3">
+          {/* 控制栏 */}
+          <div className="flex items-center justify-between p-2.5 rounded-xl bg-surface-dark border border-black/5">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 rounded-md bg-amber-100 text-amber-700 flex items-center justify-center">
+                <Wrench className="w-3.5 h-3.5" />
+              </div>
+              <div>
+                <div className="text-xs font-bold text-text-primary flex items-center gap-1.5">
+                  🔧 开发者待修清单
+                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-black/5 text-text-muted">
+                    共 {fixSuggestions.length} 条建议
+                  </span>
+                </div>
+                <div className="text-[10px] text-text-muted">
+                  基于运行时自愈/降级事件自动归因 · 按修复优先级排序
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={handleCopyFixesMarkdown}
+                disabled={fixSuggestions.length === 0}
+                className="px-2 py-1 rounded-md text-[11px] bg-white border border-black/10 hover:bg-black/5 text-text-primary flex items-center gap-1 cursor-pointer disabled:opacity-40"
+                title="复制为 Markdown，可直接粘贴到 GitHub Issue"
+              >
+                {copiedFixes ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
+                {copiedFixes ? '已复制' : '复制 Markdown'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void fetchFixes()}
+                className="p-1 rounded-md bg-white border border-black/10 hover:bg-black/5 text-text-muted cursor-pointer"
+                title="刷新待修建议"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${loadingFixes ? 'animate-spin' : ''}`} />
+              </button>
+            </div>
+          </div>
+
+          {/* 空状态 */}
+          {fixSuggestions.length === 0 ? (
+            <div className="p-8 text-center rounded-xl bg-surface-dark border border-emerald-500/20 space-y-2">
+              <div className="w-10 h-10 rounded-full bg-emerald-100 text-emerald-600 mx-auto flex items-center justify-center">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+              <div className="text-xs font-semibold text-text-primary">
+                暂无待修项，选择器与降级链路运行正常
+              </div>
+              <div className="text-[11px] text-text-muted max-w-xs mx-auto">
+                当系统触发卡片/按钮降级、拦截负面按钮或强制清除弹窗时，会自动在此聚合为可修复的建议。
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+              {fixSuggestions.map((s) => {
+                const style = FIX_PRIORITY_STYLE[s.priority] ?? FIX_PRIORITY_STYLE.low
+                const isExpanded = expandedFixKey === s.key
+                return (
+                  <div
+                    key={s.key}
+                    className="p-2.5 rounded-xl bg-white border border-black/10 shadow-2xs space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-bold border ${style.badge}`}>
+                          <span className={`inline-block w-1.5 h-1.5 rounded-full mr-1 ${style.dot}`} />
+                          {style.label}
+                        </span>
+                        <span className="text-[11px] font-semibold text-text-primary">{s.fixTitle}</span>
+                      </div>
+                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-red-50 text-red-600 border border-red-200 whitespace-nowrap">
+                        {s.occurrences} 次
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 flex-wrap text-[10px] text-text-muted font-mono">
+                      <span className="px-1 rounded bg-black/5">{s.platform}</span>
+                      <span>{CATEGORY_LABELS[s.category] ?? s.category}</span>
+                      <span>最近触发 {new Date(s.lastOccurredAt).toLocaleString()}</span>
+                    </div>
+
+                    <p className="text-[11px] text-text-secondary leading-relaxed">{s.fixDescription}</p>
+
+                    {s.failedSelectors.length > 0 && (
+                      <div className="p-1.5 rounded-md bg-surface-dark border border-black/5 text-[10px] font-mono text-text-muted break-all">
+                        <div className="text-[9px] uppercase tracking-wider font-bold mb-0.5">
+                          失败选择器
+                        </div>
+                        {s.failedSelectors.join(' · ')}
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => setExpandedFixKey(isExpanded ? null : s.key)}
+                      className="text-[10px] text-primary hover:underline flex items-center gap-0.5 cursor-pointer"
+                    >
+                      {isExpanded ? '收起详情' : '展开详情'}
+                      <ChevronDown className={`w-3 h-3 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {isExpanded && (
+                      <div className="p-1.5 rounded-md bg-surface-dark border border-black/5 text-[10px] text-text-muted space-y-1">
+                        <div>
+                          <strong className="text-text-secondary">按钮文本：</strong>
+                          {s.buttonTexts.length > 0 ? s.buttonTexts.join(' / ') : '无'}
+                        </div>
+                        <div className="font-mono break-all">
+                          <strong className="text-text-secondary">关联事件 ID：</strong>
+                          {s.eventIds.join(', ')}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>

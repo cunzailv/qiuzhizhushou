@@ -9,7 +9,9 @@ import {
 } from './parser'
 import {
   activateJobCard,
+  activateJobCardWithFallback,
   clickApplyButton,
+  clickApplyButtonWithResilience,
   collectJobCards,
   fillGreetingMessage,
   getJobSpecificGreeting,
@@ -26,11 +28,21 @@ import {
   dismissUnexpectedModals,
   isNegativeButton,
   isPositiveApplyButton,
+  cleanCompanyNameEnhanced,
+  extractTitleTokens,
+  fuzzyMultiWordMatch,
+  findConfiguredApplyButtons,
 } from './action-simulator'
 export {
   dismissUnexpectedModals,
   isNegativeButton,
   isPositiveApplyButton,
+  activateJobCardWithFallback,
+  clickApplyButtonWithResilience,
+  cleanCompanyNameEnhanced,
+  extractTitleTokens,
+  fuzzyMultiWordMatch,
+  findConfiguredApplyButtons,
 }
 export type { ChatContact } from './action-simulator'
 import type { PlatformAdapter, PlatformRiskConfig } from '../types'
@@ -62,7 +74,9 @@ export const bossAdapter: PlatformAdapter = {
   extractJobDescriptionFromDetail,
   collectJobCards,
   activateJobCard,
+  activateJobCardWithFallback,
   clickApplyButton,
+  clickApplyButtonWithResilience,
   fillGreetingMessage,
   getJobSpecificGreeting,
   snapshotCommunicationUi,

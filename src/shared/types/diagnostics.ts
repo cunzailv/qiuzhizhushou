@@ -16,6 +16,19 @@ export type SelfHealingCategory =
 /** 建议修复优先级 */
 export type FixPriority = 'critical' | 'high' | 'medium' | 'low'
 
+/** 全部自愈类别枚举值（供聚合、测试覆盖校验与 UI 筛选消费） */
+export const ALL_SELF_HEALING_CATEGORIES: readonly SelfHealingCategory[] = [
+  'card_not_found',
+  'button_heuristic',
+  'button_llm',
+  'button_local_fallback',
+  'negative_button_blocked',
+  'modal_dismissed',
+  'task_isolated',
+  'skill_circuit_breaker',
+  'skill_fallback',
+] as const
+
 /** 单次自愈绕过事件 */
 export interface SelfHealingEvent {
   id: string

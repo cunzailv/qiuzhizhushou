@@ -59,8 +59,21 @@ export interface PlatformAdapter {
     expectedTitle?: string,
     expectedCompany?: string,
   ): Promise<HTMLElement | null>
+  // 多阶自愈激活（常规定位 -> 模糊多词匹配 -> 独立 URL 详情页直达）
+  activateJobCardWithFallback?(
+    jobUrl: string,
+    jobId: string,
+    expectedTitle?: string,
+    expectedCompany?: string,
+    options?: any,
+  ): Promise<HTMLElement | null>
   // 点击「投递 / 申请」按钮
   clickApplyButton(jobCard: HTMLElement): Promise<boolean>
+  // 多阶弹性投递点击（技能记忆 -> 预设选择器 -> 语义白名单 -> LLM 感知 -> 本地安全回退）
+  clickApplyButtonWithResilience?(
+    jobCard: HTMLElement,
+    context: any,
+  ): Promise<any>
   // 在招呼输入框中填入消息
   fillGreetingMessage(
     message: string,

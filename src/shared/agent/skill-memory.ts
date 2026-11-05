@@ -40,42 +40,51 @@ function isStableId(id: string): boolean {
   return true
 }
 
+/** 核心语义关键词白名单（即使符合某些短命名规则也坚决豁免与保留） */
+const CORE_SEMANTIC_KEYWORDS = /^(btn|button|chat|startchat|apply|submit|sure|confirm|primary|action|target|success|cancel|close|search|filter|card|item|list|tabs?|link|icon|dialog|modal|popup|panel|input|agree)$/i
+
 const NOISY_CLASS_PATTERNS = [
   // Tailwind / 原子化 CSS
   /^(flex|grid|block|inline|hidden|relative|absolute|fixed|static)$/,
+  /^(flex|grid)-(col|row|wrap|nowrap|1|auto|initial|none)/,
   /^(items|justify|content|self|place)-(start|end|center|between|around|evenly|stretch|baseline)/,
   /^[mp][xytblr]?-\d+(\.\d+)?$/,
   /^[wh]-(\d+|full|screen|auto|fit|min|max)/,
   /^(text|bg|border|ring|fill|stroke|shadow|rounded|opacity|gap|z)-/,
   /^(font|leading|tracking|cursor|transition|duration|ease|overflow)-/,
   /^(hover|focus|active|disabled|group-hover):/,
-  // 随机 hash 类名（如 _9xa3, b3kz 等）
-  /^_[a-zA-Z0-9]+$/,
-  /^[a-zA-Z0-9]*\d+[a-zA-Z0-9]*$/,
-  /^[a-z0-9]{7,}$/i,
+  /^space-[xy]-\d+/,
+  // 随机 hash 类名与 CSS Modules
+  // 1. 下划线前缀的短 hash / CSS Modules（如 _9xa3, _3xk8, _abc12, _1h5y）
+  /^_[a-z0-9_-]{2,12}$/i,
+  // 2. 字母与数字混杂的 3-6 位短 hash（如 b3kz, 9xa3, a8f2, x7k9p, 1a2b3c）
+  /^(?!(btn|col|row|tab|step)\d$)(?=.*\d)(?=.*[a-z])[a-z0-9]{3,6}$/i,
+  // 3. 4-6 位无元音的纯辅音高熵随机 hash（如 gzkd, bckz, xkzp, qwxz）
+  /^[^aeiouy\W\d_]{4,6}$/i,
+  // 4. 7 位以上字母数字混杂 hash（避免误杀 startchat, confirm, primary, company, container 等纯英文语义词）
+  /^(?=.*\d)(?=.*[a-z])[a-z0-9]{7,}$/i,
+  // 5. 8 位以上 Hex / 散列 hash
+  /^[0-9a-f]{8,}$/i,
+  // 6. 6 位以上纯辅音高熵 hash
+  /^[^aeiouy\W\d_]{6,}$/i,
+  // 7. 双下划线/三下划线或复合 CSS Module hash（如 Button__btn___9xa3）
   /^_?[a-zA-Z0-9]{4,}_[a-zA-Z0-9]{4,}/,
+  /_{3,}[a-zA-Z0-9_-]+/,
+  // 8. CSS-in-JS 与前端框架自动生成类名
   /^css-[a-z0-9]+/i,
   /^sc-[a-zA-Z0-9]+/,
+  /^jsx-[a-z0-9]+/i,
+  /^svelte-[a-z0-9]+/i,
 ]
 
 function isSemanticClass(cls: string): boolean {
   if (!cls || cls.length < 2) return false
-  // 明确的业务语义化类名优先保护
-  if (/^(btn|button|chat|startchat|apply|submit|sure|confirm|action|primary|cancel|close)/i.test(cls)) {
-    return true
-  }
+  // 核心业务语义快路径：确保高频核心语义词 0 开销豁免
+  if (CORE_SEMANTIC_KEYWORDS.test(cls)) return true
   for (const pattern of NOISY_CLASS_PATTERNS) {
     if (pattern.test(cls)) return false
   }
   return true
-}
-
-// 内存级写入互斥排队队列（确保并发 upsert / recordSkillFail 原子有序执行，杜绝竞态与重复记录）
-let skillWriteQueue = Promise.resolve<any>(undefined)
-function enqueueSkillWrite<T>(op: () => Promise<T>): Promise<T> {
-  const next = skillWriteQueue.then(() => op(), () => op())
-  skillWriteQueue = next
-  return next
 }
 
 /**
@@ -107,24 +116,61 @@ export function isContentScriptEnvironment(): boolean {
 /** 兼容别名 */
 export const isContentScript = isContentScriptEnvironment
 
-function sendRuntimeMessage<T>(type: string, payload?: unknown): Promise<T> {
+/** 跨进程消息超时常量 (毫秒) */
+export const RUNTIME_MESSAGE_TIMEOUT_MS = 1500
+
+function sendRuntimeMessage<T>(
+  type: string,
+  payload?: unknown,
+  timeoutMs = RUNTIME_MESSAGE_TIMEOUT_MS
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
+    let settled = false
+
+    const timer = setTimeout(() => {
+      if (settled) return
+      settled = true
+      reject(new Error(`chrome.runtime.sendMessage(${type}) timed out after ${timeoutMs}ms`))
+    }, timeoutMs)
+
+    const cleanup = () => {
+      clearTimeout(timer)
+    }
+
     try {
       if (typeof chrome === 'undefined' || !chrome.runtime?.sendMessage) {
+        cleanup()
+        settled = true
         return reject(new Error('chrome.runtime.sendMessage is not available'))
       }
-      chrome.runtime.sendMessage({ type, payload }, (response: any) => {
+
+      chrome.runtime.sendMessage({ type, payload }, (response: Record<string, unknown> | null | undefined) => {
+        if (settled) return
+        settled = true
+        cleanup()
+
         const lastErr = chrome.runtime?.lastError
         if (lastErr) {
           return reject(new Error(lastErr.message || `chrome.runtime.sendMessage(${type}) failed`))
         }
-        if (response && response.success === false) {
-          return reject(new Error(response.error || `Background rejected ${type}`))
+
+        // 统一响应体解包：优先提取 data，若未提供 data 则回退为 null，杜绝泄露 { success: true }
+        if (response && typeof response === 'object' && 'success' in response) {
+          if (response.success === false) {
+            const errMsg = typeof response.error === 'string' ? response.error : `Background rejected ${type}`
+            return reject(new Error(errMsg))
+          }
+          return resolve((response.data ?? null) as T)
         }
-        resolve(response?.data !== undefined ? response.data : response)
+
+        resolve((response ?? null) as T)
       })
     } catch (err) {
-      reject(err)
+      if (!settled) {
+        settled = true
+        cleanup()
+        reject(err)
+      }
     }
   })
 }
@@ -326,6 +372,11 @@ export async function findBestSkill(
   pageType: string,
   goal: string
 ): Promise<AgentSkill | null> {
+  // 入参防错：platform 或 goal 缺失时直接安全返回 null
+  if (!platform || !goal) {
+    return null
+  }
+
   if (isContentScriptEnvironment()) {
     try {
       const skill = await sendRuntimeMessage<AgentSkill | null>('GET_BEST_SKILL', {
@@ -333,7 +384,11 @@ export async function findBestSkill(
         pageType,
         goal,
       })
-      return skill || null
+      // 结构校验防错：确保接收到的数据具备合法 AgentSkill 基础结构
+      if (!skill || typeof skill !== 'object' || !('id' in skill) || !Array.isArray(skill.steps)) {
+        return null
+      }
+      return skill
     } catch (err) {
       console.warn('[SkillMemory] GET_BEST_SKILL fallback to null:', err)
       return null
@@ -349,6 +404,11 @@ export async function findBestSkillDirect(
   pageType: string,
   goal: string
 ): Promise<AgentSkill | null> {
+  // 入参防错：防止非法 key 导致 Dexie 抛出 DataError
+  if (!platform || !goal) {
+    return null
+  }
+
   const now = Date.now()
 
   // 1. Tier 1: 严格三元复合索引查询 [platform+pageType+goal]
@@ -390,7 +450,7 @@ export async function findBestSkillDirect(
  */
 export async function upsertSkill(params: {
   platform: string
-  pageType: string
+  pageType?: string
   goal: string
   steps: AgentStep[]
   selectorSignature: string
@@ -398,14 +458,19 @@ export async function upsertSkill(params: {
   remediationNotes?: string
   fingerprint?: SelectorFingerprint
 }): Promise<AgentSkill> {
+  const normalizedParams = {
+    ...params,
+    pageType: params.pageType || '',
+  }
+
   if (isContentScriptEnvironment()) {
     try {
-      return await sendRuntimeMessage<AgentSkill>('UPSERT_SKILL', params)
+      return await sendRuntimeMessage<AgentSkill>('UPSERT_SKILL', normalizedParams)
     } catch (err) {
       console.warn('[SkillMemory] UPSERT_SKILL messaging error:', err)
       return {
         id: 'fallback-' + Date.now(),
-        ...params,
+        ...normalizedParams,
         successCount: 1,
         failCount: 0,
         createdAt: Date.now(),
@@ -416,13 +481,13 @@ export async function upsertSkill(params: {
     }
   }
 
-  return upsertSkillDirect(params)
+  return upsertSkillDirect(normalizedParams)
 }
 
-/** 直接数据库写入实现 */
+/** 直接数据库写入实现（Dexie 事务保证并发原子性与自愈去重） */
 export async function upsertSkillDirect(params: {
   platform: string
-  pageType: string
+  pageType?: string
   goal: string
   steps: AgentStep[]
   selectorSignature: string
@@ -430,26 +495,56 @@ export async function upsertSkillDirect(params: {
   remediationNotes?: string
   fingerprint?: SelectorFingerprint
 }): Promise<AgentSkill> {
-  return enqueueSkillWrite(async () => {
+  if (!params.platform || !params.goal) {
+    throw new Error('upsertSkillDirect: platform and goal are required')
+  }
+
+  const pageType = params.pageType || ''
+
+  return await db.transaction('rw', db.agentSkills, async () => {
     const now = Date.now()
     const expiresAt = now + SKILL_TTL_MS
 
-    const existing = await db.agentSkills
+    const matching = await db.agentSkills
       .where('[platform+pageType+goal]')
-      .equals([params.platform, params.pageType, params.goal])
-      .first()
+      .equals([params.platform, pageType, params.goal])
+      .toArray()
+
+    let existing = matching[0]
+
+    // 历史或并发幽灵记录清洗：保留最优权威记录，清理多余重复记录
+    if (matching.length > 1) {
+      matching.sort(
+        (a, b) =>
+          (b.successCount || 0) - (a.successCount || 0) ||
+          (b.lastUsedAt || 0) - (a.lastUsedAt || 0)
+      )
+      existing = matching[0]
+      const duplicateIds = matching.slice(1).map((s) => s.id)
+      await db.agentSkills.bulkDelete(duplicateIds)
+    }
 
     if (existing) {
+      // 当存量技能被隔离(failCount >= 3)或禁用时，或者携带修复附注/新步骤更短时，允许更新步骤
+      const isQuarantinedOrDisabled =
+        (existing.failCount ?? 0) >= 3 || existing.enabled === false
+      const isExplicitRemediation =
+        Boolean(params.remediationNotes) ||
+        Boolean(params.patchSource && params.patchSource !== 'heuristic')
+      const isShorterOrEqual =
+        existing.steps.length === 0 || params.steps.length <= existing.steps.length
+
       const shouldUpdateSteps =
         params.steps.length > 0 &&
-        (existing.steps.length === 0 || params.steps.length <= existing.steps.length)
+        (isShorterOrEqual || isQuarantinedOrDisabled || isExplicitRemediation)
 
       const updatedSteps = shouldUpdateSteps ? params.steps : existing.steps
 
       const updated: AgentSkill = {
         ...existing,
+        pageType: existing.pageType || pageType,
         steps: updatedSteps,
-        successCount: existing.successCount + 1,
+        successCount: (existing.successCount || 0) + 1,
         failCount: 0, // 成功后重置 failCount，解除故障隔离
         lastUsedAt: now,
         expiresAt,
@@ -466,7 +561,7 @@ export async function upsertSkillDirect(params: {
       const newSkill: AgentSkill = {
         id: generateId(),
         platform: params.platform,
-        pageType: params.pageType,
+        pageType,
         goal: params.goal,
         steps: params.steps,
         successCount: 1,
@@ -493,6 +588,8 @@ export async function upsertSkillDirect(params: {
  * - 更新 lastUsedAt
  */
 export async function recordSkillFail(skill: AgentSkill): Promise<void> {
+  if (!skill || !skill.id) return
+
   if (isContentScriptEnvironment()) {
     try {
       await sendRuntimeMessage<void>('RECORD_SKILL_FAIL', { skill, id: skill.id })
@@ -506,11 +603,15 @@ export async function recordSkillFail(skill: AgentSkill): Promise<void> {
   return recordSkillFailDirect(skill)
 }
 
-/** 直接数据库更新实现 */
+/** 直接数据库更新实现（Dexie 事务保证原子累加） */
 export async function recordSkillFailDirect(skill: AgentSkill): Promise<void> {
-  return enqueueSkillWrite(async () => {
+  if (!skill || !skill.id) return
+
+  await db.transaction('rw', db.agentSkills, async () => {
     const current = await db.agentSkills.get(skill.id)
-    const nextFailCount = ((current?.failCount ?? skill.failCount) || 0) + 1
+    if (!current) return
+
+    const nextFailCount = ((current.failCount ?? skill.failCount) || 0) + 1
     await db.agentSkills.update(skill.id, {
       failCount: nextFailCount,
       lastUsedAt: Date.now(),

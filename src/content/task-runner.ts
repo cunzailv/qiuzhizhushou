@@ -9,6 +9,8 @@ import { matchResumeToJob } from '../shared/ai/remote-matcher'
 import { generateJobGreeting } from '../shared/ai/greeting'
 import { getOptimalResumeForJob } from '../shared/ai/resume-router'
 import { addSharedAppliedJobId } from '../shared/db/shared-state'
+import { recordSelfHealingEvent } from '../shared/db/diagnostics-store'
+import { dismissUnexpectedModals } from '../shared/platform/boss/action-simulator'
 import { log, logWarn, logError } from '../shared/utils/logger'
 
 const MOD = 'TaskRunner'
@@ -79,10 +81,10 @@ async function waitForJobDescription(
   return best
 }
 
-/** 现场复原：关闭可能弹出的聊天窗口、确认框、干扰弹窗或遮罩 */
-async function cleanupUi(adapter: PlatformAdapter) {
+/** 现场复原：关闭可能弹出的聊天窗口、确认框、干扰弹窗或遮罩，强力解除页面阻塞 */
+export async function cleanupUi(adapter?: PlatformAdapter): Promise<void> {
   try {
-    if (adapter.closeDetailPanel) {
+    if (adapter?.closeDetailPanel) {
       await adapter.closeDetailPanel()
     }
     // 关闭 Boss / 各平台弹窗通用关闭按钮
@@ -92,44 +94,25 @@ async function cleanupUi(adapter: PlatformAdapter) {
     for (const btn of Array.from(closeBtns)) {
       if (btn.offsetParent !== null || btn.offsetWidth > 0 || btn.offsetHeight > 0) {
         btn.click()
-        await randomDelay(200, 400)
+        await randomDelay(100, 250)
       }
     }
 
-    // 探测并清理任何“不合适原因”等遗留卡死弹窗与遮罩
-    const dialogs = document.querySelectorAll<HTMLElement>(
-      '.dialog-wrap, [role="dialog"], .boss-dialog, [class*="dialog-box"], [class*="dialog-container"]',
-    )
-    for (const d of Array.from(dialogs)) {
-      const text = d.textContent || ''
-      if (
-        text.includes('不合适的原因') ||
-        text.includes('为什么不合适') ||
-        text.includes('减少此类推荐') ||
-        text.includes('选择原因') ||
-        text.includes('不感兴趣')
-      ) {
-        const cancelBtn = Array.from(d.querySelectorAll<HTMLElement>('button, a, span')).find(
-          (b) => (b.textContent || '').trim() === '取消' || b.classList.contains('btn-cancel'),
-        )
-        if (cancelBtn) cancelBtn.click()
-        else {
-          const cBtn = d.querySelector<HTMLElement>('.icon-close, .close, [class*="close"]')
-          if (cBtn) cBtn.click()
-        }
-        if (d.isConnected) d.style.display = 'none'
-      }
-    }
-
-    // 兜底清理孤立遮罩层
-    const masks = document.querySelectorAll<HTMLElement>('.dialog-mask, .modal-backdrop, .v-modal')
-    for (const mask of Array.from(masks)) {
-      if (mask.offsetWidth > 0 || mask.offsetHeight > 0) {
-        mask.style.display = 'none'
-      }
-    }
+    // 探测并强力解除任何意外弹窗、半透明遮罩与视口冻结
+    dismissUnexpectedModals(document)
   } catch {
     // 忽略清理异常
+  } finally {
+    // M3：二次兜底。即使上述 DOM 操作整体抛错，也必须恢复滚动与焦点，
+    // 保证下一个岗位不会因残留的 body 锁死或焦点困在弹窗内而失败。
+    try {
+      if (typeof document !== 'undefined') {
+        document.body.style.overflow = ''
+        ;(document.activeElement as HTMLElement | null)?.blur?.()
+      }
+    } catch {
+      // 忽略视口复原异常，绝不向主链路冒泡
+    }
   }
 }
 
@@ -164,7 +147,7 @@ async function saveApplicationRecord(
   })
 }
 
-/** 执行单个 Campaign 投递任务 */
+/** 执行单个 Campaign 投递任务（M3：try-finally 单岗位故障隔离边界） */
 export async function executeCampaignTask(
   task: ApplyTask,
   adapter: PlatformAdapter,
@@ -173,6 +156,12 @@ export async function executeCampaignTask(
 ): Promise<TaskExecutionResponse> {
   log(MOD, 'executeCampaignTask', `Starting task ${task.id}: ${task.jobTitle} @ ${task.company}`)
   callbacks?.onProgress?.(`正在处理: ${task.jobTitle} @ ${task.company}`)
+
+  let result: TaskExecutionResponse = {
+    taskId: task.id,
+    status: 'failed',
+    failReason: '未知错误',
+  }
 
   try {
     // 1. 优先扫描页面风控状态
@@ -183,18 +172,24 @@ export async function executeCampaignTask(
       let riskDetected: 'captcha' | 'rate' | 'block' = 'captcha'
       if (risk.type === 'rate_limit') riskDetected = 'rate'
       else if (risk.type === 'block') riskDetected = 'block'
-      return {
+      result = {
         taskId: task.id,
         status: 'paused',
         riskDetected,
         failReason: risk.message,
       }
+      return result
     }
 
-    // 2. 在页面中打开目标岗位详情
+    // 2. 在页面中打开目标岗位详情（多阶自愈降级）
     callbacks?.onProgress?.(`打开岗位详情: ${task.jobTitle}`)
     notifyLog(`📄 正在展开岗位详情：${task.jobTitle} @ ${task.company}`)
-    const detailEl = await adapter.activateJobCard(task.jobUrl, task.jobId, task.jobTitle, task.company)
+    let detailEl: HTMLElement | null = null
+    if (typeof adapter.activateJobCardWithFallback === 'function') {
+      detailEl = await adapter.activateJobCardWithFallback(task.jobUrl, task.jobId, task.jobTitle, task.company)
+    } else {
+      detailEl = await adapter.activateJobCard(task.jobUrl, task.jobId, task.jobTitle, task.company)
+    }
     if (!detailEl) {
       logWarn(MOD, 'executeCampaignTask', `Cannot open job detail element for: ${task.jobTitle}`)
       notifyLog(`⚠️ 页面未找到岗位卡片：${task.jobTitle}`, 'warn')
@@ -217,11 +212,12 @@ export async function executeCampaignTask(
           applyBtnCount,
         }),
       })
-      return {
+      result = {
         taskId: task.id,
         status: 'failed',
         failReason: '页面中未找到对应岗位卡片或详情无法展开',
       }
+      return result
     }
 
     // 智能拦截：若详情面板提示职位已下线/已停止招聘，直接标记为跳过，避免作为执行失败计入
@@ -234,11 +230,12 @@ export async function executeCampaignTask(
     if (isOffline) {
       logWarn(MOD, 'executeCampaignTask', `Job is offline or closed: ${task.jobTitle}`)
       notifyLog(`⏭️ 该岗位已停止招聘或下线，智能跳过：${task.jobTitle}`, 'info')
-      return {
+      result = {
         taskId: task.id,
         status: 'skipped',
         failReason: '该岗位已停止招聘或下线',
       }
+      return result
     }
 
     await randomDelay(400, 800)
@@ -334,14 +331,14 @@ export async function executeCampaignTask(
     if (matchScore < 60) {
       log(MOD, 'executeCampaignTask', `Score ${matchScore} < 60. Skipping: ${task.jobTitle}`)
       callbacks?.onProgress?.(`评分 ${matchScore} 不达标，已跳过`)
-      await cleanupUi(adapter)
-      return {
+      result = {
         taskId: task.id,
         status: 'skipped',
         matchScore,
         matchReason,
         failReason: `AI 评分 ${matchScore} 分低于门槛 60 分`,
       }
+      return result
     }
 
     // 5. 生成或读取个性化打招呼话术（基于动态路由的专属画像简历）
@@ -370,8 +367,7 @@ export async function executeCampaignTask(
           currentUrl: window.location.href,
         }),
       })
-      await cleanupUi(adapter)
-      return {
+      result = {
         taskId: task.id,
         status: 'failed',
         matchScore,
@@ -379,6 +375,7 @@ export async function executeCampaignTask(
         greeting,
         failReason: '点击沟通/投递按钮失败',
       }
+      return result
     }
 
     await randomDelay(600, 1200)
@@ -394,11 +391,8 @@ export async function executeCampaignTask(
     await saveApplicationRecord(jobCard, matchResult, activeResume.id, adapter.id)
     await addSharedAppliedJobId(task.jobId)
 
-    // 9. 现场复原清理弹窗
-    await cleanupUi(adapter)
-
     callbacks?.onProgress?.(`投递成功: ${task.jobTitle}`)
-    return {
+    result = {
       taskId: task.id,
       status: 'done',
       matchScore,
@@ -406,6 +400,7 @@ export async function executeCampaignTask(
       greeting,
       appliedAt: new Date().toISOString(),
     }
+    return result
   } catch (err) {
     logError(MOD, 'executeCampaignTask', err)
     reportRunnerError({
@@ -420,10 +415,27 @@ export async function executeCampaignTask(
         currentUrl: typeof window !== 'undefined' ? window.location.href : '',
       }),
     })
-    return {
+
+    // M4：单岗位不可逆异常归因入库，供管家「开发者待修清单」聚合
+    void recordSelfHealingEvent({
+      platform: task.platform,
+      category: 'task_isolated',
+      triggerDescription: String(err),
+      bypassPath: 'skip_and_continue',
+      taskId: task.id,
+      jobTitle: task.jobTitle,
+      success: false,
+    }).catch(() => {})
+
+    result = {
       taskId: task.id,
       status: 'failed',
       failReason: `任务执行异常: ${String(err)}`,
     }
+    return result
+  } finally {
+    // M3：无论成功 / 业务失败 / 抛出异常，始终执行现场复原。
+    // .catch(() => {}) 保证清理链路自身的异常也绝不阻断主流水线。
+    await cleanupUi(adapter).catch(() => {})
   }
 }

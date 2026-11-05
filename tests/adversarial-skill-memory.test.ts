@@ -604,19 +604,9 @@ describe('Adversarial Stress Test: Skill Memory & Data Integrity (Milestone M1)'
           lastError: null,
         },
       })
-      const leakedPseudoSkill = (await findBestSkill('boss', 'detail', 'click_chat')) as any
-      // 实测证实：返回了 { success: true, data: undefined }，既不是 null，也没有 id 和 steps 属性
-      expect(leakedPseudoSkill).not.toBeNull()
-      expect(leakedPseudoSkill?.id).toBeUndefined()
-      expect(leakedPseudoSkill?.steps).toBeUndefined()
-
-      // 模拟调用方消费该伪对象：引发下游 TypeError 崩溃
-      expect(() => {
-        if (leakedPseudoSkill) {
-          // 下游代码依赖 steps 数组进行遍历
-          return leakedPseudoSkill.steps.length
-        }
-      }).toThrow(TypeError)
+      const skill = await findBestSkill('boss', 'detail', 'click_chat')
+      // 实测证实：返回 null，杜绝泄露 { success: true } 伪对象
+      expect(skill).toBeNull()
     })
 
     it('3.5 运行环境缺失：chrome 或 chrome.runtime.sendMessage 不存在时安全降级', async () => {
@@ -665,15 +655,10 @@ describe('Adversarial Stress Test: Skill Memory & Data Integrity (Milestone M1)'
   // 4. Dexie Database Key Validation Stress Suite
   // ─────────────────────────────────────────────────────────────
   describe('4. Dexie Compound Key Validation Stress Suite', () => {
-    it('4.1 [实测缺陷暴露] 当 platform 或 goal 为 undefined/null 时，findBestSkillDirect 抛出底层 DataError', async () => {
-      // 验证当调用方未传或传入非法 key 时，Dexie 抛出底层 DataError
-      await expect(
-        findBestSkillDirect('boss', 'detail', undefined as unknown as string)
-      ).rejects.toThrow(/DataError/)
-
-      await expect(
-        findBestSkillDirect(null as unknown as string, 'detail', 'click_chat')
-      ).rejects.toThrow(/DataError/)
+    it('4.1 当 platform 或 goal 为 undefined/null 时，findBestSkillDirect 安全返回 null 防御 DataError', async () => {
+      // 验证当调用方未传或传入非法 key 时，findBestSkillDirect 安全降级返回 null 杜绝底层 DataError
+      expect(await findBestSkillDirect('boss', 'detail', undefined as unknown as string)).toBeNull()
+      expect(await findBestSkillDirect(null as unknown as string, 'detail', 'click_chat')).toBeNull()
     })
   })
 })

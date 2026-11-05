@@ -30,7 +30,11 @@ export async function generateDailyButlerReport(
   const todayApps = allApps.filter((app) => {
     if (!app.appliedAt) return false
     const dStr = app.appliedAt.slice(0, 10)
-    return dStr === targetDate
+    const appDate = new Date(app.appliedAt)
+    const localDStr = isNaN(appDate.getTime())
+      ? dStr
+      : `${appDate.getFullYear()}-${String(appDate.getMonth() + 1).padStart(2, '0')}-${String(appDate.getDate()).padStart(2, '0')}`
+    return dStr === targetDate || localDStr === targetDate
   })
 
   // 2. 统计漏斗数据
