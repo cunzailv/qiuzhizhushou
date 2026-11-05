@@ -22,7 +22,7 @@ export function capturePageState(platform: string, goal: string, pageType: strin
   const clickables = document.querySelectorAll(
     'button, [role="button"], a[class*="btn"], a.btn, a[href*="job_detail"], span[class*="btn"]'
   )
-  clickables.forEach((el, i) => {
+  clickables.forEach((el) => {
     if (buttons.length >= MAX_BUTTONS) return
     const text = (el.textContent || '').replace(/\s+/g, ' ').trim()
     if (!text || text.length > 30 || seenTexts.has(text)) return
@@ -39,7 +39,7 @@ export function capturePageState(platform: string, goal: string, pageType: strin
   // 收集输入框
   const inputs: InputInfo[] = []
   const inputEls = document.querySelectorAll('textarea, input[type="text"], input[type="search"], [contenteditable="true"]')
-  inputEls.forEach((el, i) => {
+  inputEls.forEach((el) => {
     if (inputs.length >= MAX_INPUTS) return
     inputs.push({
       index: inputs.length,

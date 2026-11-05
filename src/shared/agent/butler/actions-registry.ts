@@ -1,5 +1,5 @@
 // 标准 Action 规范与注册表 (借鉴 CopilotKit 声明式 Action 设计)
-import { saveCandidatePreferences, getCandidatePreferences, getSetting, setSetting } from '../../db/settings-store'
+import { saveCandidatePreferences, getSetting, setSetting } from '../../db/settings-store'
 import { getDefaultResume, updateResume } from '../../db/resume-store'
 import { setSharedResumeSummary } from '../../db/shared-state'
 import { getAllApplications, getStats, clearApplications } from '../../db/application-store'

@@ -6,20 +6,13 @@ import {
   Sparkles,
   BarChart3,
   Calendar,
-  FileText,
   Clock,
   ShieldCheck,
   TrendingUp,
-  Sliders,
-  ChevronRight,
   Check,
   X,
   Copy,
-  Zap,
   Target,
-  AlertCircle,
-  HelpCircle,
-  Settings,
   Bug,
   Trash2,
   ChevronDown,
@@ -73,7 +66,7 @@ export default function Butler() {
 
   // 1. 日报状态
   const [dailyReport, setDailyReport] = useState<ButlerDailyReport | null>(null)
-  const [loadingReport, setLoadingReport] = useState(false)
+  const [, setLoadingReport] = useState(false)
   const [generatingReport, setGeneratingReport] = useState(false)
   const [reportConfig, setReportConfig] = useState<DailyReportConfig | null>(null)
   const [showConfigModal, setShowConfigModal] = useState(false)
@@ -83,7 +76,7 @@ export default function Butler() {
 
   // 2. 进化提案状态
   const [proposals, setProposals] = useState<EvolutionProposal[]>([])
-  const [loadingProposals, setLoadingProposals] = useState(false)
+  const [, setLoadingProposals] = useState(false)
   const [analyzingInduction, setAnalyzingInduction] = useState(false)
   const [respondingId, setRespondingId] = useState<string | null>(null)
   const [proposalFilter, setProposalFilter] = useState<'all' | 'pending' | 'accepted'>('all')

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { Card } from '../../components/ui/card'
 import { Toast } from '../../components/ui/toast'
-import { PROMPT_REGISTRY, getPrompt, setPrompt, resetPrompt, getPromptOverrides } from '../../shared/db/prompt-store'
+import { PROMPT_REGISTRY, setPrompt, resetPrompt, getPromptOverrides } from '../../shared/db/prompt-store'
 import { AGENT_ROLES, getAgentRole, setAgentRole, type AgentRoleId } from '../../shared/agent/agent-role'
 import { listSkills, setSkillEnabled, deleteSkill } from '../../shared/agent/skill-memory'
 import type { AgentSkill } from '../../shared/agent/types'

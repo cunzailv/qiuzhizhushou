@@ -11,7 +11,7 @@ import { log, logError, logGroup, logGroupEnd } from '../shared/utils/logger'
 import { butlerRunDaily, getActiveFollowUps } from '../shared/agent/butler'
 import { campaignService } from './campaign-service'
 import { appendTasksToCampaign } from '../shared/agent/queue-store'
-import { checkAllPlatformsAuth, checkPlatformAuth } from '../shared/platform/auth-checker'
+import { checkAllPlatformsAuth } from '../shared/platform/auth-checker'
 import {
   generateDailyButlerReport,
   getTodayDateStr,

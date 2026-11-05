@@ -246,7 +246,7 @@ export async function executeCampaignTask(
     let location = task.location || ''
     let experience = task.experience || ''
     let education = task.education || ''
-    let tags = task.tags || []
+    const tags = task.tags || []
     let bossName = task.bossName || ''
     let bossTitle = task.bossTitle || ''
 

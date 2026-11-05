@@ -53,7 +53,7 @@ export interface InPageChatMessage {
 }
 
 let activeTab: 'monitor' | 'chat' = 'monitor'
-let inPageChatHistory: InPageChatMessage[] = [
+const inPageChatHistory: InPageChatMessage[] = [
   {
     id: 'welcome',
     role: 'assistant',

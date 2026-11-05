@@ -3,13 +3,10 @@
 import React, { useState, useEffect } from 'react'
 import { Card } from '../../components/ui/card'
 import {
-  Bell,
   Send,
   Check,
   AlertTriangle,
   Smartphone,
-  ShieldAlert,
-  Sparkles,
   Link,
   Key,
 } from 'lucide-react'

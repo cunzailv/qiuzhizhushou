@@ -7,7 +7,6 @@ import { getSetting, setSetting, syncSettingsToSharedStorage } from '../shared/d
 import {
   getSupportedUrlPatterns,
   getPlatformsMeta,
-  getPlatformById,
 } from '../shared/platform'
 import {
   LayoutDashboard, FileText, ListChecks, Settings2, Bot, Sparkles,
@@ -32,9 +31,6 @@ type ToastState = {
 }
 
 const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds))
-
-// 默认用于「没有可用标签页时自动打开」的目标平台（当前以 Boss 推荐页为默认入口）。
-const DEFAULT_TARGET_URL = 'https://www.zhipin.com/web/geek/job-recommend'
 
 // 平台 id → URL 关键词映射（用于 findSupportedBossTab 的 URL 过滤）
 const PLATFORM_URL_KEYS: Array<{ id: string; key: string }> = [
@@ -114,22 +110,6 @@ async function findSupportedBossTab(
       log(MOD, 'findSupportedBossTab', `Unable to inspect tab ${tab.id}`, error)
     }
   }
-}
-
-async function createSupportedBossTab(platformId?: string): Promise<chrome.tabs.Tab> {
-  const url = (platformId ? getPlatformById(platformId)?.homeUrl : undefined) ?? DEFAULT_TARGET_URL
-  const tab = await chrome.tabs.create({
-    url,
-    active: false,
-  })
-  if (!tab.id) throw new Error('无法创建岗位推荐页')
-
-  for (let attempt = 0; attempt < 100; attempt++) {
-    const current = await chrome.tabs.get(tab.id)
-    if (current.status === 'complete') return current
-    await wait(150)
-  }
-  throw new Error('岗位推荐页加载超时')
 }
 
 const TABS = [
@@ -276,7 +256,7 @@ export default function App() {
       // 优先使用 popup 检测到的当前活动 tab（用户在哪个平台就操作哪个平台）
       // 注意：扩展 popup 页自身也可能被识别为「活动 tab」，必须跳过非 http(s) 页面
       let targetTab: chrome.tabs.Tab | undefined
-      let createdTarget = false
+      const createdTarget = false
 
       if (activeTabId) {
         try {

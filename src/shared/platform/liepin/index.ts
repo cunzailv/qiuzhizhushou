@@ -63,7 +63,6 @@ const DESC_SELECTOR = '[class*="job-description"], [class*="job-detail"]'
 const RECRUITER_BOX_SELECTOR = '[class*="recruiter-info-box"]'
 
 // 猎聘求职端与 HR 沟通的主按钮为「聊一聊」（hover 卡片后出现在头像下方）。
-const APPLY_TEXTS = ['聊一聊', '立即沟通', '沟通', '投递简历', '投递', '立即投递', '申请']
 
 function q<T extends Element = HTMLElement>(sel: string, root: ParentNode = document): T | null {
   return root.querySelector<T>(sel)
@@ -699,7 +698,7 @@ async function clickApplyButton(_jobCard: HTMLElement): Promise<boolean> {
 
 async function fillGreetingMessage(
   message: string,
-  _snapshot?: CommunicationUiSnapshot, // eslint-disable-line @typescript-eslint/no-unused-vars
+  _snapshot?: CommunicationUiSnapshot,  
 ): Promise<boolean> {
   // 猎聘点击「聊一聊」后弹出模态框，输入框在模态框内。
   // 填入招呼语后，关闭模态框（不发送），继续下一个。

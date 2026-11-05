@@ -24,7 +24,7 @@ import { createFloatingPanel, updatePanelContent, showPanelToast, type ChatCopil
 import { randomDelay, scanRisk, checkDailyLimit, incrementCounter } from '../shared/antiBot'
 import { matchResumeToJob } from '../shared/ai'
 import { reactLoop } from '../shared/agent'
-import { transition, recordMachineTransition, saveApplyRun, clearApplyRun, goalResultToEvent, type ApplyState, type ApplyEvent } from '../shared/agent/apply-state-machine'
+import { transition, recordMachineTransition, saveApplyRun, clearApplyRun, type ApplyState, type ApplyEvent } from '../shared/agent/apply-state-machine'
 import { getSharedResumeSummary, getSharedFullResume, getSharedAppliedJobIds, addSharedAppliedJobId } from '../shared/db/shared-state'
 import { log, logWarn, logError, logGroup, logGroupEnd } from '../shared/utils/logger'
 import { getSetting } from '../shared/db/settings-store'
@@ -59,7 +59,7 @@ if (typeof window !== 'undefined') {
           context: window.location.href,
         },
       })
-    } catch {}
+    } catch { /* 预期内异常，安全忽略 */ }
   })
 }
 let currentMode: 'batch' | 'recommend' = 'recommend'
@@ -279,7 +279,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             context: JSON.stringify({ taskId: task?.id, url: window.location.href }),
           },
         })
-      } catch {}
+      } catch { /* 预期内异常，安全忽略 */ }
       sendResponse({
         taskId: task?.id,
         status: 'failed',
@@ -1236,7 +1236,7 @@ async function sendResumesOnChatPage(): Promise<void> {
   let sent = 0
   let skippedSent = 0
   let skippedNoBtn = 0
-  let results: string[] = []
+  const results: string[] = []
 
   for (let i = 0; i < contacts.length; i++) {
     if (!isApplying) break
@@ -1249,7 +1249,7 @@ async function sendResumesOnChatPage(): Promise<void> {
     // DEBUG: 第一个联系人时展示按钮列表（2秒），然后正常继续
     if (i === 0) {
       const allBtns = document.querySelectorAll('button, [role="button"], [class*="btn"], span[class*="action"]')
-      let btnTexts: string[] = []
+      const btnTexts: string[] = []
       allBtns.forEach(b => {
         const t = (b.textContent || '').trim()
         if (t && t.length >= 2 && t.length <= 10 && !btnTexts.includes(t)) btnTexts.push(t)

@@ -17,7 +17,6 @@ import {
   ChevronUp,
   Save,
   X,
-  ExternalLink,
   Trash2,
 } from 'lucide-react'
 import type { CampaignStats } from '../../shared/agent/campaign'

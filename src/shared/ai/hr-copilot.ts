@@ -151,7 +151,6 @@ export async function generateHrReplyCopilot(
   const { hrMessage, jobTitle = '目标岗位', companyName = '贵司', resume, preferences } = options
   const intent = classifyHrIntent(hrMessage, preferences)
   const facts = extractRelevantResumeFacts(resume, hrMessage)
-  const matchedFact = facts[0] || ''
 
   // ─── 场景 1：底线冲突拦截（单休 / 外包 / 无社保等） ───
   if (intent === 'bottom_line_check') {

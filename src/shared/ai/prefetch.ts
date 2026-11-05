@@ -1,7 +1,6 @@
 // 任务队列 AI 产出预取模块（筛岗 + 话术异步预取与队列缓存）
 
 import { getCampaign, saveCampaign } from '../agent/queue-store'
-import type { ApplyTask } from '../agent/queue-store'
 import { matchResumeToJob } from './remote-matcher'
 import { generateJobGreeting } from './greeting'
 import type { Resume } from '../types/resume'

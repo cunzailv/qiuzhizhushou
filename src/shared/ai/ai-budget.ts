@@ -1,6 +1,6 @@
 // C4 · AI 调用成本护栏：每日调用预算上限，超限自动回退本地（返回空串由调用方兜底）。
 // 无 chrome.storage 的环境（单测）使用内存回退计数。
-import { getSetting, setSetting } from '../db/settings-store'
+import { getSetting } from '../db/settings-store'
 
 const DEFAULT_DAILY_BUDGET = 50
 

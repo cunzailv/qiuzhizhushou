@@ -45,7 +45,7 @@ export async function logAudit(entry: Omit<AuditRecord, 'id' | 'createdAt'>): Pr
 export async function getAuditLogs(
   options: { limit?: number; source?: string; result?: AuditResult; platform?: string } = {},
 ): Promise<AuditRecord[]> {
-  let query = db.auditLogs.orderBy('createdAt').reverse()
+  const query = db.auditLogs.orderBy('createdAt').reverse()
   let rows = await query.limit(options.limit ?? 200).toArray()
   if (options.source) rows = rows.filter((r) => r.source === options.source)
   if (options.result) rows = rows.filter((r) => r.result === options.result)

@@ -82,7 +82,7 @@ export function matchDeterministicAction(input: string): { actionName: string; a
   }
 
   // 4. 更新简历技能栈，如 "简历增加技能 Docker、K8s" / "技能加上 React, Vue"
-  const addSkillMatch = text.match(/(?:简历|技能)?(?:加上|增加|添加|增补)\s*(?:技能|技术栈)?\s*[:：]?\s*([a-zA-Z0-9\.\+#\s、，,]+)/i)
+  const addSkillMatch = text.match(/(?:简历|技能)?(?:加上|增加|添加|增补)\s*(?:技能|技术栈)?\s*[:：]?\s*([a-zA-Z0-9.+#\s、，,]+)/i)
   if (addSkillMatch && !text.includes('底线')) {
     const skills = addSkillMatch[1]
       .split(/[,，、\s]+/)
@@ -226,7 +226,7 @@ ${JSON.stringify(tools, null, 2)}
         return { actionName: '', args: {}, reply: parsed.reply }
       }
     }
-  } catch (err) {
+  } catch {
     // 降级使用规则引擎
   }
   return null

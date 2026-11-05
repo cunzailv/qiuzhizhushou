@@ -408,7 +408,7 @@ export function dismissUnexpectedModals(doc: Document = document): boolean {
           try {
             cancelBtn.click()
             dismissed = true
-          } catch {}
+          } catch { /* 预期内异常，安全忽略 */ }
         } else {
           // Step 2: 查找关闭图标（.icon-close, SVG, unicode × 等）
           const closeBtn = Array.from(
@@ -438,7 +438,7 @@ export function dismissUnexpectedModals(doc: Document = document): boolean {
             try {
               closeBtn.click()
               dismissed = true
-            } catch {}
+            } catch { /* 预期内异常，安全忽略 */ }
           }
         }
 
@@ -456,7 +456,7 @@ export function dismissUnexpectedModals(doc: Document = document): boolean {
           const targetWin = doc.defaultView || window
           targetWin.dispatchEvent(escEvent)
           doc.dispatchEvent(escEvent)
-        } catch {}
+        } catch { /* 预期内异常，安全忽略 */ }
 
         // Step 4: 强制隐藏/清除仍残留的弹窗 DOM 节点，防止卡死
         if (
@@ -725,10 +725,10 @@ export async function recordSelfHealingEvent(payload: {
         payload,
       }).catch?.(() => {})
     }
-  } catch {}
+  } catch { /* 预期内异常，安全忽略 */ }
   try {
     await recordError(payload)
-  } catch {}
+  } catch { /* 预期内异常，安全忽略 */ }
 }
 
 /** 提取可见、未禁用、非黑名单的交互候选按钮 */
@@ -858,7 +858,7 @@ export async function selectButtonViaLlm(
       setTimeout(() => reject(new Error('LLM timeout')), timeoutMs)
     )
     raw = await Promise.race([callPromise, timeoutPromise])
-  } catch (err) {
+  } catch {
     return null
   }
 
@@ -977,7 +977,7 @@ export async function clickApplyButtonWithResilience(
         }
       }
     }
-  } catch (err) {
+  } catch {
     // 降级至 Tier 1
   }
 
@@ -1024,7 +1024,7 @@ export async function clickApplyButtonWithResilience(
           signature: `${platform}:${pageType}:${goal}:${selector}`,
         },
       })
-    } catch {}
+    } catch { /* 预期内异常，安全忽略 */ }
 
     await recordSelfHealingEvent({
       source: `self-healing.button_fallback.${platform}`,
@@ -1082,7 +1082,7 @@ export async function clickApplyButtonWithResilience(
                 signature: `${platform}:${pageType}:${goal}:${selector}`,
               },
             })
-          } catch {}
+          } catch { /* 预期内异常，安全忽略 */ }
 
           await recordSelfHealingEvent({
             source: `self-healing.button_fallback.${platform}`,
@@ -1111,7 +1111,7 @@ export async function clickApplyButtonWithResilience(
           return { success: true, path: 'llm_perception' }
         }
       }
-    } catch {}
+    } catch { /* 预期内异常，安全忽略 */ }
   }
 
   // ─── Tier 4: 本地规则安全兜底 ───
@@ -1139,7 +1139,7 @@ export async function clickApplyButtonWithResilience(
           signature: `${platform}:${pageType}:${goal}:${selector}`,
         },
       })
-    } catch {}
+    } catch { /* 预期内异常，安全忽略 */ }
 
     await recordSelfHealingEvent({
       source: `self-healing.button_fallback.${platform}`,
@@ -1194,8 +1194,8 @@ function getActionRoot(action: Element): HTMLElement {
 export function cleanTitle(text: string): string {
   return text
     .toLowerCase()
-    .replace(/[（(【\[].*?[）)】\]]/g, '') // 去除括号内容如（AI 智能体方向），得到核心岗位如 "全栈工程师"
-    .replace(/[\s\-_/\\（）()【】\[\]·•/]/g, '')
+    .replace(/[（(【[].*?[）)】\]]/g, '') // 去除括号内容如（AI 智能体方向），得到核心岗位如 "全栈工程师"
+    .replace(/[\s\-_/\\（）()【】[\]·•/]/g, '')
     .trim()
 }
 
@@ -1797,7 +1797,7 @@ export async function activateJobCard(
     clickTarget.dispatchEvent(new MouseEvent('mousedown', evtOpts))
     clickTarget.dispatchEvent(new PointerEvent('pointerup', evtOpts))
     clickTarget.dispatchEvent(new MouseEvent('mouseup', evtOpts))
-  } catch {}
+  } catch { /* 预期内异常，安全忽略 */ }
   clickTarget.click()
 
   // 5. 循环等待详情面板展开与更新（增加下线状态识别）
@@ -1902,7 +1902,7 @@ export async function activateJobCardWithFallback(
       clickTarget.dispatchEvent(new MouseEvent('mousedown', evtOpts))
       clickTarget.dispatchEvent(new PointerEvent('pointerup', evtOpts))
       clickTarget.dispatchEvent(new MouseEvent('mouseup', evtOpts))
-    } catch {}
+    } catch { /* 预期内异常，安全忽略 */ }
     clickTarget.click()
 
     // 记录自愈审计事件

@@ -109,10 +109,10 @@ export function computeYearsOfExperience(
 // ─── 技能分级（A1） ───
 
 const SKILL_LEVEL_PATTERNS: Array<{ level: SkillLevel; pattern: RegExp }> = [
-  { level: 'expert', pattern: /精通\s*([\w+#.·\-]+(?:\s[\w+#.·\-]+)*|[\u4e00-\u9fa5]{2,12})/g },
-  { level: 'proficient', pattern: /(?:熟练掌握|熟练运用|熟练|掌握)\s*([\w+#.·\-]+(?:\s[\w+#.·\-]+)*|[\u4e00-\u9fa5]{2,12})/g },
-  { level: 'familiar', pattern: /熟悉\s*([\w+#.·\-]+(?:\s[\w+#.·\-]+)*|[\u4e00-\u9fa5]{2,12})/g },
-  { level: 'basic', pattern: /(?:了解|入门)\s*([\w+#.·\-]+(?:\s[\w+#.·\-]+)*|[\u4e00-\u9fa5]{2,12})/g },
+  { level: 'expert', pattern: /精通\s*([\w+#.·-]+(?:\s[\w+#.·-]+)*|[\u4e00-\u9fa5]{2,12})/g },
+  { level: 'proficient', pattern: /(?:熟练掌握|熟练运用|熟练|掌握)\s*([\w+#.·-]+(?:\s[\w+#.·-]+)*|[\u4e00-\u9fa5]{2,12})/g },
+  { level: 'familiar', pattern: /熟悉\s*([\w+#.·-]+(?:\s[\w+#.·-]+)*|[\u4e00-\u9fa5]{2,12})/g },
+  { level: 'basic', pattern: /(?:了解|入门)\s*([\w+#.·-]+(?:\s[\w+#.·-]+)*|[\u4e00-\u9fa5]{2,12})/g },
 ]
 
 /** 从简历文本中提取"技能 + 熟练度"（精通/熟练/熟悉/了解） */

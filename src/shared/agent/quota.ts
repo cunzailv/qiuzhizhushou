@@ -66,7 +66,7 @@ export async function getSavedIntervalConfig(): Promise<IntervalConfig> {
     if (saved && saved.minSeconds > 0 && saved.maxSeconds >= saved.minSeconds) {
       return saved
     }
-  } catch {}
+  } catch { /* 预期内异常，安全忽略 */ }
   return DEFAULT_INTERVAL_CONFIG
 }
 

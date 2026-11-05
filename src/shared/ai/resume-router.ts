@@ -1,6 +1,5 @@
 // 一人多面「多版本简历智能动态路由 (Dynamic Resume Routing)」
 import type { Resume } from '../types/resume'
-import type { JobCard } from '../types/job'
 import { getAllResumes, getDefaultResume } from '../db/resume-store'
 import { log } from '../utils/logger'
 

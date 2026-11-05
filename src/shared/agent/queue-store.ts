@@ -3,9 +3,7 @@
 
 import type { PlatformId, TimeWindow, IntervalConfig } from './quota'
 import {
-  DEFAULT_WINDOWS,
   DEFAULT_PLATFORM_CONFIGS,
-  DEFAULT_INTERVAL_CONFIG,
   getSavedTimeWindows,
   getSavedIntervalConfig,
 } from './quota'
