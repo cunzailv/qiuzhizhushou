@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "智能求职助手",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "多平台智能求职助手，支持 Boss直聘、猎聘等平台的自动打招呼与简历投递（求职者端），含 AI 匹配度分析与投递进度追踪",
   "icons": {
     "16": "icons/icon16.png",
@@ -9,8 +9,7 @@
     "128": "icons/icon128.png"
   },
   "action": {
-    "default_popup": "src/popup/index.html",
-    "default_title": "智能求职助手",
+    "default_title": "打开求职助手侧栏",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
@@ -46,9 +45,12 @@
     "notifications",
     "tabs",
     "scripting",
-    "cookies"
+    "cookies",
+    "offscreen"
   ],
   "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*",
     "https://www.zhipin.com/*",
     "https://zhipin.com/*",
     "*://*.liepin.com/*",

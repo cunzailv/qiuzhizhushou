@@ -426,68 +426,71 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
   })
 
   return (
-    <div className="p-3 space-y-3 text-text-primary">
+    <div className="px-3.5 py-3 pb-4 space-y-4 text-text-primary">
       {/* 顶部标题与管家模式切换 */}
-      <div className="flex items-center justify-between pb-1 border-b border-black/5">
-        <div className="flex items-center gap-1.5">
-          <div className="w-7 h-7 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
-            <Bot className="w-4 h-4" />
-          </div>
-          <div>
-            <h2 className="text-sm font-bold flex items-center gap-1">
-              求职管家 Agent
-              <span className="text-[10px] px-1.5 py-0.2 rounded bg-primary/10 text-primary border border-primary/20 font-medium">
-                认知与自进化
-              </span>
-            </h2>
+      <div className="space-y-3 pb-3 border-b border-black/5">
+        {/* 标题行：标题与操作按钮分列两端，不再和导航抢空间 */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary shrink-0">
+              <Bot className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-sm font-bold flex items-center gap-1.5 flex-wrap">
+                求职管家 Agent
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 font-medium">
+                  认知与自进化
+                </span>
+              </h2>
+            </div>
           </div>
           <button
             type="button"
             onClick={() => void runScan()}
             disabled={scanning}
-            className="flex items-center gap-1 rounded-md bg-primary/10 hover:bg-primary/20 text-primary text-[10px] px-2 py-0.5 font-medium transition cursor-pointer disabled:opacity-50 ml-1 whitespace-nowrap"
+            className="flex items-center gap-1.5 rounded-lg bg-primary/10 hover:bg-primary/20 text-primary text-[11px] px-2.5 py-1.5 font-medium transition cursor-pointer disabled:opacity-50 shrink-0 whitespace-nowrap"
           >
             <RefreshCw className={`w-3 h-3 ${scanning ? 'animate-spin' : ''}`} />
             {scanning ? '扫描中…' : '扫描跟进'}
           </button>
         </div>
 
-        {/* 二级导航胶囊 */}
-        <div className="flex items-center p-0.5 rounded-lg bg-surface-dark border border-black/5 text-[11px]">
+        {/* 二级导航：两行三列网格，6 个入口不再挤在同一行 */}
+        <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-surface-dark border border-black/5">
           <button
             type="button"
             onClick={() => setSubTab('chat')}
-            className={`px-2 py-1 rounded-md font-medium transition cursor-pointer flex items-center gap-1 ${
+            className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-medium transition cursor-pointer ${
               subTab === 'chat'
-                ? 'bg-white shadow-2xs text-primary font-bold'
-                : 'text-text-muted hover:text-text-primary'
+                ? 'bg-white shadow-2xs text-primary font-bold border border-primary/20'
+                : 'text-text-muted hover:text-text-primary hover:bg-white/70'
             }`}
           >
-            <Bot className="w-3 h-3 text-orange-500" />
+            <Bot className="w-3.5 h-3.5 text-orange-500" />
             对话中控
           </button>
           <button
             type="button"
             onClick={() => setSubTab('daily_report')}
-            className={`px-2 py-1 rounded-md font-medium transition cursor-pointer flex items-center gap-1 ${
+            className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-medium transition cursor-pointer ${
               subTab === 'daily_report'
-                ? 'bg-white shadow-2xs text-primary'
-                : 'text-text-muted hover:text-text-primary'
+                ? 'bg-white shadow-2xs text-primary border border-primary/20'
+                : 'text-text-muted hover:text-text-primary hover:bg-white/70'
             }`}
           >
-            <Calendar className="w-3 h-3" />
+            <Calendar className="w-3.5 h-3.5" />
             管家日报
           </button>
           <button
             type="button"
             onClick={() => setSubTab('evolution')}
-            className={`px-2 py-1 rounded-md font-medium transition cursor-pointer flex items-center gap-1 relative ${
+            className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-medium transition cursor-pointer relative ${
               subTab === 'evolution'
-                ? 'bg-white shadow-2xs text-primary'
-                : 'text-text-muted hover:text-text-primary'
+                ? 'bg-white shadow-2xs text-primary border border-primary/20'
+                : 'text-text-muted hover:text-text-primary hover:bg-white/70'
             }`}
           >
-            <Sparkles className="w-3 h-3 text-brand-orange" />
+            <Sparkles className="w-3.5 h-3.5 text-brand-orange" />
             策略进化
             {pendingProposalsCount > 0 && (
               <span className="w-1.5 h-1.5 rounded-full bg-brand-orange animate-ping" />
@@ -496,28 +499,28 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
           <button
             type="button"
             onClick={() => setSubTab('strategy')}
-            className={`px-2 py-1 rounded-md font-medium transition cursor-pointer flex items-center gap-1 ${
+            className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-medium transition cursor-pointer ${
               subTab === 'strategy'
-                ? 'bg-white shadow-2xs text-primary'
-                : 'text-text-muted hover:text-text-primary'
+                ? 'bg-white shadow-2xs text-primary border border-primary/20'
+                : 'text-text-muted hover:text-text-primary hover:bg-white/70'
             }`}
           >
-            <Target className="w-3 h-3" />
+            <Target className="w-3.5 h-3.5" />
             跟进与留痕
           </button>
           <button
             type="button"
             onClick={() => setSubTab('errors')}
-            className={`px-2 py-1 rounded-md font-medium transition cursor-pointer flex items-center gap-1 ${
+            className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-medium transition cursor-pointer ${
               subTab === 'errors'
-                ? 'bg-white shadow-2xs text-red-600 font-bold'
-                : 'text-text-muted hover:text-text-primary'
+                ? 'bg-white shadow-2xs text-red-600 font-bold border border-red-200'
+                : 'text-text-muted hover:text-text-primary hover:bg-white/70'
             }`}
           >
-            <Bug className="w-3 h-3 text-red-500" />
+            <Bug className="w-3.5 h-3.5 text-red-500" />
             异常留痕
             {errorCount > 0 && (
-              <span className="px-1 py-0.2 text-[9px] rounded-full bg-red-100 text-red-600 font-bold">
+              <span className="px-1 py-0.5 text-[10px] rounded-full bg-red-100 text-red-600 font-bold">
                 {errorCount}
               </span>
             )}
@@ -525,16 +528,16 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
           <button
             type="button"
             onClick={() => setSubTab('fixes')}
-            className={`px-2 py-1 rounded-md font-medium transition cursor-pointer flex items-center gap-1 ${
+            className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-[11px] font-medium transition cursor-pointer ${
               subTab === 'fixes'
-                ? 'bg-white shadow-2xs text-amber-700 font-bold'
-                : 'text-text-muted hover:text-text-primary'
+                ? 'bg-white shadow-2xs text-amber-700 font-bold border border-amber-200'
+                : 'text-text-muted hover:text-text-primary hover:bg-white/70'
             }`}
           >
-            <Wrench className="w-3 h-3 text-amber-600" />
+            <Wrench className="w-3.5 h-3.5 text-amber-600" />
             待修清单
             {fixSuggestions.length > 0 && (
-              <span className="px-1 py-0.2 text-[9px] rounded-full bg-red-500 text-white font-bold">
+              <span className="px-1 py-0.5 text-[10px] rounded-full bg-red-500 text-white font-bold">
                 {fixSuggestions.length}
               </span>
             )}
@@ -547,15 +550,15 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
 
       {/* ─── 视图 1：事后复盘 · 管家日报 ─── */}
       {subTab === 'daily_report' && (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {/* 日报控制栏与定时配置 */}
-          <div className="flex items-center justify-between bg-surface-dark p-2 rounded-lg border border-black/5 text-xs">
-            <div className="flex items-center gap-1.5">
-              <Calendar className="w-3.5 h-3.5 text-primary" />
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 bg-surface-dark p-3 rounded-xl border border-black/5 text-xs">
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
+              <Calendar className="w-3.5 h-3.5 text-primary shrink-0" />
               <span className="font-semibold text-text-primary">
                 {dailyReport?.date || '今日'} 投递复盘战报
               </span>
-              <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">
+              <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
                 {dailyReport?.trigger === 'campaign_finished'
                   ? '跑毕自动生成'
                   : dailyReport?.trigger === 'scheduled'
@@ -564,24 +567,24 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
               </span>
             </div>
 
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => setShowConfigModal(!showConfigModal)}
-                className="text-[10px] text-text-muted hover:text-primary transition flex items-center gap-0.5 cursor-pointer px-1.5 py-0.5 rounded bg-white border border-black/10"
+                className="text-[11px] text-text-muted hover:text-primary transition flex items-center gap-1 cursor-pointer px-2 py-1 rounded-lg bg-white border border-black/10"
                 title="修改每日自动生成时间"
               >
-                <Clock className="w-2.5 h-2.5 text-primary" />
+                <Clock className="w-3 h-3 text-primary" />
                 定时: {reportConfig?.scheduledTime || '18:00'}
               </button>
 
               <button
                 type="button"
                 onClick={handleCopyReportMarkdown}
-                className="text-[10px] text-text-muted hover:text-primary transition flex items-center gap-0.5 cursor-pointer px-1.5 py-0.5 rounded bg-white border border-black/10"
+                className="text-[11px] text-text-muted hover:text-primary transition flex items-center gap-1 cursor-pointer px-2 py-1 rounded-lg bg-white border border-black/10"
                 title="一键复制 Markdown 格式战报"
               >
-                {copiedMessage ? <Check className="w-2.5 h-2.5 text-emerald-600" /> : <Copy className="w-2.5 h-2.5" />}
+                {copiedMessage ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
                 {copiedMessage ? '已复制' : '复制战报'}
               </button>
 
@@ -589,10 +592,10 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                 type="button"
                 onClick={handleManualGenerateReport}
                 disabled={generatingReport}
-                className="text-[10px] text-primary hover:bg-primary/10 transition flex items-center gap-0.5 cursor-pointer px-2 py-0.5 rounded bg-primary/5 border border-primary/20 font-medium disabled:opacity-50"
+                className="text-[11px] text-primary hover:bg-primary/10 transition flex items-center gap-1 cursor-pointer px-2.5 py-1 rounded-lg bg-primary/5 border border-primary/20 font-medium disabled:opacity-50"
                 title="重新生成并分析最新战报"
               >
-                <RefreshCw className={`w-2.5 h-2.5 ${generatingReport ? 'animate-spin' : ''}`} />
+                <RefreshCw className={`w-3 h-3 ${generatingReport ? 'animate-spin' : ''}`} />
                 {generatingReport ? '复盘中...' : '重新复盘'}
               </button>
             </div>
@@ -600,7 +603,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
 
           {/* 定时生成设置浮层 */}
           {showConfigModal && (
-            <div className="bg-surface-dark border border-black/10 rounded-lg p-2.5 text-xs space-y-2">
+            <div className="bg-surface-dark border border-black/10 rounded-xl p-3 text-xs space-y-2.5">
               <div className="flex items-center justify-between border-b border-black/5 pb-1">
                 <span className="font-semibold text-text-primary flex items-center gap-1">
                   <Clock className="w-3.5 h-3.5 text-primary" />
@@ -639,14 +642,14 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                 <button
                   type="button"
                   onClick={() => setShowConfigModal(false)}
-                  className="px-2 py-0.5 rounded bg-white border border-black/10 text-[10px] text-text-secondary cursor-pointer"
+                  className="px-2.5 py-1 rounded-lg bg-white border border-black/10 text-[11px] text-text-secondary cursor-pointer"
                 >
                   取消
                 </button>
                 <button
                   type="button"
                   onClick={handleSaveReportConfig}
-                  className="px-2.5 py-0.5 rounded bg-primary text-white text-[10px] font-medium hover:bg-primary-light cursor-pointer"
+                  className="px-3 py-1 rounded-lg bg-primary text-white text-[11px] font-medium hover:bg-primary-light cursor-pointer"
                 >
                   保存设置
                 </button>
@@ -668,77 +671,77 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
               </div>
 
               {/* 核心漏斗指标 */}
-              <div className="grid grid-cols-4 gap-2 text-center bg-surface-dark p-2 rounded-lg border border-black/5">
-                <div>
-                  <div className="text-[10px] text-text-muted">扫描探测</div>
-                  <div className="text-sm font-bold text-text-primary mt-0.5">
+              <div className="grid grid-cols-4 gap-2 text-center bg-surface-dark p-3 rounded-xl border border-black/5">
+                <div className="min-w-0">
+                  <div className="text-[11px] leading-snug text-text-muted">扫描探测</div>
+                  <div className="text-base font-bold text-text-primary mt-1">
                     {dailyReport.funnel.scanned}
                   </div>
                 </div>
-                <div>
-                  <div className="text-[10px] text-emerald-600 font-medium">发起沟通</div>
-                  <div className="text-sm font-bold text-emerald-600 mt-0.5">
+                <div className="min-w-0">
+                  <div className="text-[11px] leading-snug text-emerald-600 font-medium">发起沟通</div>
+                  <div className="text-base font-bold text-emerald-600 mt-1">
                     {dailyReport.funnel.applied}
                   </div>
                 </div>
-                <div>
-                  <div className="text-[10px] text-sky-600">已读/互动</div>
-                  <div className="text-sm font-bold text-sky-600 mt-0.5">
+                <div className="min-w-0">
+                  <div className="text-[11px] leading-snug text-sky-600">已读/互动</div>
+                  <div className="text-base font-bold text-sky-600 mt-1">
                     {dailyReport.funnel.read + dailyReport.funnel.communicating}
                   </div>
                 </div>
-                <div>
-                  <div className="text-[10px] text-brand-orange font-medium">回复转化率</div>
-                  <div className="text-sm font-bold text-brand-orange mt-0.5">
+                <div className="min-w-0">
+                  <div className="text-[11px] leading-snug text-brand-orange font-medium">回复转化率</div>
+                  <div className="text-base font-bold text-brand-orange mt-1">
                     {dailyReport.funnel.replyRate}%
                   </div>
                 </div>
               </div>
 
               {/* 严格安全护栏（Guardrails）与拟人保护达标证明 */}
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-2.5 space-y-1.5 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-emerald-900 flex items-center gap-1">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3 space-y-2 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-semibold text-emerald-900 flex items-center gap-1.5">
                     <ShieldCheck className="w-4 h-4 text-emerald-600" />
                     严格安全护栏（Guardrails）达标运行
                   </span>
-                  <span className="text-[10px] font-bold text-emerald-700 bg-white px-1.5 py-0.2 rounded border border-emerald-300">
+                  <span className="text-[11px] font-bold text-emerald-700 bg-white px-2 py-0.5 rounded border border-emerald-300">
                     安全得分: {dailyReport.guardrailStatus.safetyScore}/100
                   </span>
                 </div>
-                <div className="grid grid-cols-3 gap-1 text-[10px] text-emerald-800">
-                  <div className="bg-white/80 p-1.5 rounded border border-emerald-100">
+                <div className="grid grid-cols-3 gap-2 text-[11px] leading-snug text-emerald-800">
+                  <div className="bg-white/80 p-2 rounded-lg border border-emerald-100">
                     <span className="text-emerald-600 block">拟人间歇:</span>
                     <strong>{dailyReport.guardrailStatus.intervalRange}</strong>
                   </div>
-                  <div className="bg-white/80 p-1.5 rounded border border-emerald-100">
+                  <div className="bg-white/80 p-2 rounded-lg border border-emerald-100">
                     <span className="text-emerald-600 block">风控拦截:</span>
                     <strong>{dailyReport.guardrailStatus.captchaEncounters} 次</strong>
                   </div>
-                  <div className="bg-white/80 p-1.5 rounded border border-emerald-100">
+                  <div className="bg-white/80 p-2 rounded-lg border border-emerald-100">
                     <span className="text-emerald-600 block">账号安全度:</span>
                     <strong className="text-emerald-700">100% 极佳</strong>
                   </div>
                 </div>
-                <p className="text-[10px] text-emerald-700 mt-0.5">
+                <p className="text-[11px] text-emerald-700 mt-1 leading-relaxed">
                   ✓ {dailyReport.guardrailStatus.safeStatusText}
                 </p>
               </div>
 
               {/* 各平台投递分布 */}
-              <div className="rounded-lg border border-black/5 bg-surface-dark p-2.5 space-y-1.5 text-xs">
+              <div className="rounded-xl border border-black/5 bg-surface-dark p-3 space-y-2 text-xs">
                 <span className="text-[11px] font-semibold text-text-secondary block">
                   多平台投递与配额消耗分布
                 </span>
-                <div className="space-y-1">
+                <div className="space-y-1.5">
                   {Object.entries(dailyReport.platformBreakdown).map(([pName, pData]) => (
-                    <div key={pName} className="flex items-center justify-between text-[11px] bg-white p-1.5 rounded border border-black/5">
+                    <div key={pName} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[11px] bg-white p-2.5 rounded-lg border border-black/5">
                       <span className="font-medium text-text-primary">{pName}</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-text-muted">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-[11px] text-text-muted">
                           沟通 {pData.applied} | 回复 {pData.replied}
                         </span>
-                        <span className="text-[10px] font-mono text-primary bg-primary/5 px-1 rounded">
+                        <span className="text-[11px] font-mono text-primary bg-primary/5 px-1.5 py-0.5 rounded">
                           配额: {pData.quotaUsed}/{pData.quotaTotal}
                         </span>
                       </div>
@@ -747,14 +750,15 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                 </div>
               </div>
 
+
               {/* 今日高光亮点与问题诊断 */}
               <div className="grid grid-cols-1 gap-2">
-                <div className="rounded-lg border border-black/5 bg-surface-dark p-2.5 space-y-1 text-xs">
+                <div className="rounded-xl border border-black/5 bg-surface-dark p-3 space-y-2 text-xs">
                   <span className="text-[11px] font-semibold text-text-secondary flex items-center gap-1">
                     <Sparkles className="w-3.5 h-3.5 text-brand-orange" />
                     今日高光亮点
                   </span>
-                  <ul className="text-[11px] text-text-muted space-y-1 pl-1">
+                  <ul className="text-[11px] leading-relaxed text-text-muted space-y-1.5 pl-1">
                     {dailyReport.highlights.map((h, i) => (
                       <li key={i} className="flex items-start gap-1">
                         <span className="text-brand-orange shrink-0">·</span>
@@ -764,12 +768,12 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                   </ul>
                 </div>
 
-                <div className="rounded-lg border border-black/5 bg-surface-dark p-2.5 space-y-1 text-xs">
+                <div className="rounded-xl border border-black/5 bg-surface-dark p-3 space-y-2 text-xs">
                   <span className="text-[11px] font-semibold text-text-secondary flex items-center gap-1">
                     <TrendingUp className="w-3.5 h-3.5 text-primary" />
                     问题诊断与归因
                   </span>
-                  <ul className="text-[11px] text-text-muted space-y-1 pl-1">
+                  <ul className="text-[11px] leading-relaxed text-text-muted space-y-1.5 pl-1">
                     {dailyReport.diagnostics.map((d, i) => (
                       <li key={i} className="flex items-start gap-1">
                         <span className="text-primary shrink-0">·</span>
@@ -781,12 +785,12 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
               </div>
 
               {/* 明日作战指南 */}
-              <div className="rounded-xl border border-primary/15 bg-primary/5 p-2.5 space-y-1 text-xs">
+              <div className="rounded-xl border border-primary/15 bg-primary/5 p-3 space-y-2 text-xs">
                 <span className="text-[11px] font-semibold text-text-primary flex items-center gap-1">
                   <Target className="w-3.5 h-3.5 text-primary" />
                   明日作战行动指南
                 </span>
-                <div className="text-[10px] text-text-muted space-y-1">
+                <div className="text-[11px] leading-relaxed text-text-muted space-y-1.5">
                   <div>
                     <strong className="text-text-secondary">主攻方向：</strong>
                     {dailyReport.nextDayActionPlan.focusTitles.join(' / ')}
@@ -797,7 +801,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                   </div>
                   <ul className="space-y-0.5 pt-0.5">
                     {dailyReport.nextDayActionPlan.keyTips.map((tip, i) => (
-                      <li key={i} className="flex items-start gap-1 text-[10px]">
+                      <li key={i} className="flex items-start gap-1.5 text-[11px]">
                         <span className="text-primary shrink-0">✓</span>
                         <span>{tip}</span>
                       </li>
@@ -817,9 +821,9 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
 
       {/* ─── 视图 2：高级的进化 · 感知与进化策略中心 ─── */}
       {subTab === 'evolution' && (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {/* 人机协同哲学导语卡片 */}
-          <div className="rounded-xl border border-primary/20 bg-gradient-to-r from-primary/5 to-brand-orange/5 p-3 space-y-1.5 text-xs">
+          <div className="rounded-xl border border-primary/20 bg-gradient-to-r from-primary/5 to-brand-orange/5 p-3.5 space-y-2 text-xs">
             <div className="flex items-center justify-between">
               <span className="font-bold text-[12px] text-text-primary flex items-center gap-1">
                 <Sparkles className="w-4 h-4 text-brand-orange" />
@@ -829,7 +833,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                 type="button"
                 onClick={handleRunInduction}
                 disabled={analyzingInduction}
-                className="text-[10px] text-primary bg-white border border-primary/30 hover:bg-primary/10 px-2 py-0.5 rounded transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                className="text-[11px] text-primary bg-white border border-primary/30 hover:bg-primary/10 px-2.5 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
                 title="深度分析海量 JD 与真实回复规律"
               >
                 <RefreshCw className={`w-2.5 h-2.5 ${analyzingInduction ? 'animate-spin' : ''}`} />
@@ -844,15 +848,15 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
           </div>
 
           {/* 提案过滤筛选 */}
-          <div className="flex items-center justify-between text-xs">
-            <div className="flex items-center gap-1 text-[11px]">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
               <span className="text-text-muted">筛选：</span>
               {(['all', 'pending', 'accepted'] as const).map((f) => (
                 <button
                   key={f}
                   type="button"
                   onClick={() => setProposalFilter(f)}
-                  className={`px-2 py-0.5 rounded text-[10px] transition cursor-pointer ${
+                  className={`px-2.5 py-1 rounded-lg text-[11px] transition cursor-pointer ${
                     proposalFilter === f
                       ? 'bg-primary text-white font-medium'
                       : 'bg-surface-dark text-text-muted hover:text-text-primary'
@@ -868,7 +872,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
           </div>
 
           {/* 进化提案列表 */}
-          <div className="space-y-3">
+          <div className="space-y-4">
             {filteredProposals.map((proposal) => {
               const isPending = proposal.status === 'pending'
               const isAccepted = proposal.status === 'accepted'
@@ -877,7 +881,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
               return (
                 <div
                   key={proposal.id}
-                  className={`rounded-xl border p-3 space-y-2.5 transition-all text-xs ${
+                  className={`rounded-xl border p-3.5 space-y-3 transition-all text-xs ${
                     isPending
                       ? 'border-primary/30 bg-white shadow-xs'
                       : isAccepted
@@ -886,9 +890,9 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                   }`}
                 >
                   {/* 提案头部与分类 */}
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-[12px] text-text-primary flex items-center gap-1.5">
-                      <span className="text-[10px] px-1.5 py-0.2 rounded font-medium bg-brand-orange/10 text-brand-orange border border-brand-orange/20">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <span className="font-bold text-[12px] text-text-primary flex flex-wrap items-center gap-1.5 min-w-0 flex-1">
+                      <span className="text-[10px] px-1.5 py-0.5 rounded font-medium bg-brand-orange/10 text-brand-orange border border-brand-orange/20">
                         {proposal.categoryBadge}
                       </span>
                       {proposal.title}
@@ -916,20 +920,20 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                   </div>
 
                   {/* 1. 感知与归纳证据栏（数据支撑） */}
-                  <div className="bg-surface-dark rounded-lg p-2 space-y-1 text-[11px] border border-black/5">
-                    <div className="flex items-center justify-between text-[10px]">
+                  <div className="bg-surface-dark rounded-lg p-2.5 space-y-1.5 text-[11px] border border-black/5">
+                    <div className="flex flex-wrap items-center justify-between gap-1.5 text-[11px]">
                       <span className="text-text-muted flex items-center gap-1 font-semibold">
                         <BarChart3 className="w-3 h-3 text-primary" />
                         系统感知与归纳依据：
                       </span>
-                      <span className="text-brand-orange font-mono font-bold bg-white px-1.5 py-0.2 rounded border border-black/5">
+                      <span className="text-brand-orange font-mono font-bold bg-white px-1.5 py-0.5 rounded border border-black/5">
                         样本规模: {proposal.evidenceStats.sampleSize} 个真实 JD
                       </span>
                     </div>
                     <p className="text-text-secondary leading-relaxed text-[11px]">
                       {proposal.insight}
                     </p>
-                    <div className="flex items-center gap-2 pt-1 text-[10px] font-mono">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pt-1 text-[11px] font-mono">
                       <span className="text-text-muted">
                         历史指标: {proposal.evidenceStats.beforeValue}
                       </span>
@@ -946,11 +950,11 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                       策略提议详情（Before vs After 对比）：
                     </div>
                     <div className="grid grid-cols-2 gap-2">
-                      <div className="bg-rose-50/60 border border-rose-200 rounded p-1.5 text-[10px]">
+                      <div className="bg-rose-50/60 border border-rose-200 rounded-lg p-2 text-[11px] leading-relaxed">
                         <span className="text-rose-600 font-semibold block mb-0.5">现有策略 / 关键词：</span>
                         <span className="text-text-secondary line-through">{proposal.diff.before}</span>
                       </div>
-                      <div className="bg-emerald-50/80 border border-emerald-300 rounded p-1.5 text-[10px]">
+                      <div className="bg-emerald-50/80 border border-emerald-300 rounded-lg p-2 text-[11px] leading-relaxed">
                         <span className="text-emerald-700 font-bold block mb-0.5">建议采纳方案：</span>
                         <strong className="text-emerald-900">{proposal.diff.after}</strong>
                       </div>
@@ -958,12 +962,12 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                   </div>
 
                   {/* 3. 严格安全护栏保障说明 */}
-                  <div className="bg-blue-50/40 border border-blue-200/60 rounded-lg p-2 text-[10px] text-blue-900 space-y-1">
+                  <div className="bg-blue-50/40 border border-blue-200/60 rounded-lg p-2.5 text-[11px] text-blue-900 space-y-1.5">
                     <span className="font-semibold flex items-center gap-1 text-blue-800">
                       <ShieldCheck className="w-3 h-3 text-blue-600" />
                       克制执行承诺与严格安全护栏（Guardrails）：
                     </span>
-                    <ul className="space-y-0.5 pl-1 text-[10px] text-blue-800">
+                    <ul className="space-y-1 pl-1 text-[11px] leading-relaxed text-blue-800">
                       {proposal.guardrails.map((g, i) => (
                         <li key={i} className="flex items-start gap-1">
                           <span className="text-blue-500">✓</span>
@@ -980,7 +984,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                         type="button"
                         onClick={() => handleRejectProposal(proposal.id)}
                         disabled={respondingId === proposal.id}
-                        className="px-2.5 py-1 text-[11px] rounded bg-white border border-black/10 hover:bg-surface-medium text-text-secondary transition cursor-pointer"
+                        className="px-3 py-1.5 text-[11px] rounded-lg bg-white border border-black/10 hover:bg-surface-medium text-text-secondary transition cursor-pointer"
                       >
                         拒绝并保留现方案
                       </button>
@@ -988,7 +992,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                         type="button"
                         onClick={() => handleAcceptProposal(proposal.id)}
                         disabled={respondingId === proposal.id}
-                        className="px-3.5 py-1 text-[11px] rounded bg-primary text-white font-medium hover:bg-primary-light transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                        className="px-3.5 py-1.5 text-[11px] rounded-lg bg-primary text-white font-medium hover:bg-primary-light transition flex items-center gap-1 shadow-2xs cursor-pointer"
                       >
                         <Check className="w-3.5 h-3.5" />
                         同意并学习此策略
@@ -1011,9 +1015,9 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
 
       {/* ─── 视图 3：今日策略与跟进建议 ─── */}
       {subTab === 'strategy' && (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {strategy && (
-            <div className="rounded-xl border border-black/10 bg-black/[0.03] p-3 space-y-2">
+            <div className="rounded-xl border border-black/10 bg-black/[0.03] p-3.5 space-y-2.5">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-text-primary">
                 <Bot className="w-3.5 h-3.5 text-primary-light" />
                 今日管家沟通总编排
@@ -1031,7 +1035,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
           )}
 
           {review && (
-            <div className="rounded-xl border border-black/10 bg-black/[0.03] p-3 space-y-2">
+            <div className="rounded-xl border border-black/10 bg-black/[0.03] p-3.5 space-y-2.5">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-text-primary">
                 <BarChart3 className="w-3.5 h-3.5 text-primary-light" />
                 周期复盘（{review.period}）
@@ -1056,7 +1060,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
             </div>
           )}
 
-          <div className="rounded-xl border border-black/10 bg-black/[0.03] p-3 space-y-2">
+          <div className="rounded-xl border border-black/10 bg-black/[0.03] p-3.5 space-y-2.5">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-text-primary">
               <Sparkles className="w-3.5 h-3.5 text-primary-light" />
               跟进建议（已投递 N 天未回复，建议+确认）
@@ -1065,7 +1069,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
               <p className="text-[11px] text-text-muted">暂无待跟进的投递。AIbot 将自动为您监控回复状态。</p>
             ) : (
               followUps.slice(0, 5).map((followUp) => (
-                <div key={followUp.id} className="rounded-lg bg-white border border-black/10 p-2.5 space-y-1.5">
+                <div key={followUp.id} className="rounded-lg bg-white border border-black/10 p-3 space-y-2">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-xs font-medium text-text-primary">
                       {followUp.companyName} · {followUp.jobTitle}
@@ -1086,7 +1090,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
             )}
           </div>
 
-          <div className="rounded-xl border border-black/10 bg-black/[0.03] p-3 space-y-2">
+          <div className="rounded-xl border border-black/10 bg-black/[0.03] p-3.5 space-y-2.5">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-text-primary">
               <Bot className="w-3.5 h-3.5 text-primary-light" />
               最近战略抉择与留痕
@@ -1107,9 +1111,9 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
 
       {/* ─── 视图 4：异常与 Bug 留痕诊断中心 ─── */}
       {subTab === 'errors' && (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {/* 控制面板 */}
-          <div className="flex items-center justify-between p-2.5 rounded-xl bg-surface-dark border border-black/5">
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-surface-dark border border-black/5">
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 rounded-md bg-red-100 text-red-600 flex items-center justify-center">
                 <Bug className="w-3.5 h-3.5" />
@@ -1117,11 +1121,11 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
               <div>
                 <div className="text-xs font-bold text-text-primary flex items-center gap-1.5">
                   异常留痕与诊断中心
-                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-black/5 text-text-muted">
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/5 text-text-muted">
                     共 {errorRecords.length} 条记录
                   </span>
                 </div>
-                <div className="text-[10px] text-text-muted">
+                <div className="text-[11px] leading-snug text-text-muted">
                   自动记录投递执行、页面 DOM 提取、AI 通信全链路异常，留痕防丢
                 </div>
               </div>
@@ -1158,11 +1162,11 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
           </div>
 
           {/* 筛选标签 */}
-          <div className="flex items-center gap-1 text-[11px]">
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
             <button
               type="button"
               onClick={() => setErrorFilter('all')}
-              className={`px-2 py-0.5 rounded-full cursor-pointer transition ${
+              className={`px-2.5 py-1 rounded-full cursor-pointer transition ${
                 errorFilter === 'all'
                   ? 'bg-primary text-white font-medium'
                   : 'bg-black/5 text-text-muted hover:text-text-primary'
@@ -1173,7 +1177,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
             <button
               type="button"
               onClick={() => setErrorFilter('boss')}
-              className={`px-2 py-0.5 rounded-full cursor-pointer transition ${
+              className={`px-2.5 py-1 rounded-full cursor-pointer transition ${
                 errorFilter === 'boss'
                   ? 'bg-primary text-white font-medium'
                   : 'bg-black/5 text-text-muted hover:text-text-primary'
@@ -1184,7 +1188,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
             <button
               type="button"
               onClick={() => setErrorFilter('campaign')}
-              className={`px-2 py-0.5 rounded-full cursor-pointer transition ${
+              className={`px-2.5 py-1 rounded-full cursor-pointer transition ${
                 errorFilter === 'campaign'
                   ? 'bg-primary text-white font-medium'
                   : 'bg-black/5 text-text-muted hover:text-text-primary'
@@ -1195,7 +1199,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
             <button
               type="button"
               onClick={() => setErrorFilter('other')}
-              className={`px-2 py-0.5 rounded-full cursor-pointer transition ${
+              className={`px-2.5 py-1 rounded-full cursor-pointer transition ${
                 errorFilter === 'other'
                   ? 'bg-primary text-white font-medium'
                   : 'bg-black/5 text-text-muted hover:text-text-primary'
@@ -1236,7 +1240,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                   return (
                     <div
                       key={record.id}
-                      className="p-2.5 rounded-xl bg-white border border-red-200/60 shadow-2xs space-y-1.5"
+                      className="p-3 rounded-xl bg-white border border-red-200/60 shadow-2xs space-y-2"
                     >
                       <div className="flex items-center justify-between gap-1.5">
                         <div className="flex items-center gap-1.5 flex-wrap">
@@ -1278,8 +1282,8 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                       </div>
 
                       {record.context && (
-                        <div className="p-1.5 rounded-md bg-surface-dark border border-black/5 text-[10px] font-mono text-text-muted break-all leading-normal">
-                          <div className="text-[9px] uppercase tracking-wider text-text-muted/70 mb-0.5 font-bold">
+                        <div className="p-2 rounded-md bg-surface-dark border border-black/5 text-[11px] font-mono text-text-muted break-all leading-relaxed">
+                          <div className="text-[10px] uppercase tracking-wider text-text-muted/70 mb-1 font-bold">
                             Diagnostics Context:
                           </div>
                           {record.context}
@@ -1301,9 +1305,9 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
 
       {/* ─── 视图 5：开发者待修清单（M4 · 自愈事件自动归因） ─── */}
       {subTab === 'fixes' && (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {/* 控制栏 */}
-          <div className="flex items-center justify-between p-2.5 rounded-xl bg-surface-dark border border-black/5">
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-surface-dark border border-black/5">
             <div className="flex items-center gap-2">
               <div className="w-6 h-6 rounded-md bg-amber-100 text-amber-700 flex items-center justify-center">
                 <Wrench className="w-3.5 h-3.5" />
@@ -1311,11 +1315,11 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
               <div>
                 <div className="text-xs font-bold text-text-primary flex items-center gap-1.5">
                   🔧 开发者待修清单
-                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-black/5 text-text-muted">
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/5 text-text-muted">
                     共 {fixSuggestions.length} 条建议
                   </span>
                 </div>
-                <div className="text-[10px] text-text-muted">
+                <div className="text-[11px] leading-snug text-text-muted">
                   基于运行时自愈/降级事件自动归因 · 按修复优先级排序
                 </div>
               </div>
@@ -1363,7 +1367,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                 return (
                   <div
                     key={s.key}
-                    className="p-2.5 rounded-xl bg-white border border-black/10 shadow-2xs space-y-1.5"
+                    className="p-3 rounded-xl bg-white border border-black/10 shadow-2xs space-y-2"
                   >
                     <div className="flex items-center justify-between gap-1.5">
                       <div className="flex items-center gap-1.5 flex-wrap">
@@ -1373,7 +1377,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                         </span>
                         <span className="text-[11px] font-semibold text-text-primary">{s.fixTitle}</span>
                       </div>
-                      <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-red-50 text-red-600 border border-red-200 whitespace-nowrap">
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-red-50 text-red-600 border border-red-200 whitespace-nowrap">
                         {s.occurrences} 次
                       </span>
                     </div>
@@ -1387,8 +1391,8 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                     <p className="text-[11px] text-text-secondary leading-relaxed">{s.fixDescription}</p>
 
                     {s.failedSelectors.length > 0 && (
-                      <div className="p-1.5 rounded-md bg-surface-dark border border-black/5 text-[10px] font-mono text-text-muted break-all">
-                        <div className="text-[9px] uppercase tracking-wider font-bold mb-0.5">
+                      <div className="p-2 rounded-md bg-surface-dark border border-black/5 text-[11px] font-mono text-text-muted break-all">
+                        <div className="text-[10px] uppercase tracking-wider font-bold mb-1">
                           失败选择器
                         </div>
                         {s.failedSelectors.join(' · ')}
@@ -1405,7 +1409,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                     </button>
 
                     {isExpanded && (
-                      <div className="p-1.5 rounded-md bg-surface-dark border border-black/5 text-[10px] text-text-muted space-y-1">
+                      <div className="p-2 rounded-md bg-surface-dark border border-black/5 text-[11px] leading-relaxed text-text-muted space-y-1.5">
                         <div>
                           <strong className="text-text-secondary">按钮文本：</strong>
                           {s.buttonTexts.length > 0 ? s.buttonTexts.join(' / ') : '无'}

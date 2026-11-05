@@ -70,8 +70,8 @@ describe('AIbot browser real E2E test', () => {
     await startBtn.waitFor({ timeout: 5000 })
     await startBtn.click()
 
-    // 验证状态变为「运行中」
-    await popupPage.getByText('运行中').waitFor({ timeout: 5000 })
+    // 验证状态变为「运行中」（精确匹配徽标，避免命中配置说明里同样含「运行中」的文案）
+    await popupPage.getByText('运行中', { exact: true }).waitFor({ timeout: 5000 })
 
     // 3. 验证行为日志流实时有输出（有流水日志跳出，且绝不误报已达上限）
     await expect.poll(async () => {

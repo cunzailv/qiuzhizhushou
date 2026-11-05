@@ -15,6 +15,7 @@ import type { Resume, ResumeProfile, Education, WorkExperience } from '../../sha
 import { formatDate } from '../../shared/utils/date'
 import { saveMatchAnalysis, getAllMatchAnalyses, deleteMatchAnalysis } from '../../shared/db/match-analysis-store'
 import type { MatchAnalysisRecord } from '../../shared/db'
+import { CandidatePreferencesCard } from '../components/CandidatePreferencesCard'
 import {
   Upload, FileText, Star, Trash2, Eye, CheckCircle, AlertCircle,
   Code, Search, XCircle, Bot, ChevronDown, Clock, TrendingUp,
@@ -407,7 +408,12 @@ export default function Resumes() {
   return (
     <div className="p-4 space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-bold gradient-text">简历管理</h2>
+        <div>
+          <h2 className="text-lg font-bold gradient-text">简历管理</h2>
+          <a href="#candidate-preferences" className="text-[10px] text-primary-light hover:underline">
+            求职画像 · 底线 · 自主授权 → 本页下方配置
+          </a>
+        </div>
         <input
           ref={fileInputRef}
           type="file"
@@ -1010,6 +1016,10 @@ export default function Resumes() {
           </div>
         )}
       </Dialog>
+
+      <div id="candidate-preferences" className="pt-2 border-t border-black/5">
+        <CandidatePreferencesCard onNotify={showToast} />
+      </div>
 
       <Toast {...toast} onClose={() => setToast({ ...toast, visible: false })} />
     </div>

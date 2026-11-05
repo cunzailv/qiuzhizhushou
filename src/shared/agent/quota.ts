@@ -37,6 +37,76 @@ export const DEFAULT_PLATFORM_CONFIGS: Record<PlatformId, QuotaConfig> = {
   },
 }
 
+/** 支持的平台顺序（UI / 存储 / 调度共用） */
+export const PLATFORM_IDS: PlatformId[] = ['boss', 'liepin', 'zhaopin', '51job', 'maimai']
+
+/** 各平台默认投递数量（由推荐安全配额派生，保持单一来源） */
+export const DEFAULT_PLATFORM_QUOTAS: Record<PlatformId, number> = {
+  boss: DEFAULT_PLATFORM_CONFIGS.boss.quota,
+  liepin: DEFAULT_PLATFORM_CONFIGS.liepin.quota,
+  zhaopin: DEFAULT_PLATFORM_CONFIGS.zhaopin.quota,
+  '51job': DEFAULT_PLATFORM_CONFIGS['51job'].quota,
+  maimai: DEFAULT_PLATFORM_CONFIGS.maimai.quota,
+}
+
+/** 单个平台可设置的投递数量区间 */
+export const MIN_PLATFORM_QUOTA = 1
+export const MAX_PLATFORM_QUOTA = 500
+
+/** 用户自定义的各平台投递数量（chrome.storage.local 单一真源） */
+export const SETTINGS_KEY_PLATFORM_QUOTAS = 'aibot_platform_quotas'
+
+/**
+ * 把任意来源（storage / 消息 payload）的配额整理成完整的合法配额表。
+ * 缺失、非数字、越界的值统一回退到平台默认值，避免脏数据卡住调度。
+ */
+export function normalizePlatformQuotas(raw: unknown): Record<PlatformId, number> {
+  const source = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
+  const result: Record<PlatformId, number> = { ...DEFAULT_PLATFORM_QUOTAS }
+  for (const pid of PLATFORM_IDS) {
+    const candidate = source[pid]
+    const numeric =
+      typeof candidate === 'number'
+        ? candidate
+        : typeof candidate === 'string' && candidate.trim() !== ''
+          ? Number(candidate)
+          : NaN
+    if (!Number.isFinite(numeric)) continue
+    result[pid] = Math.min(
+      MAX_PLATFORM_QUOTA,
+      Math.max(MIN_PLATFORM_QUOTA, Math.round(numeric)),
+    )
+  }
+  return result
+}
+
+/** 读取用户自定义的各平台投递数量，未设置时返回推荐默认值 */
+export async function getSavedPlatformQuotas(): Promise<Record<PlatformId, number>> {
+  try {
+    const result = await chrome.storage.local.get(SETTINGS_KEY_PLATFORM_QUOTAS)
+    return normalizePlatformQuotas(result[SETTINGS_KEY_PLATFORM_QUOTAS])
+  } catch {
+    return { ...DEFAULT_PLATFORM_QUOTAS }
+  }
+}
+
+/** 局部更新各平台投递数量，返回更新后的完整配额表 */
+export async function savePlatformQuotas(
+  quotas: Partial<Record<PlatformId, number>>,
+): Promise<Record<PlatformId, number>> {
+  const current = await getSavedPlatformQuotas()
+  const next = normalizePlatformQuotas({ ...current, ...quotas })
+  await chrome.storage.local.set({ [SETTINGS_KEY_PLATFORM_QUOTAS]: next })
+  return next
+}
+
+/** 恢复各平台推荐默认投递数量 */
+export async function resetPlatformQuotas(): Promise<Record<PlatformId, number>> {
+  const defaults = { ...DEFAULT_PLATFORM_QUOTAS }
+  await chrome.storage.local.set({ [SETTINGS_KEY_PLATFORM_QUOTAS]: defaults })
+  return defaults
+}
+
 // 运行时间窗口（默认：上午 09:00-11:30，下午 14:00-17:30）
 export interface TimeWindow {
   startHour: number

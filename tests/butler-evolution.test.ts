@@ -114,16 +114,17 @@ describe('Butler Daily Review Report (管家日报)', () => {
 })
 
 describe('Perception, Induction & Evolution Strategy Engine (感知、归纳与自进化闭环)', () => {
-  it('runs perception analysis over 500+ JDs and produces strategy evolution proposals', async () => {
+  it('runs induction on real application records and never fabricates lift rates', async () => {
     const proposals = await runInductionAnalysis()
     expect(proposals.length).toBeGreaterThanOrEqual(3)
 
-    // 验证技术词进化提案
+    // 验证技术词进化提案：数据必须来自真实投递记录，不编造样本量与提升幅度
     const skillProp = proposals.find((p) => p.type === 'skill_keyword')
     expect(skillProp).toBeDefined()
-    expect(skillProp?.insight).toMatch(/5\d{2}\+/)
-    expect(skillProp?.insight).toContain('40%')
-    expect(skillProp?.evidenceStats.liftRate).toBe('+40.2%')
+    expect(skillProp?.insight).toContain('真实投递记录')
+    expect(skillProp?.insight).not.toMatch(/5\d{2}\+/)
+    expect(skillProp?.evidenceStats.liftRate).toBe('待验证')
+    expect(skillProp?.evidenceStats.metricName).toContain('真实')
     expect(skillProp?.diff.before).toBeDefined()
     expect(skillProp?.diff.after).toContain('AI 智能体')
 

@@ -4,12 +4,21 @@
 // 任意一侧修改都会同步到另外两侧。
 import { getSetting, setSetting } from './db/settings-store'
 
-export type PanelState = 'expanded' | 'collapsed' | 'closed'
+/**
+ * 侧栏/浮窗形态：
+ * - expanded：网页右侧整高侧栏展开
+ * - bubble：收起为右侧浮球（AIbot 继续运行，点击浮球或插件图标可再次展开）
+ * - collapsed：沿右边缘的窄把手（旧形态，仅兼容历史数据）
+ * - closed：关闭并停止 AIbot
+ */
+export type PanelState = 'expanded' | 'collapsed' | 'closed' | 'bubble'
 export type AssistantApplyMode = 'batch' | 'recommend'
 
 export interface AssistantControlState {
-  /** 悬浮窗形态：展开 / 贴右侧收缩 / 关闭 */
+  /** 悬浮窗形态：侧栏展开 / 浮球收起 / 窄把手 / 关闭 */
   panelState: PanelState
+  /** 置顶常驻：开启后不再自动收起，新页面也直接展开侧栏 */
+  pinned: boolean
   /** 投递模式：批量沟通 / AI 自动确认 */
   applyMode: AssistantApplyMode
   /** 是否启用 AI 评分 */
@@ -20,6 +29,7 @@ export interface AssistantControlState {
 
 export const DEFAULT_ASSISTANT_STATE: AssistantControlState = {
   panelState: 'expanded',
+  pinned: false,
   applyMode: 'batch',
   enableAiMatch: true,
   liepinResumeMode: false,
@@ -28,13 +38,14 @@ export const DEFAULT_ASSISTANT_STATE: AssistantControlState = {
 const STATE_KEYS = Object.keys(DEFAULT_ASSISTANT_STATE) as Array<keyof AssistantControlState>
 
 export async function getAssistantState(): Promise<AssistantControlState> {
-  const [panelState, applyMode, enableAiMatch, liepinResumeMode] = await Promise.all([
+  const [panelState, pinned, applyMode, enableAiMatch, liepinResumeMode] = await Promise.all([
     getSetting<PanelState>('panelState', DEFAULT_ASSISTANT_STATE.panelState),
+    getSetting<boolean>('pinned', DEFAULT_ASSISTANT_STATE.pinned),
     getSetting<AssistantApplyMode>('applyMode', DEFAULT_ASSISTANT_STATE.applyMode),
     getSetting<boolean>('enableAiMatch', DEFAULT_ASSISTANT_STATE.enableAiMatch),
     getSetting<boolean>('liepinResumeMode', DEFAULT_ASSISTANT_STATE.liepinResumeMode),
   ])
-  return { panelState, applyMode, enableAiMatch, liepinResumeMode }
+  return { panelState, pinned, applyMode, enableAiMatch, liepinResumeMode }
 }
 
 /** 只写真正变化的字段，避免 storage.onChanged 回环刷新 */
@@ -85,13 +96,16 @@ export function isAssistantTaskCancelled(
 }
 
 /**
- * 「关闭浮窗 = 关闭 AIbot」是一次运行时动作，不是永久偏好。
- * 页面重新加载 / 扩展重启时，残留的 closed 应恢复为展开，AIbot 仍保持停止。
+ * 「收起浮球 / 关闭 AIbot」都是一次性运行时动作，不是跨页面的永久偏好：
+ * - 置顶常驻：新页面直接展开侧栏
+ * - 其余情况：残留的 closed / bubble 恢复为展开，避免刷新后助手一直不可见
  */
 export function normalizeInitialPanelState(
   state: AssistantControlState,
 ): AssistantControlState {
-  return state.panelState === 'closed'
-    ? { ...state, panelState: 'expanded' }
-    : state
+  if (state.pinned) return { ...state, panelState: 'expanded' }
+  if (state.panelState === 'closed' || state.panelState === 'bubble') {
+    return { ...state, panelState: 'expanded' }
+  }
+  return state
 }

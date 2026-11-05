@@ -20,7 +20,7 @@ import { getCandidatePreferences } from '../shared/db/settings-store'
 
 // 当前活动平台适配器（由 PlatformManager 按网址自动识别，或按设置手动覆盖）。
 let adapter: PlatformAdapter
-import { createFloatingPanel, updatePanelContent, showPanelToast, setPanelState, type ChatCopilotData } from './inject-ui'
+import { createFloatingPanel, updatePanelContent, showPanelToast, setPanelState, setPinned, type ChatCopilotData } from './inject-ui'
 import {
   DEFAULT_ASSISTANT_STATE,
   getAssistantState,
@@ -38,6 +38,7 @@ import { transition, recordMachineTransition, saveApplyRun, clearApplyRun, type 
 import { getSharedResumeSummary, getSharedFullResume, getSharedAppliedJobIds, addSharedAppliedJobId } from '../shared/db/shared-state'
 import { log, logWarn, logError, logGroup, logGroupEnd } from '../shared/utils/logger'
 import { getSetting } from '../shared/db/settings-store'
+import { CONSERVATIVE_VALUES } from '../shared/types/safety-preset'
 import type { ApplyFilters } from '../shared/types/filters'
 import { DEFAULT_FILTERS, parseSalaryRange } from '../shared/types/filters'
 import type { JobCard, MatchResult } from '../shared/types/job'
@@ -192,7 +193,10 @@ function syncFromAssistantState(state: AssistantControlState): void {
   currentFilters = { ...currentFilters, enableAiMatch: state.enableAiMatch }
   liepinResumeMode = state.liepinResumeMode
   setLiepinResumeMode(liepinResumeMode)
-  if (panelHost) setPanelState(panelHost, state.panelState)
+  if (panelHost) {
+    setPanelState(panelHost, state.panelState)
+    setPinned(panelHost, state.pinned)
+  }
 }
 
 /** 写统一控制状态（后台负责广播给 popup / 其他 tab） */
@@ -221,6 +225,29 @@ function shutdownAssistantFromPanel(): void {
   } catch { /* 预期内异常，安全忽略 */ }
 }
 
+/**
+ * 点击扩展图标 / 浮球：展开侧栏 ⇄ 收起为浮球。
+ * 非招聘页（init 因 pageType 不支持而跳过）也会兜底创建面板。
+ */
+async function toggleAssistantPanelPresence(): Promise<void> {
+  if (!adapter) adapter = await getActivePlatform()
+  if (!panelHost?.isConnected) {
+    panelHost = createFloatingPanel()
+    const pageType = adapter.detectPageType()
+    updatePanelContent(panelHost, {
+      mode: currentMode,
+      status: 'idle',
+      filters: currentFilters,
+      resumeMode: liepinResumeMode,
+      pageType,
+      isChatPage: pageType === 'chat',
+    })
+  }
+  const next: PanelState = assistantState.panelState === 'expanded' ? 'bubble' : 'expanded'
+  setPanelState(panelHost, next)
+  writeAssistantState({ panelState: next })
+}
+
 // ------ Initialization ------
 async function init(): Promise<void> {
   logGroup(MOD, 'init')
@@ -243,8 +270,8 @@ async function init(): Promise<void> {
     await loadApplyDefaultsFromSettings()
     const storedState = await getAssistantState()
     assistantState = normalizeInitialPanelState(storedState)
-    if (storedState.panelState === 'closed') {
-      // 上次「关闭浮窗」不应让本次打开页面继续隐藏；同步写回，配置页也会跟着恢复
+    if (storedState.panelState === 'closed' || storedState.panelState === 'bubble') {
+      // 上次「关闭 / 收起浮球」不应让本次打开页面继续隐藏；同步写回，配置页也会跟着恢复
       await patchAssistantState({ panelState: 'expanded' }).catch(() => {})
     }
 
@@ -278,6 +305,13 @@ async function init(): Promise<void> {
 
 // ------ Listen for popup messages ------
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  // 点击扩展图标：展开侧栏 ⇄ 收起为浮球
+  if (message.type === 'TOGGLE_ASSISTANT_PANEL') {
+    log(MOD, 'onMessage', 'TOGGLE_ASSISTANT_PANEL')
+    void toggleAssistantPanelPresence().catch(() => {})
+    sendResponse({ success: true })
+    return true
+  }
   if (message.type === 'EXECUTE_APPLY') {
     const mode = message.payload?.mode || currentMode
     const filters = message.payload?.filters
@@ -515,12 +549,24 @@ window.addEventListener('message', (event) => {
   }
   if (data?.type === 'BOSS_ASSISTANT_SET_PANEL_STATE') {
     const state = data.state as PanelState
-    if (state === 'expanded' || state === 'collapsed' || state === 'closed') {
+    if (state === 'expanded' || state === 'collapsed' || state === 'closed' || state === 'bubble') {
       if (panelHost) setPanelState(panelHost, state)
-      // 在配置页里选「关闭」同样等价于关闭 bot
+      // 「关闭」仍然等价于关闭 bot；「收起为浮球」只改形态，bot 继续跑
       if (state === 'closed') shutdownAssistantFromPanel()
       else writeAssistantState({ panelState: state })
     }
+  }
+  if (data?.type === 'BOSS_ASSISTANT_TOGGLE_PIN') {
+    const pinned = !assistantState.pinned
+    log(MOD, 'panelMessage', `TOGGLE_PIN ${pinned}`)
+    if (panelHost) setPinned(panelHost, pinned)
+    writeAssistantState({ pinned })
+  }
+  if (data?.type === 'BOSS_ASSISTANT_OPEN_OPTIONS') {
+    log(MOD, 'panelMessage', 'OPEN_OPTIONS')
+    try {
+      Promise.resolve(chrome.runtime.sendMessage({ type: 'OPEN_OPTIONS' })).catch(() => {})
+    } catch { /* 预期内异常，安全忽略 */ }
   }
   if (data?.type === 'BOSS_ASSISTANT_CHANGE_MODE') {
     log(MOD, 'panelMessage', `CHANGE_MODE: ${data.mode}`)
@@ -687,7 +733,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
   log(MOD, 'startApply', `Resume: ${defaultResume.name} (skills=${defaultResume.structuredData?.skills?.length})`)
 
   // 读取用户配置的「单次扫描数量」。<=0 表示不限制（扫描到页面无更多为止）。
-  const maxScanCount = await getSetting<number>('maxScanCount', 50)
+  const maxScanCount = await getSetting<number>('maxScanCount', CONSERVATIVE_VALUES.maxScanCount)
   const maxJobs = maxScanCount > 0 ? maxScanCount : undefined
   log(MOD, 'startApply', `Max scan count: ${maxJobs ?? 'unlimited'}`)
 

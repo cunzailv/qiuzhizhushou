@@ -3,7 +3,7 @@ import { Tabs } from '../components/ui/tabs'
 import { Toast } from '../components/ui/toast'
 import type { ApplyFilters } from '../shared/types/filters'
 import { log } from '../shared/utils/logger'
-import { getSetting, setSetting, syncSettingsToSharedStorage } from '../shared/db/settings-store'
+import { getSetting, setSetting, syncSettingsToSharedStorage, resolveSafetyProfile } from '../shared/db/settings-store'
 import {
   getSupportedUrlPatterns,
   getPlatformsMeta,
@@ -17,6 +17,8 @@ import { CampaignPanel } from './components/CampaignPanel'
 import { installGlobalErrorCapture } from '../shared/db/error-store'
 
 installGlobalErrorCapture()
+// 安全阀档位初始化（首次安装写保守档，老用户标记 custom 不覆盖）
+void resolveSafetyProfile().catch(() => undefined)
 
 const MOD = 'Popup:App'
 const Dashboard = lazy(() => import('./pages/Dashboard'))
@@ -322,11 +324,11 @@ export default function App() {
   }
 
   return (
-    <div className="w-[420px] max-h-[600px] overflow-y-auto bg-surface-darkest">
+    <div className="w-[440px] max-h-[600px] overflow-y-auto bg-surface-darkest">
       {/* Header */}
       <div className="sticky top-0 z-10 bg-white/85 backdrop-blur-md border-b border-black/10">
         {/* 品牌行 */}
-        <div className="flex items-center gap-2.5 px-3 pt-3 pb-1.5">
+        <div className="flex items-center gap-2.5 px-3.5 pt-3 pb-1.5">
           <img
             src={logoUrl}
             alt="求职投递助手"
@@ -355,8 +357,8 @@ export default function App() {
             )}
           </div>
         </div>
-        <Tabs tabs={TABS} activeTab={activeTab} onTabChange={setActiveTab} className="m-3 mt-1" />
-        <div className="px-3 pb-2 -mt-1 flex items-center justify-between gap-2 text-[11px] text-text-muted">
+        <Tabs tabs={TABS} activeTab={activeTab} onTabChange={setActiveTab} className="m-3.5 mt-1" />
+        <div className="px-3.5 pb-2.5 -mt-1 flex items-center justify-between gap-2 text-[11px] text-text-muted">
           <label className="flex items-center gap-1.5">
             平台：
             <select
@@ -392,7 +394,7 @@ export default function App() {
           />
         )}
         {activeTab === 'pipeline' && (
-          <div className="p-3">
+          <div className="px-3.5 pb-4 pt-3">
             <CampaignPanel onNotify={showToast} onNavigateTab={setActiveTab} />
           </div>
         )}

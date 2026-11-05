@@ -62,12 +62,12 @@ export default function PlatformShortcuts() {
   }, [])
 
   return (
-    <div className="px-3 pt-2.5">
-      <div className="mb-1.5 flex items-center justify-between px-0.5">
-        <span className="text-[10px] font-semibold text-text-secondary">平台直达</span>
-        <span className="text-[9px] text-text-muted">点击跳转官网 · 已打开会自动切回</span>
+    <div className="px-3.5 pt-3 pb-3">
+      <div className="mb-2 flex items-center justify-between px-0.5">
+        <span className="text-[11px] font-semibold text-text-secondary">平台直达</span>
+        <span className="text-[10px] text-text-muted">点击跳转官网 · 已打开会自动切回</span>
       </div>
-      <div className="grid grid-cols-5 gap-1.5">
+      <div className="grid grid-cols-5 gap-2">
         {entries.map((entry) => {
           const color = BRAND_COLORS[entry.id] ?? FALLBACK_COLOR
           const isOpen = openedIds.includes(entry.id)
@@ -79,7 +79,7 @@ export default function PlatformShortcuts() {
               title={`打开 ${entry.name} — ${entry.homeUrl}`}
               aria-label={`打开 ${entry.name} 官网`}
               style={{ '--brand': color } as React.CSSProperties}
-              className="group relative flex flex-col items-center gap-1 rounded-lg border border-black/10 bg-white px-1 pb-1.5 pt-1.5 transition-all hover:-translate-y-0.5 hover:border-[color:var(--brand)] hover:shadow-sm active:translate-y-0"
+              className="group relative flex flex-col items-center gap-1.5 rounded-xl border border-black/10 bg-white px-1.5 py-2 transition-all hover:-translate-y-0.5 hover:border-[color:var(--brand)] hover:shadow-sm active:translate-y-0"
             >
               {isOpen && (
                 <span
@@ -94,7 +94,7 @@ export default function PlatformShortcuts() {
               >
                 {entry.icon}
               </span>
-              <span className="max-w-full truncate text-[10px] font-medium leading-tight text-text-primary group-hover:text-[color:var(--brand)]">
+              <span className="max-w-full truncate text-[11px] font-medium leading-tight text-text-primary group-hover:text-[color:var(--brand)]">
                 {entry.name}
               </span>
             </button>

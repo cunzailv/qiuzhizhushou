@@ -7,6 +7,7 @@ import {
   getRandomInterval,
   formatTimeWindows,
   saveIntervalConfig,
+  savePlatformQuotas,
 } from '../shared/agent/quota'
 import type { Campaign, ApplyTask } from '../shared/agent/queue-store'
 import {
@@ -18,6 +19,7 @@ import {
   togglePlatformEnabled,
   updateCampaignWindows,
   updateCampaignInterval,
+  updateCampaignQuotas,
   clearPendingTasks,
 } from '../shared/agent/queue-store'
 import {
@@ -37,6 +39,7 @@ import { getDailyReportConfig } from '../shared/db/butler-evolution-store'
 import { recordError } from '../shared/db/error-store'
 import { extractTargetCareers } from '../shared/agent/job-filter'
 import { getSetting } from '../shared/db/settings-store'
+import { replanIfNeeded } from '../shared/agent/planner'
 import { sendWebhookNotification } from '../shared/notification/webhook-notifier'
 import {
   getNextSearchKeyword,
@@ -177,6 +180,9 @@ export async function runCampaignTick(): Promise<void> {
       scheduleNextTick(restDuration)
       return
     }
+
+    // 3.5 自主重规划：按真实复盘 + 经验记忆调整今日策略（失败静默降级，不影响原流水线）
+    await replanIfNeeded(campaign)
 
     // 4. 从队列领取下一个任务
     const { task } = await claimNextTask()
@@ -616,6 +622,15 @@ export const campaignService = {
       `⏱️ 已更新拟人间歇：${interval.minSeconds}-${interval.maxSeconds} 秒随机等待`,
       'info',
     )
+    return cmp
+  },
+  /** 保存并即时应用各平台投递数量；运行中立刻重新调度，未启动时仅落盘待下次开跑生效 */
+  updateQuotas: async (quotas: Partial<Record<PlatformId, number>>) => {
+    const saved = await savePlatformQuotas(quotas)
+    const cmp = await updateCampaignQuotas(saved)
+    if (cmp?.status === 'running') {
+      scheduleNextTick(1000)
+    }
     return cmp
   },
   triggerAutoCollect: async () => {

@@ -5,6 +5,11 @@
 
 import { actionToToolCall, getTool } from './tool-registry'
 import { decidePermission } from './permission'
+import {
+  evaluateAuthorization,
+  loadActivePolicy,
+  proposeAction,
+} from './authorization'
 import { logAudit } from '../db/audit-store'
 import type { AgentAction } from './types'
 
@@ -70,15 +75,29 @@ export async function executeAction(
 
   // 3) 权限分档
   if (!options.skipPermission) {
-    const decision = await decidePermission(
-      call.tool,
-      {
-        goal: ctx.goal,
-        text: typeof call.payload.text === 'string' ? call.payload.text : undefined,
-        targetValue: typeof call.payload.value === 'string' ? call.payload.value : undefined,
-      },
-      options.permissionOverrides,
-    )
+    // 声明式授权契约启用时优先查表；未启用时完全回退原有权限三档，保证向后兼容
+    const policy = await loadActivePolicy()
+    const authorization = policy
+      ? evaluateAuthorization(proposeAction(call.tool, ctx.goal, call.payload ?? {}), policy)
+      : null
+    const decision = authorization
+      ? {
+          level: (authorization.level === 'deny' ? 'denied' : authorization.level) as
+            | 'auto'
+            | 'confirm'
+            | 'denied',
+          reason: authorization.reason,
+          message: authorization.reason,
+        }
+      : await decidePermission(
+          call.tool,
+          {
+            goal: ctx.goal,
+            text: typeof call.payload.text === 'string' ? call.payload.text : undefined,
+            targetValue: typeof call.payload.value === 'string' ? call.payload.value : undefined,
+          },
+          options.permissionOverrides,
+        )
 
     if (decision.level === 'denied') {
       if (options.audit !== false) {

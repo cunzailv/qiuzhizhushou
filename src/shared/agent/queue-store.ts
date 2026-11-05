@@ -6,7 +6,18 @@ import {
   DEFAULT_PLATFORM_CONFIGS,
   getSavedTimeWindows,
   getSavedIntervalConfig,
+  getSavedPlatformQuotas,
+  MIN_PLATFORM_QUOTA,
+  MAX_PLATFORM_QUOTA,
 } from './quota'
+
+const QUOTA_PLATFORM_NAMES: Record<PlatformId, string> = {
+  boss: 'Boss直聘',
+  liepin: '猎聘',
+  zhaopin: '智联招聘',
+  '51job': '前程无忧',
+  maimai: '脉脉',
+}
 
 export type TaskStatus =
   | 'pending'    // 待执行
@@ -108,6 +119,11 @@ export async function createNewCampaign(
 ): Promise<Campaign> {
   const actualWindows = windows && windows.length > 0 ? windows : await getSavedTimeWindows()
   const intervalConfig = await getSavedIntervalConfig()
+  // 以用户保存的自定义数量为底，调用方显式传入的部分再覆盖（后台独立启动也不会回落硬编码默认值）
+  const effectiveQuotas: Partial<Record<PlatformId, number>> = {
+    ...(await getSavedPlatformQuotas()),
+    ...(customQuotas ?? {}),
+  }
   const isPlatformEnabled = (pid: PlatformId): boolean => {
     if (!enabledPlatforms || enabledPlatforms.length === 0) return true
     return enabledPlatforms.includes(pid)
@@ -115,7 +131,7 @@ export async function createNewCampaign(
 
   const quotas: Record<PlatformId, PlatformCampaignQuota> = {
     boss: {
-      quota: customQuotas?.boss ?? DEFAULT_PLATFORM_CONFIGS.boss.quota,
+      quota: effectiveQuotas?.boss ?? DEFAULT_PLATFORM_CONFIGS.boss.quota,
       applied: 0,
       skipped: 0,
       failed: 0,
@@ -123,7 +139,7 @@ export async function createNewCampaign(
       enabled: isPlatformEnabled('boss'),
     },
     liepin: {
-      quota: customQuotas?.liepin ?? DEFAULT_PLATFORM_CONFIGS.liepin.quota,
+      quota: effectiveQuotas?.liepin ?? DEFAULT_PLATFORM_CONFIGS.liepin.quota,
       applied: 0,
       skipped: 0,
       failed: 0,
@@ -131,7 +147,7 @@ export async function createNewCampaign(
       enabled: isPlatformEnabled('liepin'),
     },
     zhaopin: {
-      quota: customQuotas?.zhaopin ?? DEFAULT_PLATFORM_CONFIGS.zhaopin.quota,
+      quota: effectiveQuotas?.zhaopin ?? DEFAULT_PLATFORM_CONFIGS.zhaopin.quota,
       applied: 0,
       skipped: 0,
       failed: 0,
@@ -139,7 +155,7 @@ export async function createNewCampaign(
       enabled: isPlatformEnabled('zhaopin'),
     },
     '51job': {
-      quota: customQuotas?.['51job'] ?? DEFAULT_PLATFORM_CONFIGS['51job'].quota,
+      quota: effectiveQuotas?.['51job'] ?? DEFAULT_PLATFORM_CONFIGS['51job'].quota,
       applied: 0,
       skipped: 0,
       failed: 0,
@@ -147,7 +163,7 @@ export async function createNewCampaign(
       enabled: isPlatformEnabled('51job'),
     },
     maimai: {
-      quota: customQuotas?.maimai ?? DEFAULT_PLATFORM_CONFIGS.maimai.quota,
+      quota: effectiveQuotas?.maimai ?? DEFAULT_PLATFORM_CONFIGS.maimai.quota,
       applied: 0,
       skipped: 0,
       failed: 0,
@@ -234,6 +250,39 @@ export async function updateCampaignWindows(windows: TimeWindow[]): Promise<Camp
   if (!campaign) return null
   campaign.windows = windows
   await saveCampaign(campaign)
+  return campaign
+}
+
+/**
+ * 动态更新各平台的计划投递数量（AIbot 面板可随时修改，运行中即时生效）。
+ * - 调大数量后，若该平台此前被标记为「耗尽」且已投数未达新上限，则解除耗尽标记继续调度。
+ * - 调小数量后，若已投数已超过新上限，下一 tick 会自然判定该平台完成。
+ */
+export async function updateCampaignQuotas(
+  quotas: Partial<Record<PlatformId, number>>,
+): Promise<Campaign | null> {
+  const campaign = await getCampaign()
+  if (!campaign) return null
+
+  const changes: string[] = []
+  for (const pid of Object.keys(campaign.quotas) as PlatformId[]) {
+    const candidate = quotas[pid]
+    if (candidate === undefined || !Number.isFinite(candidate)) continue
+    const q = campaign.quotas[pid]
+    const nextQuota = Math.min(
+      MAX_PLATFORM_QUOTA,
+      Math.max(MIN_PLATFORM_QUOTA, Math.round(candidate)),
+    )
+    if (q.quota === nextQuota) continue
+    q.quota = nextQuota
+    if (q.exhausted && q.applied < nextQuota) q.exhausted = false
+    changes.push(`${QUOTA_PLATFORM_NAMES[pid]} ${nextQuota}`)
+  }
+  if (changes.length === 0) return campaign
+
+  await saveCampaign(campaign)
+  // appendCampaignLog 会重新读取并保存 campaign，必须放在 saveCampaign 之后，避免覆盖本次修改
+  await appendCampaignLog(`🎯 已更新投递数量：${changes.join('、')}`, 'info')
   return campaign
 }
 

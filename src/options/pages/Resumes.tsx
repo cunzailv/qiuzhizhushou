@@ -3,6 +3,7 @@ import { Card } from '../../components/ui/card'
 import { Toast } from '../../components/ui/toast'
 import { getAllResumes, deleteResume, setDefaultResume } from '../../shared/db/resume-store'
 import { FileText, Star, Trash2 } from 'lucide-react'
+import { CandidatePreferencesCard } from '../../popup/components/CandidatePreferencesCard'
 
 function formatTime(t: string): string {
   if (!t) return '-'
@@ -44,7 +45,9 @@ export default function Resumes() {
     <div className="max-w-4xl space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-text-primary">简历管理</h2>
-        <p className="text-sm text-text-muted mt-1">管理投递使用的简历：默认简历用于匹配与投递</p>
+        <p className="text-sm text-text-muted mt-1">
+          管理投递使用的简历：默认简历用于匹配与投递；求职画像、底线与自主授权在本页下方配置
+        </p>
       </div>
 
       <Card>
@@ -108,6 +111,8 @@ export default function Resumes() {
           </div>
         )}
       </Card>
+
+      <CandidatePreferencesCard onNotify={showToast} />
 
       <Toast {...toast} onClose={() => setToast({ ...toast, visible: false })} />
     </div>

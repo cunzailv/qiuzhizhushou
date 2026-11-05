@@ -5,6 +5,7 @@ import type { AgentSkill } from '../agent/types'
 import type { CompanyMemory, DecisionLog, FollowUpSuggestion } from '../types/butler'
 import type { AuditRecord } from './audit-store'
 import type { CareerProfile } from './career-store'
+import type { Experience } from '../types/experience'
 
 export interface InterviewEvent {
   id: string
@@ -78,6 +79,7 @@ export class BossZhipinDB extends Dexie {
   careerProfiles!: Table<CareerProfile, string>
   applyRuns!: Table<ApplyRunRecord, string>
   errors!: Table<ErrorRecord, string>
+  experiences!: Table<Experience, string>
 
   constructor() {
     super('BossZhipinAssistant')
@@ -138,6 +140,11 @@ export class BossZhipinDB extends Dexie {
             skill.patchSource = 'heuristic'
           }
         })
+    })
+
+    // L3 经验记忆：从真实投递结果归纳的可检索判断，带证据、可过期、可驳回
+    this.version(9).stores({
+      experiences: 'id, pattern, verdict, sampleSize, expiresAt, createdAt, enabled',
     })
   }
 }

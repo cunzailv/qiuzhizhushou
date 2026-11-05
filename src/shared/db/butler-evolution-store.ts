@@ -176,13 +176,13 @@ async function seedInitialProposals(): Promise<EvolutionProposal[]> {
       title: '技术词进化：提炼「AI 智能体落地 / 全栈交付」高频热词',
       categoryBadge: '技术词学习',
       insight:
-        '系统深度感知与归纳了近期扫描的 500+ 个招聘岗位 JD：在具备相同年限背景下，简历与打招呼中明确包含「AI 智能体 / LLM 应用落地 / 全栈交付」的候选人，HR 沟通回复率高出传统单向技术词整整 40%！',
+        '策略方向建议：目前尚无足够的真实投递记录支撑统计结论，是否突出工程化能力词请用你自己的回复率数据验证。',
       evidenceStats: {
-        sampleSize: 520,
-        metricName: '沟通回复转化率',
-        beforeValue: '17.4%',
-        afterValue: '38.8%',
-        liftRate: '+40.2%',
+        sampleSize: 0,
+        metricName: '近14天真实投递回复率',
+        beforeValue: '暂无数据',
+        afterValue: '待验证',
+        liftRate: '待验证',
       },
       recommendation:
         '建议将简历高光技能词升级为「AI智能体平台开发、Next.js/React全栈交付、大模型API工程化」，你是否同意填写并学习入画像？',
@@ -206,13 +206,13 @@ async function seedInitialProposals(): Promise<EvolutionProposal[]> {
       title: '主攻方向跃迁：建议将主攻方向从「纯后端」转向「AI 全栈工程师」',
       categoryBadge: '方向跃迁',
       insight:
-        '市场感知数据显示：当前深圳/全国一线城市中，「纯后端开发」岗位竞争比高达 1:85 且薪资天花板明显；而「AI 全栈工程师 / 智能体研发」岗位沟通率高出 2.3 倍，薪资区间高出 20%-35%。',
+        '策略方向建议：主攻方向是否需要拓展，应以近 14 天各岗位方向的实际回复率与面试转化为准，当前样本不足，不预设提升幅度。',
       evidenceStats: {
-        sampleSize: 360,
-        metricName: 'HR 沟通意向率',
-        beforeValue: '14.2%',
-        afterValue: '35.6%',
-        liftRate: '+50.1%',
+        sampleSize: 0,
+        metricName: '近14天真实投递回复率',
+        beforeValue: '暂无数据',
+        afterValue: '待验证',
+        liftRate: '待验证',
       },
       recommendation:
         '建议我们将求职主攻方向从纯后端拓展跃迁为「AI全栈工程师」，在保留深厚后端架构底蕴的同时突出全栈交付能力。你是否同意并授权学习？',
@@ -235,13 +235,13 @@ async function seedInitialProposals(): Promise<EvolutionProposal[]> {
       title: '话术进化：前置突出「独立从 0 到 1 闭环交付」案例',
       categoryBadge: '话术进化',
       insight:
-        '数据归纳分析显示：HR 在 5 秒扫视打招呼时，第一句话直切「具备独立交付 AI 商业落地项目能力」的沟通意向比通用客套话（“您好，期望能与您沟通…”）提升 38%。',
+        '策略方向建议：首句是否更有效，需在同一岗位方向下用真实回复率做对比验证；当前样本不足，不预设提升幅度。',
       evidenceStats: {
-        sampleSize: 150,
-        metricName: '打招呼 10 分钟已读率',
-        beforeValue: '28.0%',
-        afterValue: '66.0%',
-        liftRate: '+38.0%',
+        sampleSize: 0,
+        metricName: '近14天真实投递回复率',
+        beforeValue: '暂无数据',
+        afterValue: '待验证',
+        liftRate: '待验证',
       },
       recommendation:
         '建议打招呼首句强化闭环交付成果与即战力，直接呈现项目量化成效。是否同意升级？',

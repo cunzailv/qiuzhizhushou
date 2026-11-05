@@ -1,5 +1,70 @@
 // 求职者预设画像与底线配置类型定义
 
+// ─── 声明式自主授权契约 ───
+// 由用户事前编写，运行时查表判定；未启用时完全不干预既有权限逻辑。
+// 规则：fail-closed（不确定一律停下问）、事实只读、硬锁不可下放。
+export type GrantLevel = 'auto' | 'confirm' | 'deny'
+
+export type StrategyTuneKey = 'keywords' | 'threshold' | 'platformWeights' | 'greeting'
+
+export interface AuthorizationPolicy {
+  /** 总开关：默认 false，用户主动开启后才接管权限判定 */
+  enabled: boolean
+  /** 用户最后确认时间；超过 14 天自动降级为需确认 */
+  updatedAt: string
+  facts: {
+    source: 'resume_only'
+    /** 恒为 false：AI 只能引用用户填写的事实，不能改写或新增 */
+    allowRewrite: false
+  }
+  reply: {
+    mode: 'suggest' | 'auto_fill' | 'safe_auto_reply'
+    allowedTopics: string[]
+    forbidTopics: string[]
+    maxPerDay: number
+  }
+  strategy: {
+    /** 区间内是否自动投递 */
+    apply: GrantLevel
+    dailyQuotaMax: number
+    matchThresholdMin: number
+    allowedTitles: string[]
+    mayTune: StrategyTuneKey[]
+  }
+  /** 硬锁：UI 只读展示，不提供 auto 选项 */
+  locks: {
+    resumeFactEdit: 'deny'
+    offerDecision: 'confirm'
+    salaryNegotiation: 'confirm'
+    riskControlBypass: 'deny'
+  }
+}
+
+export const DEFAULT_AUTHORIZATION_POLICY: AuthorizationPolicy = {
+  enabled: false,
+  updatedAt: '',
+  facts: { source: 'resume_only', allowRewrite: false },
+  reply: {
+    mode: 'suggest',
+    allowedTopics: ['在职状态', '最快到岗', '期望薪资', '项目概述', '打招呼', '发送'],
+    forbidTopics: ['薪资流水', '离职原因细节', '家庭情况'],
+    maxPerDay: 10,
+  },
+  strategy: {
+    apply: 'confirm',
+    dailyQuotaMax: 20,
+    matchThresholdMin: 60,
+    allowedTitles: [],
+    mayTune: ['keywords', 'greeting'],
+  },
+  locks: {
+    resumeFactEdit: 'deny',
+    offerDecision: 'confirm',
+    salaryNegotiation: 'confirm',
+    riskControlBypass: 'deny',
+  },
+}
+
 export type EmploymentStatus =
   | 'unemployed_immediate' // 离职-随时到岗
   | 'unemployed_week' // 离职-1周内到岗
@@ -74,6 +139,8 @@ export interface CandidateProfilePreferences {
   copilotMode: 'suggest' | 'auto_fill' | 'safe_auto_reply'
   /** 面试应约联系方式（手机号/微信号） */
   contactInfo: string
+  /** 可选：声明式自主授权契约（仅在 enabled=true 时生效） */
+  authorization?: AuthorizationPolicy
 }
 
 export const DEFAULT_CANDIDATE_PREFERENCES: CandidateProfilePreferences = {

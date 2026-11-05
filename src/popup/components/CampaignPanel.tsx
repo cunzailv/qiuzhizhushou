@@ -24,12 +24,18 @@ import type { PlatformId, TimeWindow, IntervalConfig } from '../../shared/agent/
 import {
   DEFAULT_WINDOWS,
   DEFAULT_INTERVAL_CONFIG,
+  DEFAULT_PLATFORM_QUOTAS,
+  MIN_PLATFORM_QUOTA,
+  MAX_PLATFORM_QUOTA,
   formatTimeWindows,
   getSavedTimeWindows,
   saveTimeWindows,
   parseTimeString,
   getSavedIntervalConfig,
   saveIntervalConfig,
+  getSavedPlatformQuotas,
+  savePlatformQuotas,
+  resetPlatformQuotas,
 } from '../../shared/agent/quota'
 import type { PlatformAuthInfo } from '../../shared/platform/auth-checker'
 import { PLATFORM_LOGIN_URLS } from '../../shared/platform/auth-checker'
@@ -119,6 +125,14 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
   const [minSecInput, setMinSecInput] = useState('45')
   const [maxSecInput, setMaxSecInput] = useState('180')
 
+  // 各平台投递数量：可直接在平台行内编辑，持久化后运行中即时生效
+  const [platformQuotas, setPlatformQuotas] = useState<Record<PlatformId, number>>({
+    ...DEFAULT_PLATFORM_QUOTAS,
+  })
+  const [editingQuota, setEditingQuota] = useState<PlatformId | null>(null)
+  const [quotaInput, setQuotaInput] = useState('')
+  const cancelQuotaEditRef = useRef(false)
+
   const [logExpanded, setLogExpanded] = useState(true)
   const logContainerRef = useRef<HTMLDivElement>(null)
 
@@ -181,6 +195,9 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         setIntervalConfig(savedInterval)
         setMinSecInput(String(savedInterval.minSeconds))
         setMaxSecInput(String(savedInterval.maxSeconds))
+
+        const savedQuotas = await getSavedPlatformQuotas()
+        setPlatformQuotas(savedQuotas)
       } catch {
         // 使用默认值
       }
@@ -252,6 +269,52 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         // 忽略
       }
     }
+  }
+
+  /**
+   * 修改单个平台的投递数量。
+   * 同时写本地持久化与通知后台：面板数字、campaign 计划上限、每日风控上限三处一起生效。
+   */
+  const commitQuota = async (id: PlatformId, raw: string) => {
+    setEditingQuota(null)
+    const value = parseInt(raw, 10)
+    if (!Number.isFinite(value) || value < MIN_PLATFORM_QUOTA || value > MAX_PLATFORM_QUOTA) {
+      onNotify?.(`投递数量需为 ${MIN_PLATFORM_QUOTA}-${MAX_PLATFORM_QUOTA} 之间的整数`, 'warning')
+      return
+    }
+    if (platformQuotas[id] === value) return
+
+    const next = { ...platformQuotas, [id]: value }
+    setPlatformQuotas(next)
+    try {
+      await savePlatformQuotas({ [id]: value })
+      await chrome.runtime.sendMessage({
+        type: 'UPDATE_CAMPAIGN_QUOTAS',
+        payload: { quotas: next },
+      })
+    } catch {
+      // 后台暂不可达时至少已本地落盘，下次开跑会自动读取
+    }
+    await fetchStats()
+    const name = PLATFORM_INFOS.find((p) => p.id === id)?.name ?? id
+    onNotify?.(`${name} 投递数量已改为 ${value}（运行中即时生效）`, 'success')
+  }
+
+  /** 一键恢复各平台推荐默认投递数量 */
+  const handleResetQuotas = async () => {
+    const defaults = await resetPlatformQuotas()
+    setPlatformQuotas(defaults)
+    setEditingQuota(null)
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'UPDATE_CAMPAIGN_QUOTAS',
+        payload: { quotas: defaults },
+      })
+    } catch {
+      // 忽略后台通信异常，本地已恢复
+    }
+    await fetchStats()
+    onNotify?.('已恢复各平台默认投递数量', 'info')
   }
 
   // 保存自定义工作时段
@@ -431,6 +494,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         payload: {
           enabledPlatforms: activePlatformIds,
           windows: timeWindows,
+          quotas: platformQuotas,
         },
       })) as { success: boolean; error?: string }
 
@@ -664,8 +728,20 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
       {/* 平台开关与登录授权区 */}
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
-          <span className="text-[11px] font-semibold text-text-secondary">平台轮转与登录授权 (开关控制)</span>
+          <span className="text-[11px] font-semibold text-text-secondary">
+            平台轮转与登录授权
+            <span className="ml-1 font-normal text-text-muted">· 点击右侧数量可改</span>
+          </span>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleResetQuotas}
+              className="text-[10px] text-text-muted hover:text-primary transition flex items-center gap-0.5 cursor-pointer"
+              title="恢复各平台推荐默认投递数量"
+            >
+              <RotateCw className="w-2.5 h-2.5" />
+              恢复默认
+            </button>
             <button
               type="button"
               onClick={checkAuth}
@@ -687,8 +763,9 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             const isEnabled = !!enabledPlatforms[id]
             const q = stats?.platformBreakdown?.[id]
             const applied = q?.applied ?? 0
-            const maxQuota = q?.quota ?? 80
-            const percent = Math.min(100, Math.round((applied / maxQuota) * 100))
+            // 以用户保存的自定义数量为真源，后台运行中同步更新后也不会显示旧值
+            const maxQuota = platformQuotas[id] ?? q?.quota ?? DEFAULT_PLATFORM_QUOTAS[id]
+            const percent = Math.min(100, Math.round((applied / Math.max(1, maxQuota)) * 100))
             const auth = authInfo?.[id]
 
             return (
@@ -754,25 +831,64 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
                   )}
                 </div>
 
-                {/* 进度条与数字 */}
+                {/* 进度条与可编辑的投递数量上限（5 个平台均可修改，含未开启的） */}
                 <div className="flex items-center gap-2 text-right shrink-0">
-                  {isEnabled ? (
-                    <>
-                      <div className="w-16 bg-black/5 rounded-full h-1.5 overflow-hidden">
-                        <div
-                          className={`h-full rounded-full transition-all duration-300 ${
-                            q?.exhausted ? 'bg-amber-500' : 'bg-primary'
-                          }`}
-                          style={{ width: `${percent}%` }}
-                        />
-                      </div>
-                      <span className="text-[10px] text-text-muted font-mono w-12">
-                        {applied}/{maxQuota}
-                      </span>
-                    </>
-                  ) : (
+                  {isEnabled && editingQuota !== id && (
+                    <div className="w-16 bg-black/5 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          q?.exhausted ? 'bg-amber-500' : 'bg-primary'
+                        }`}
+                        style={{ width: `${percent}%` }}
+                      />
+                    </div>
+                  )}
+                  {!isEnabled && editingQuota !== id && (
                     <span className="text-[10px] text-text-muted italic">已关闭</span>
                   )}
+                  <span className="text-[10px] text-text-muted font-mono min-w-[3.5rem] flex items-center justify-end gap-0.5">
+                    {isEnabled && `${applied}/`}
+                    {editingQuota === id ? (
+                      <input
+                        autoFocus
+                        type="number"
+                        min={MIN_PLATFORM_QUOTA}
+                        max={MAX_PLATFORM_QUOTA}
+                        value={quotaInput}
+                        onChange={(e) => setQuotaInput(e.target.value)}
+                        onBlur={() => {
+                          if (cancelQuotaEditRef.current) {
+                            cancelQuotaEditRef.current = false
+                            setEditingQuota(null)
+                            return
+                          }
+                          void commitQuota(id, quotaInput)
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') e.currentTarget.blur()
+                          if (e.key === 'Escape') {
+                            cancelQuotaEditRef.current = true
+                            e.currentTarget.blur()
+                          }
+                        }}
+                        className="w-10 px-0.5 py-0 text-[10px] text-center rounded border border-primary bg-white text-text-primary outline-none font-mono"
+                        title={`回车保存，Esc 取消（${MIN_PLATFORM_QUOTA}-${MAX_PLATFORM_QUOTA}）`}
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          cancelQuotaEditRef.current = false
+                          setEditingQuota(id)
+                          setQuotaInput(String(maxQuota))
+                        }}
+                        className="hover:text-primary underline decoration-dotted underline-offset-2 cursor-pointer"
+                        title="点击修改该平台投递数量（每日风控上限同步生效）"
+                      >
+                        {maxQuota}
+                      </button>
+                    )}
+                  </span>
                 </div>
               </div>
             )
@@ -827,23 +943,37 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         </div>
 
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-slate-500 w-14 shrink-0">浮窗形态</span>
+          <span className="text-[10px] text-slate-500 w-14 shrink-0">侧栏形态</span>
           <button onClick={() => handlePanelState('expanded')}
             className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${assistant.panelState === 'expanded' ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
-            展开
+            右侧侧栏
           </button>
-          <button onClick={() => handlePanelState('collapsed')}
-            className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${assistant.panelState === 'collapsed' ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
-            右侧收缩
+          <button onClick={() => handlePanelState('bubble')}
+            className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${assistant.panelState === 'bubble' ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
+            收起为浮球
           </button>
           <button onClick={() => handlePanelState('closed')}
             className="flex-1 py-1.5 rounded-md text-[11px] border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 transition">
-            关闭
+            停止
           </button>
         </div>
 
+        <button
+          onClick={() => updateAssistant({ pinned: !assistant.pinned })}
+          className={`w-full flex items-center justify-between px-2.5 py-2 rounded-md text-[11px] border transition ${
+            assistant.pinned
+              ? 'bg-primary/10 border-primary/30 text-primary'
+              : 'bg-white border-black/10 text-slate-600 hover:bg-slate-50'
+          }`}
+        >
+          <span className="flex items-center gap-1.5">📌 置顶常驻</span>
+          <span className={`w-7 h-3.5 rounded-full relative transition ${assistant.pinned ? 'bg-primary' : 'bg-slate-300'}`}>
+            <span className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white transition-all ${assistant.pinned ? 'left-3.5' : 'left-0.5'}`} />
+          </span>
+        </button>
+
         <p className="text-[10px] text-slate-400 leading-relaxed">
-          启动 AIbot 后浮窗自动收缩到右侧；关闭浮窗 = 关闭 AIbot；运行中切换模式从下一个任务起生效。
+          点击浏览器工具栏的插件图标即可在网页右侧展开侧栏；右上角 × 收起为浮球（AIbot 继续运行），📌 置顶后不再自动收起。
         </p>
       </div>
 

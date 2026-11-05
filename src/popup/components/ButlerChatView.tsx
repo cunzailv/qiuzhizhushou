@@ -40,10 +40,12 @@ export default function ButlerChatView() {
   ])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
 
+  // 只滚动消息列表自身，避免 scrollIntoView 连带把管家标题与二级导航滚出弹窗可视区
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const node = scrollRef.current
+    if (node) node.scrollTo({ top: node.scrollHeight, behavior: 'smooth' })
   }
 
   useEffect(() => {
@@ -130,7 +132,7 @@ export default function ButlerChatView() {
   return (
     <div className="flex flex-col h-[520px] bg-slate-50 border border-slate-200 rounded-xl overflow-hidden shadow-sm">
       {/* 头部状态条 */}
-      <div className="flex items-center justify-between px-3.5 py-2.5 bg-white border-b border-slate-100">
+      <div className="flex items-center justify-between px-3.5 py-3 bg-white border-b border-slate-100">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-orange-100 text-orange-600 flex items-center justify-center font-bold text-xs shadow-xs">
             <Bot className="w-4 h-4" />
@@ -155,14 +157,14 @@ export default function ButlerChatView() {
       </div>
 
       {/* 消息滚动流 */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3.5 space-y-3.5">
         {messages.map((m) => (
           <div
             key={m.id}
             className={`flex flex-col ${m.role === 'user' ? 'items-end' : 'items-start'}`}
           >
             <div
-              className={`max-w-[88%] text-xs rounded-xl p-2.5 shadow-xs leading-relaxed whitespace-pre-wrap ${
+              className={`max-w-[88%] text-xs rounded-xl p-3 shadow-xs leading-relaxed whitespace-pre-wrap ${
                 m.role === 'user'
                   ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-br-none'
                   : 'bg-white border border-slate-200/80 text-slate-800 rounded-bl-none'
@@ -212,17 +214,16 @@ export default function ButlerChatView() {
             <span>智能管家正在调度执行...</span>
           </div>
         )}
-        <div ref={messagesEndRef} />
       </div>
 
       {/* 快捷推荐芯片 (Prompt Chips) */}
-      <div className="px-2.5 py-1.5 bg-slate-100/70 border-t border-slate-200/60 overflow-x-auto flex gap-1.5 no-scrollbar">
+      <div className="px-3 py-2 bg-slate-100/70 border-t border-slate-200/60 overflow-x-auto flex gap-2 no-scrollbar">
         {QUICK_PROMPTS.map((chip, idx) => (
           <button
             key={idx}
             disabled={loading}
             onClick={() => handleSend(chip.prompt)}
-            className="shrink-0 text-[10px] bg-white border border-slate-200 hover:border-orange-300 hover:text-orange-600 px-2 py-1 rounded-full text-slate-600 transition-colors shadow-xs"
+            className="shrink-0 text-[11px] bg-white border border-slate-200 hover:border-orange-300 hover:text-orange-600 px-2.5 py-1.5 rounded-full text-slate-600 transition-colors shadow-xs"
           >
             {chip.label}
           </button>
@@ -230,7 +231,7 @@ export default function ButlerChatView() {
       </div>
 
       {/* 输入框与发送 */}
-      <div className="p-2.5 bg-white border-t border-slate-100 flex gap-1.5 items-center">
+      <div className="p-3 bg-white border-t border-slate-100 flex gap-2 items-center">
         <input
           type="text"
           value={input}
@@ -238,7 +239,7 @@ export default function ButlerChatView() {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
           placeholder="给管家下达指令，如：期望薪资改成20-30K、导出今天数据..."
-          className="flex-1 text-xs border border-slate-200 rounded-lg px-2.5 py-2 focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500 bg-slate-50/50"
+          className="flex-1 text-xs border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500 bg-slate-50/50"
         />
         <button
           onClick={() => handleSend()}

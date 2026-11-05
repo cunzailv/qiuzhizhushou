@@ -59,8 +59,8 @@ describe('M4 · 自愈事件归因与开发者待修清单 (Diagnostics Store)',
       expect(rows[0].goal).toBe('button_heuristic')
       expect(rows[0].result).toBe('success')
       expect(JSON.parse(rows[0].error || '{}').id).toBeTruthy()
-      // Dexie 仍为 v8
-      expect(db.verno).toBe(8)
+      // Dexie v9：新增 experiences 经验记忆表（v8 的 auditLogs 结构未改动）
+      expect(db.verno).toBe(9)
     })
 
     it('1.4 success=false 时 result 记为 failed', async () => {

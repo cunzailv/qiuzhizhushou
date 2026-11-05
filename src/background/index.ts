@@ -43,9 +43,42 @@ import {
 import type { AgentSkill } from '../shared/agent/types'
 import type { JobCard, MatchResult } from '../shared/types/job'
 import { getAssistantState, patchAssistantState } from '../shared/assistant-state'
+import { handleExternalAiRpc } from './external-ai-rpc'
+import {
+  getExternalAiConfig, saveExternalAiConfig, getExternalAiStatus,
+} from '../shared/bridge/config'
+import {
+  MSG_EXTERNAL_AI_RPC, MSG_EXTERNAL_AI_STATUS, MSG_EXTERNAL_AI_CONTROL,
+} from '../shared/bridge/types'
 
 const MOD = 'Background'
 const APPLY_TICK_ALARM = 'apply-tick'
+const OFFSCREEN_URL = 'src/offscreen/bridge.html'
+
+let offscreenCreating: Promise<void> | null = null
+
+/**
+ * 创建（或确保存在）常驻 offscreen document，用来维持对本地桥接服务的长轮询。
+ * Service Worker 会被休眠，不能承担长连接；offscreen 页面是扩展上下文，可以。
+ * createDocument 在已存在时会抛错，直接忽略即可（Chrome 只允许一个 offscreen 文档）。
+ */
+async function ensureOffscreenDocument(): Promise<void> {
+  if (offscreenCreating) return offscreenCreating
+  offscreenCreating = (async () => {
+    try {
+      await chrome.offscreen.createDocument({
+        url: chrome.runtime.getURL(OFFSCREEN_URL),
+        reasons: ['WORKERS' as chrome.offscreen.Reason],
+        justification: '维持与外部 AI 桥接服务的长轮询连接，让 Claude Code / Codex / 小龙虾能调用扩展能力',
+      })
+      log(MOD, 'external-ai', 'offscreen bridge document ready')
+    } catch (err) {
+      // 已存在或当前 Chrome 不支持 offscreen：不阻断任何既有逻辑
+      log(MOD, 'external-ai', `offscreen create skipped: ${String(err)}`)
+    }
+  })().finally(() => { offscreenCreating = null })
+  return offscreenCreating
+}
 
 // 全局捕获 background 抛出的异常与未处理 Promise rejection
 installGlobalErrorCapture()
@@ -74,12 +107,32 @@ chrome.runtime.onInstalled.addListener(() => {
     periodInMinutes: 10,
   })
 
-  log(MOD, 'installed', 'Alarms created: daily-reset, interview-check, butler-daily, butler-daily-report-check')
+  // 外部 AI 桥接：保活检查（offscreen 页面被浏览器回收时自动重建）
+  chrome.alarms.create('external-ai-keepalive', { periodInMinutes: 1 })
+
+  void getExternalAiConfig().then((cfg) => {
+    if (cfg.enabled) return ensureOffscreenDocument()
+  }).catch(() => {})
+
+  log(MOD, 'installed', 'Alarms created: daily-reset, interview-check, butler-daily, butler-daily-report-check, external-ai-keepalive')
+})
+
+// 浏览器启动（Service Worker 首次被唤醒）时恢复桥接长连接
+chrome.runtime.onStartup.addListener(() => {
+  void getExternalAiConfig().then((cfg) => {
+    if (cfg.enabled) return ensureOffscreenDocument()
+  }).catch(() => {})
 })
 
 // Handle alarms
 chrome.alarms.onAlarm.addListener(async (alarm) => {
   log(MOD, 'alarm', `Alarm fired: ${alarm.name}`)
+
+  if (alarm.name === 'external-ai-keepalive') {
+    const cfg = await getExternalAiConfig().catch(() => null)
+    if (cfg?.enabled) await ensureOffscreenDocument()
+    return
+  }
 
   if (alarm.name === 'daily-reset') {
     await resetDailyCounter()
@@ -215,10 +268,67 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const senderInfo = sender.tab ? `tab:${sender.tab.id}` : sender.id ? `ext:${sender.id}` : 'unknown'
   log(MOD, 'onMessage', `Received: ${message.type} from ${senderInfo}`)
 
+  // ─── 外部 AI 接入（Claude Code / Codex / OpenClaw 小龙虾 / 任意 MCP 客户端）───
+  // 只接受扩展自身上下文发来的 RPC；网页/外部进程无法直接调用。
+  if (message.type === MSG_EXTERNAL_AI_RPC) {
+    if (sender.id && sender.id !== chrome.runtime.id) {
+      sendResponse({ ok: false, error: '拒绝来自扩展外部的消息' })
+      return false
+    }
+    handleExternalAiRpc(message.payload || {}, { shutdownAssistant })
+      .then(sendResponse)
+      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }))
+    return true
+  }
+
+  if (message.type === MSG_EXTERNAL_AI_STATUS) {
+    getExternalAiStatus()
+      .then((status) => sendResponse({ success: true, data: status }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === MSG_EXTERNAL_AI_CONTROL) {
+    const action = message.payload?.action
+    if (action === 'set-config') {
+      saveExternalAiConfig(message.payload?.patch || {})
+        .then(async (cfg) => {
+          if (cfg.enabled) await ensureOffscreenDocument()
+          sendResponse({ success: true, data: cfg })
+        })
+        .catch((err) => sendResponse({ success: false, error: String(err) }))
+      return true
+    }
+    if (action === 'ensure') {
+      ensureOffscreenDocument()
+        .then(() => sendResponse({ success: true }))
+        .catch((err) => sendResponse({ success: false, error: String(err) }))
+      return true
+    }
+    if (action === 'reset') {
+      saveExternalAiConfig({ paired: false, token: '' })
+        .then((cfg) => sendResponse({ success: true, data: cfg }))
+        .catch((err) => sendResponse({ success: false, error: String(err) }))
+      return true
+    }
+    if (action === 'status') {
+      getExternalAiStatus()
+        .then((status) => sendResponse({ success: true, data: status }))
+        .catch((err) => sendResponse({ success: false, error: String(err) }))
+      return true
+    }
+  }
+
   // Handle various message types from popup
   if (message.type === 'GET_STATS') {
     log(MOD, 'GET_STATS', 'Handled by popup directly')
     sendResponse({ success: true })
+  }
+
+  if (message.type === 'OPEN_OPTIONS') {
+    chrome.tabs.create({ url: chrome.runtime.getURL('src/options/index.html') })
+    sendResponse({ success: true })
+    return true
   }
 
   if (message.type === 'NOTIFY') {
@@ -249,8 +359,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       message.payload?.windows,
     )
       .then(async (cmp) => {
-        // bot 启动后浮窗自动收缩到右侧，不遮挡页面（用户可随时展开）
-        await patchAssistantState({ panelState: 'collapsed' })
+        // bot 启动后自动收起为右侧浮球，不遮挡页面；置顶常驻时不打扰
+        const state = await getAssistantState()
+        if (!state.pinned) await patchAssistantState({ panelState: 'bubble' })
         sendResponse({ success: true, data: cmp })
       })
       .catch((err) => sendResponse({ success: false, error: String(err) }))
@@ -289,6 +400,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
 
+  // 用户在 AIbot 面板修改各平台投递数量：持久化 + 运行中即时生效
+  if (message.type === 'UPDATE_CAMPAIGN_QUOTAS') {
+    const quotas = message.payload?.quotas || {}
+    campaignService.updateQuotas(quotas)
+      .then((cmp) => sendResponse({ success: true, data: cmp }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
   if (message.type === 'CHECK_PLATFORMS_AUTH') {
     checkAllPlatformsAuth()
       .then((authMap) => sendResponse({ success: true, data: authMap }))
@@ -322,7 +442,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     log(MOD, 'RESUME_CAMPAIGN', 'Resuming campaign')
     campaignService.resume()
       .then(async (cmp) => {
-        await patchAssistantState({ panelState: 'collapsed' })
+        const state = await getAssistantState()
+        if (!state.pinned) await patchAssistantState({ panelState: 'bubble' })
         sendResponse({ success: true, data: cmp })
       })
       .catch((err) => sendResponse({ success: false, error: String(err) }))
@@ -600,6 +721,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   log(MOD, 'onMessage', `Unhandled message type: ${message.type}`)
   return true
+})
+
+// ─── 点击扩展图标：在网页右侧唤起侧栏（不再弹 popup） ───
+async function toggleAssistantPanelInTab(tabId: number): Promise<boolean> {
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: 'TOGGLE_ASSISTANT_PANEL' })
+    return true
+  } catch {
+    // content script 尚未注入（非招聘页 / 刚装扩展），动态注入后重试一次
+    const scripts = (chrome.runtime.getManifest().content_scripts ?? [])
+      .flatMap((entry) => entry.js ?? [])
+    if (scripts.length === 0) return false
+    try {
+      await chrome.scripting.executeScript({ target: { tabId }, files: scripts })
+      await new Promise((resolve) => setTimeout(resolve, 300))
+      await chrome.tabs.sendMessage(tabId, { type: 'TOGGLE_ASSISTANT_PANEL' })
+      return true
+    } catch (error) {
+      logError(MOD, 'action.onClicked', 'Unable to inject assistant panel', error)
+      return false
+    }
+  }
+}
+
+chrome.action.onClicked.addListener((tab) => {
+  void (async () => {
+    if (!tab.id) return
+    const url = tab.url ?? ''
+    // chrome:// 等受限页面无法注入脚本，退化为打开管理后台
+    if (!/^https?:/i.test(url)) {
+      await chrome.tabs.create({ url: chrome.runtime.getURL('src/options/index.html') })
+      return
+    }
+    const handled = await toggleAssistantPanelInTab(tab.id)
+    if (!handled) {
+      await chrome.tabs.create({ url: chrome.runtime.getURL('src/options/index.html') })
+    }
+  })()
 })
 
 // Keep service worker alive

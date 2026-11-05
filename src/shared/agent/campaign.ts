@@ -8,7 +8,15 @@ import {
   appendCampaignLog,
 } from './queue-store'
 import type { PlatformId, TimeWindow, IntervalConfig } from './quota'
-import { isWithinWindow, getSavedTimeWindows, getSavedIntervalConfig, DEFAULT_INTERVAL_CONFIG } from './quota'
+import {
+  isWithinWindow,
+  getSavedTimeWindows,
+  getSavedIntervalConfig,
+  getSavedPlatformQuotas,
+  MIN_PLATFORM_QUOTA,
+  MAX_PLATFORM_QUOTA,
+  DEFAULT_INTERVAL_CONFIG,
+} from './quota'
 
 export interface CampaignStats {
   id: string
@@ -99,12 +107,28 @@ export async function startCampaign(
 ): Promise<Campaign> {
   const actualWindows = windows && windows.length > 0 ? windows : await getSavedTimeWindows()
   const savedInterval = await getSavedIntervalConfig()
+  const effectiveQuotas: Partial<Record<PlatformId, number>> = {
+    ...(await getSavedPlatformQuotas()),
+    ...(customQuotas ?? {}),
+  }
   const existing = await getCampaign()
   if (existing && (existing.status === 'running' || existing.status === 'paused')) {
     existing.status = 'running'
     existing.pausedReason = undefined
     existing.windows = actualWindows
     existing.intervalConfig = savedInterval
+    // 复用活动时同步最新配额，否则「改了数量再点开跑」仍会沿用旧计划
+    for (const pid of Object.keys(existing.quotas) as PlatformId[]) {
+      const nextQuota = effectiveQuotas?.[pid]
+      if (nextQuota === undefined || !Number.isFinite(nextQuota)) continue
+      existing.quotas[pid].quota = Math.min(
+        MAX_PLATFORM_QUOTA,
+        Math.max(MIN_PLATFORM_QUOTA, Math.round(nextQuota)),
+      )
+      if (existing.quotas[pid].exhausted && existing.quotas[pid].applied < existing.quotas[pid].quota) {
+        existing.quotas[pid].exhausted = false
+      }
+    }
     if (enabledPlatforms && enabledPlatforms.length > 0) {
       for (const pid of Object.keys(existing.quotas) as PlatformId[]) {
         existing.quotas[pid].enabled = enabledPlatforms.includes(pid)

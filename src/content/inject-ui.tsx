@@ -91,6 +91,8 @@ export function setPlatformName(name: string): void {
 }
 
 const VIEWPORT_MARGIN = 8
+/** 右侧侧栏宽度（网页窄于该值时自动留出 8px 边距） */
+const SIDEBAR_WIDTH = 380
 
 function clampPanelToViewport(host: HTMLElement): void {
   if (!host.isConnected || host.style.display === 'none') return
@@ -125,7 +127,7 @@ function restoreFloatingPanel(host: HTMLElement): void {
   const header = shadow.querySelector('.panel-header') as HTMLElement | null
   const btnMinimize = shadow.getElementById('btn-minimize')
 
-  if (panel) panel.style.width = '320px'
+  if (panel) panel.style.display = ''
   if (body) body.style.display = ''
   if (panelTabs) panelTabs.style.display = ''
   if (filterBar) filterBar.style.display = activeTab === 'monitor' ? '' : 'none'
@@ -133,9 +135,67 @@ function restoreFloatingPanel(host: HTMLElement): void {
   if (panelChatContent) panelChatContent.style.display = activeTab === 'chat' ? 'flex' : 'none'
   if (header) header.style.borderRadius = '16px 16px 0 0'
   if (btnMinimize) btnMinimize.textContent = '−'
+}
 
-  clampPanelToViewport(host)
-  requestAnimationFrame(() => clampPanelToViewport(host))
+function isSidebarLayout(host: HTMLElement): boolean {
+  return host.style.bottom === `${VIEWPORT_MARGIN}px`
+}
+
+/**
+ * 侧栏形态：贴网页右侧、整屏高、宽 380px（窄视口自动留出 8px 边距）。
+ * 与浮窗共用同一个 panel，仅尺寸与定位不同。
+ */
+function applySidebarLayout(host: HTMLElement): void {
+  const shadow = host.shadowRoot
+  const panel = shadow?.querySelector('.panel') as HTMLElement | null
+  const header = shadow?.querySelector('.panel-header') as HTMLElement | null
+
+  host.style.top = `${VIEWPORT_MARGIN}px`
+  host.style.right = `${VIEWPORT_MARGIN}px`
+  host.style.bottom = `${VIEWPORT_MARGIN}px`
+  host.style.left = 'auto'
+  host.style.height = 'auto'
+  host.style.maxHeight = ''
+  host.style.width = `min(${SIDEBAR_WIDTH}px, calc(100vw - ${VIEWPORT_MARGIN * 2}px))`
+  host.style.maxWidth = ''
+  host.style.transform = 'none'
+  host.style.cursor = ''
+
+  if (panel) {
+    panel.style.display = ''
+    panel.style.width = '100%'
+    panel.style.height = '100%'
+    panel.style.maxHeight = 'none'
+    panel.style.borderRadius = '16px'
+  }
+  if (header) header.style.cursor = 'move'
+}
+
+/** 拖动侧栏标题栏 → 脱离成可自由移动的浮窗 */
+function detachSidebarToFloating(host: HTMLElement, rect: DOMRect): boolean {
+  const shadow = host.shadowRoot
+  if (!shadow || !isSidebarLayout(host)) return false
+
+  const panel = shadow.querySelector('.panel') as HTMLElement | null
+  const width = Math.min(320, Math.max(260, Math.round(rect.width)))
+  const left = Math.max(
+    VIEWPORT_MARGIN,
+    Math.min(rect.left, window.innerWidth - width - VIEWPORT_MARGIN),
+  )
+
+  host.style.bottom = 'auto'
+  host.style.height = 'auto'
+  host.style.width = `${width}px`
+  host.style.left = `${left}px`
+  host.style.top = `${Math.max(VIEWPORT_MARGIN, rect.top)}px`
+  host.style.right = 'auto'
+
+  if (panel) {
+    panel.style.width = '100%'
+    panel.style.height = 'auto'
+    panel.style.maxHeight = `calc(100vh - ${VIEWPORT_MARGIN * 2}px)`
+  }
+  return true
 }
 
 function installPanelDragging(host: HTMLElement, header: HTMLElement): void {
@@ -158,6 +218,8 @@ function installPanelDragging(host: HTMLElement, header: HTMLElement): void {
     if (event.button !== 0) return
     if ((event.target as Element | null)?.closest('.header-actions')) return
 
+    // 侧栏拖动标题栏 = 脱离成浮窗；浮窗拖动 = 自由移动
+    detachSidebarToFloating(host, host.getBoundingClientRect())
     const rect = host.getBoundingClientRect()
     draggingPointerId = event.pointerId
     offsetX = event.clientX - rect.left
@@ -185,7 +247,11 @@ function installPanelDragging(host: HTMLElement, header: HTMLElement): void {
   window.addEventListener('pointercancel', stopDragging)
 }
 
-/** 悬浮窗三态：展开 / 贴右侧收缩 / 关闭。状态由统一控制状态驱动。 */
+/**
+ * 形态切换：expanded（右侧整高侧栏）/ bubble（右侧浮球，bot 继续）/
+ * collapsed（旧版窄把手，兼容历史数据）/ closed（关闭并停止 AIbot）。
+ * 状态由统一控制状态驱动，popup 与侧栏双向同步。
+ */
 export function setPanelState(host: HTMLElement, state: PanelState): void {
   const shadow = host.shadowRoot
   if (!shadow) return
@@ -220,7 +286,8 @@ export function setPanelState(host: HTMLElement, state: PanelState): void {
 
   const panel = shadow.querySelector('.panel') as HTMLElement | null
 
-  if (state === 'closed') {
+  // 浮球与关闭都只保留页面上的小入口，不销毁 host（内容仍在，便于秒开）
+  if (state === 'closed' || state === 'bubble') {
     host.style.display = 'none'
     handle.style.display = 'none'
     createFloatingTrigger(host)
@@ -251,17 +318,23 @@ export function setPanelState(host: HTMLElement, state: PanelState): void {
 
   if (panel) panel.style.display = ''
   handle.style.display = 'none'
-  host.style.width = ''
-  host.style.maxWidth = ''
-  host.style.right = '20px'
-  host.style.left = 'auto'
-  host.style.top = '80px'
   restoreFloatingPanel(host)
+  applySidebarLayout(host)
+}
+
+/** 置顶常驻按钮的视觉状态（📌 高亮 + aria-pressed） */
+export function setPinned(host: HTMLElement, pinned: boolean): void {
+  const btn = host.shadowRoot?.getElementById('btn-pin') as HTMLButtonElement | null
+  if (!btn) return
+  btn.classList.toggle('active', pinned)
+  btn.title = pinned ? '取消置顶常驻' : '置顶常驻'
+  btn.setAttribute('aria-pressed', String(pinned))
 }
 
 export function createFloatingPanel(): HTMLElement {
   if (activeHost?.isConnected) {
     restoreFloatingPanel(activeHost)
+    applySidebarLayout(activeHost)
     return activeHost
   }
 
@@ -271,14 +344,16 @@ export function createFloatingPanel(): HTMLElement {
 
   const host = document.createElement('div')
   host.id = 'boss-assistant-panel'
+  // 默认形态：网页右侧整高侧栏（与 Kimi / 通义等插件的侧栏一致）
   host.style.cssText = `
     position: fixed;
-    top: 80px;
-    right: 20px;
+    top: ${VIEWPORT_MARGIN}px;
+    right: ${VIEWPORT_MARGIN}px;
+    bottom: ${VIEWPORT_MARGIN}px;
+    width: min(${SIDEBAR_WIDTH}px, calc(100vw - ${VIEWPORT_MARGIN * 2}px));
     z-index: 99999;
     font-family: 'PingFang SC', system-ui, sans-serif;
     transition: transform 0.3s ease, opacity 0.3s ease;
-    max-width: calc(100vw - ${VIEWPORT_MARGIN * 2}px);
   `
 
   const shadow = host.attachShadow({ mode: 'open' })
@@ -299,9 +374,18 @@ export function createFloatingPanel(): HTMLElement {
         </div>
       </div>
       <div class="header-actions">
-        <button class="btn-header" id="btn-collapse" title="收缩到右侧">›</button>
-        <button class="btn-header" id="btn-minimize" title="最小化">−</button>
-        <button class="btn-header" id="btn-close" title="关闭并停止 AIbot">&times;</button>
+        <button class="btn-header" id="btn-options" title="打开管理后台" aria-label="打开管理后台">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.4M12 18.6V21M3 12h2.4M18.6 12H21M5.6 5.6l1.7 1.7M16.7 16.7l1.7 1.7M18.4 5.6l-1.7 1.7M7.3 16.7l-1.7 1.7"/></svg>
+        </button>
+        <button class="btn-header" id="btn-pin" title="置顶常驻" aria-label="置顶常驻" aria-pressed="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76V4h6v6.76l3 3.24H6l3-3.24Z"/></svg>
+        </button>
+        <button class="btn-header btn-header-stop" id="btn-stop" title="停止 AIbot" aria-label="停止 AIbot">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v9"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>
+        </button>
+        <button class="btn-header" id="btn-close" title="收起为浮窗" aria-label="收起为浮窗">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
       </div>
     </div>
     <div class="panel-tabs" id="panel-tabs">
@@ -346,14 +430,24 @@ export function createFloatingPanel(): HTMLElement {
   tabMonitor?.addEventListener('click', () => switchTab('monitor'))
   tabChat?.addEventListener('click', () => switchTab('chat'))
 
-  // 关闭浮窗 = 关闭 bot（统一动作，由 content 转发到 background）
+  // × = 收起为右侧浮球，AIbot 继续运行（与「停止」区分开）
   shadow.getElementById('btn-close')?.addEventListener('click', () => {
-    window.postMessage({ type: 'BOSS_ASSISTANT_SHUTDOWN' }, '*')
+    window.postMessage({ type: 'BOSS_ASSISTANT_SET_PANEL_STATE', state: 'bubble' }, '*')
   })
 
-  // 收缩到右侧（状态写入统一控制状态，bot 配置页同步显示）
-  shadow.getElementById('btn-collapse')?.addEventListener('click', () => {
-    window.postMessage({ type: 'BOSS_ASSISTANT_SET_PANEL_STATE', state: 'collapsed' }, '*')
+  // 置顶常驻：不自动收起，新页面直接展开
+  shadow.getElementById('btn-pin')?.addEventListener('click', () => {
+    window.postMessage({ type: 'BOSS_ASSISTANT_TOGGLE_PIN' }, '*')
+  })
+
+  // 打开管理后台（去掉 popup 后，这是简历/设置/数据的主入口）
+  shadow.getElementById('btn-options')?.addEventListener('click', () => {
+    window.postMessage({ type: 'BOSS_ASSISTANT_OPEN_OPTIONS' }, '*')
+  })
+
+  // 停止 AIbot（保留原有的"一键停止"能力）
+  shadow.getElementById('btn-stop')?.addEventListener('click', () => {
+    window.postMessage({ type: 'BOSS_ASSISTANT_SHUTDOWN' }, '*')
   })
 
   // Minimize handler
@@ -375,11 +469,13 @@ export function createFloatingPanel(): HTMLElement {
   installPanelDragging(host, header)
   if (!resizeListenerInstalled) {
     window.addEventListener('resize', () => {
-      if (activeHost?.isConnected) clampPanelToViewport(activeHost)
+      // 侧栏由 CSS 定位自适应，只有脱离成浮窗时才需要夹回视口
+      if (activeHost?.isConnected && !isSidebarLayout(activeHost)) {
+        clampPanelToViewport(activeHost)
+      }
     })
     resizeListenerInstalled = true
   }
-  requestAnimationFrame(() => clampPanelToViewport(host))
   return host
 }
 
@@ -421,21 +517,23 @@ function createFloatingTrigger(host: HTMLElement): void {
   document.getElementById('boss-assistant-trigger')?.remove()
   triggerBtn = document.createElement('div')
   triggerBtn.id = 'boss-assistant-trigger'
+  // 收起后贴在网页右侧垂直居中的半圆浮球（与 Kimi 等一致）
   triggerBtn.style.cssText = `
     position: fixed;
-    bottom: 24px;
-    right: 24px;
+    top: 50%;
+    right: 0;
+    transform: translateY(-50%);
     z-index: 99998;
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
+    width: 46px;
+    height: 46px;
+    border-radius: 23px 0 0 23px;
     background: linear-gradient(135deg, #F97316, #FB923C);
     box-shadow: 0 4px 20px rgba(249, 115, 22, 0.4);
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    font-size: 20px;
+    font-size: 18px;
     color: white;
     user-select: none;
     transition: transform 0.2s, box-shadow 0.2s;
@@ -449,11 +547,11 @@ function createFloatingTrigger(host: HTMLElement): void {
     window.postMessage({ type: 'BOSS_ASSISTANT_SET_PANEL_STATE', state: 'expanded' }, '*')
   })
   triggerBtn.addEventListener('mouseenter', () => {
-    triggerBtn!.style.transform = 'scale(1.1)'
+    triggerBtn!.style.transform = 'translateY(-50%) translateX(-3px)'
     triggerBtn!.style.boxShadow = '0 6px 24px rgba(249, 115, 22, 0.6)'
   })
   triggerBtn.addEventListener('mouseleave', () => {
-    triggerBtn!.style.transform = 'scale(1)'
+    triggerBtn!.style.transform = 'translateY(-50%)'
     triggerBtn!.style.boxShadow = '0 4px 20px rgba(249, 115, 22, 0.4)'
   })
   document.body.appendChild(triggerBtn)
@@ -1131,9 +1229,10 @@ function getStyles(): string {
       border-radius: 16px;
       box-shadow: 0 8px 40px rgba(0, 0, 0, 0.18), 0 0 60px rgba(249, 115, 22, 0.1);
       overflow: hidden;
-      width: 320px;
-      max-width: calc(100vw - 16px);
-      max-height: calc(100vh - 16px);
+      width: 100%;
+      height: 100%;
+      max-width: none;
+      max-height: none;
       display: flex;
       flex-direction: column;
       transition: width 0.3s ease, border-radius 0.3s ease;
@@ -1186,7 +1285,14 @@ function getStyles(): string {
       line-height: 1;
       transition: background 0.2s;
     }
+    .btn-header svg { width: 14px; height: 14px; display: block; }
     .btn-header:hover { background: rgba(255,255,255,0.3); }
+    .btn-header.active {
+      background: rgba(255, 255, 255, 0.94);
+      color: #EA580C;
+      box-shadow: inset 0 0 0 1px rgba(249, 115, 22, 0.35);
+    }
+    .btn-header-stop:hover { background: rgba(220, 38, 38, 0.85); }
 
     /* Filter bar */
     .filter-bar {
@@ -1226,7 +1332,7 @@ function getStyles(): string {
     /* Body */
     .panel-body {
       padding: 12px 14px;
-      max-height: 420px;
+      max-height: none;
       min-height: 0;
       flex: 1 1 auto;
       overflow-y: auto;
@@ -1664,7 +1770,8 @@ function getStyles(): string {
     .chat-wrapper {
       display: flex;
       flex-direction: column;
-      height: 350px;
+      height: 100%;
+      min-height: 320px;
       gap: 8px;
       width: 100%;
     }

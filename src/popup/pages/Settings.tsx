@@ -10,7 +10,14 @@ import { exportApplications } from '../../shared/export'
 import { getAllApplications } from '../../shared/db/application-store'
 import type { PluginSettings } from '../../shared/types/settings'
 import { DEFAULT_SETTINGS } from '../../shared/types/settings'
-import { CandidatePreferencesCard } from '../components/CandidatePreferencesCard'
+import {
+  SAFETY_PRESETS,
+  SAFETY_PROFILE_LABELS,
+  detectSafetyProfile,
+  getSafetyPreset,
+  type SafetyProfileId,
+} from '../../shared/types/safety-preset'
+// 求职画像 · 底线 · 自主授权 已迁至「简历」模块（与简历绑定，此处不再重复展示）
 import { NotificationSettingsCard } from '../components/NotificationSettingsCard'
 import {
   Key, Zap, Shield, Download, AlertTriangle,
@@ -75,6 +82,17 @@ export default function Settings() {
     for (const [key, value] of Object.entries(updates)) {
       await setSetting(key, value)
     }
+  }
+
+  // 手动改任一项节奏参数 → 自动标记为「自定义」档
+  function rhythmPatch(patch: Partial<PluginSettings>): Partial<PluginSettings> {
+    return { ...patch, safetyProfile: detectSafetyProfile({ ...settings, ...patch }) }
+  }
+
+  async function handleApplySafetyPreset(id: Exclude<SafetyProfileId, 'custom'>) {
+    const preset = SAFETY_PRESETS[id]
+    await handleSave({ ...preset.values, safetyProfile: preset.id })
+    showToast(`已切换为「${preset.label}」档`, preset.id === 'aggressive' ? 'warning' : 'success')
   }
 
   async function handleSelectPreset(presetId: string, preset?: ModelPreset) {
@@ -356,7 +374,7 @@ export default function Settings() {
               max={200}
               step={5}
               value={settings.aiDailyBudget ?? 50}
-              onChange={(e) => handleSave({ aiDailyBudget: parseInt(e.target.value) })}
+              onChange={(e) => handleSave(rhythmPatch({ aiDailyBudget: parseInt(e.target.value) }))}
               className="w-full accent-primary"
             />
             <div className="flex items-center justify-between mt-1.5">
@@ -376,18 +394,50 @@ export default function Settings() {
         </div>
       </Card>
 
-      {/* HR 追问 Copilot 求职画像与底线配置 */}
-      <CandidatePreferencesCard onNotify={showToast} />
+      {/* 求职画像与底线已迁至「简历」模块 */}
+      <div className="rounded-xl border border-black/10 bg-black/[0.02] p-3">
+        <p className="text-xs font-medium text-text-primary">求职画像 · 底线 · 自主授权</p>
+        <p className="text-[11px] text-text-muted mt-1 leading-relaxed">
+          这些配置与简历绑定，已统一放到「简历」页下方管理，此处不再重复展示。
+        </p>
+      </div>
 
       {/* 跨端实时通知推送 (Webhook: 飞书/钉钉/企微/Server酱/Bark) */}
       <NotificationSettingsCard onNotify={showToast} />
 
       {/* Anti-bot Settings */}
       <Card>
-        <div className="flex items-center gap-2 mb-3">
+        <div className="flex items-center gap-2 mb-2">
           <Shield className="w-4 h-4 text-success" />
           <span className="text-sm font-semibold text-text-primary">防封策略</span>
+          <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-success/10 text-success">
+            {SAFETY_PROFILE_LABELS[(settings.safetyProfile ?? 'conservative') as SafetyProfileId]}
+          </span>
         </div>
+        <div className="grid grid-cols-3 gap-1.5 mb-2">
+          {Object.values(SAFETY_PRESETS).map((preset) => {
+            const active = settings.safetyProfile === preset.id
+            return (
+              <button
+                key={preset.id}
+                type="button"
+                onClick={() => handleApplySafetyPreset(preset.id)}
+                title={`${preset.tagline}｜${preset.description}`}
+                className={`py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                  active
+                    ? 'border-primary/40 bg-primary/10 text-primary-light'
+                    : 'border-black/10 bg-black/[0.02] text-text-muted'
+                }`}
+              >
+                {preset.label}
+              </button>
+            )
+          })}
+        </div>
+        <p className="text-[10px] text-text-muted mb-2 leading-relaxed">
+          {getSafetyPreset(settings.safetyProfile)?.description
+            ?? '自定义：你手动调过下面的参数，点上方档位可恢复到推荐节奏。'}
+        </p>
         <div className="space-y-2">
           <div>
             <label className="text-[11px] text-text-muted mb-1 block">
@@ -399,7 +449,7 @@ export default function Settings() {
               max={10000}
               step={10}
               value={settings.dailyLimit}
-              onChange={(e) => handleSave({ dailyLimit: parseInt(e.target.value) })}
+              onChange={(e) => handleSave(rhythmPatch({ dailyLimit: parseInt(e.target.value) }))}
               className="w-full accent-primary"
             />
           </div>
@@ -410,7 +460,7 @@ export default function Settings() {
             <div className="flex gap-2">
               <select
                 value={settings.minDelay}
-                onChange={(e) => handleSave({ minDelay: parseInt(e.target.value) })}
+                onChange={(e) => handleSave(rhythmPatch({ minDelay: parseInt(e.target.value) }))}
                 className="input-field flex-1 text-xs"
               >
                 {[1000, 2000, 3000, 5000].map((v) => (
@@ -420,7 +470,7 @@ export default function Settings() {
               <span className="text-text-muted self-center">-</span>
               <select
                 value={settings.maxDelay}
-                onChange={(e) => handleSave({ maxDelay: parseInt(e.target.value) })}
+                onChange={(e) => handleSave(rhythmPatch({ maxDelay: parseInt(e.target.value) }))}
                 className="input-field flex-1 text-xs"
               >
                 {[3000, 5000, 8000, 10000, 15000].map((v) => (
@@ -435,7 +485,7 @@ export default function Settings() {
             </label>
             <select
               value={settings.maxScanCount}
-              onChange={(e) => handleSave({ maxScanCount: parseInt(e.target.value) })}
+              onChange={(e) => handleSave(rhythmPatch({ maxScanCount: parseInt(e.target.value) }))}
               className="input-field w-full text-xs"
             >
               {[10, 20, 30, 50, 80, 100, 150, 200].map((v) => (
@@ -448,7 +498,7 @@ export default function Settings() {
             <label className="text-[11px] text-text-muted mb-1 block">沟通模式</label>
             <div className="flex gap-2">
               <button
-                onClick={() => handleSave({ applyMode: 'batch' })}
+                onClick={() => handleSave(rhythmPatch({ applyMode: 'batch' }))}
                 className={`flex-1 px-3 py-2 text-xs rounded-lg transition-colors ${
                   settings.applyMode === 'batch'
                     ? 'bg-primary/20 text-primary-light'
@@ -458,7 +508,7 @@ export default function Settings() {
                 一键批量沟通
               </button>
               <button
-                onClick={() => handleSave({ applyMode: 'recommend' })}
+                onClick={() => handleSave(rhythmPatch({ applyMode: 'recommend' }))}
                 className={`flex-1 px-3 py-2 text-xs rounded-lg transition-colors ${
                   settings.applyMode === 'recommend'
                     ? 'bg-primary/20 text-primary-light'
@@ -489,6 +539,16 @@ export default function Settings() {
           </div>
         </div>
       </Card>
+
+      {/* 配置顺序提示：必配 3 项 + 安全阀，其余后置 */}
+      <div className="rounded-xl border border-black/10 bg-black/[0.02] p-3">
+        <p className="text-xs font-medium text-text-primary">配置顺序</p>
+        <p className="text-[11px] text-text-muted mt-1 leading-relaxed">
+          必配：① 简历与求职信息 ② 大模型 API Key ③ 招聘平台登录 ④ 安全阀档位（已默认「保守」）。
+          <br />
+          可后置：AI 自主权限、通知推送、公司黑名单、数据导出——都在管理后台里，用到再开。
+        </p>
+      </div>
 
       {/* Safety Warning */}
       <div className="flex items-start gap-2 p-3 rounded-xl bg-warning/10 border border-warning/20">

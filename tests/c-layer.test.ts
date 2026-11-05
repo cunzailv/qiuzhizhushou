@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { semanticSimilarity, normalizeText, sharedRoleKeywordCount } from '../src/shared/ai/semantic-refine'
 import { getAiBudgetLimit, getAiUsageToday, consumeAiCall, isAiBudgetExhausted, resetAiBudget, DEFAULT_DAILY_BUDGET } from '../src/shared/ai/ai-budget'
+import { CONSERVATIVE_VALUES } from '../src/shared/types/safety-preset'
 import { buildReview } from '../src/shared/agent/butler/review-planner'
 import type { Application } from '../src/shared/types/application'
 
@@ -34,9 +35,9 @@ describe('C4 AI 预算护栏', () => {
     await resetAiBudget()
   })
 
-  it('默认预算 = 50', async () => {
-    expect(DEFAULT_DAILY_BUDGET).toBe(50)
-    expect(await getAiBudgetLimit()).toBe(50)
+  it('默认预算跟随保守档安全预设', async () => {
+    expect(DEFAULT_DAILY_BUDGET).toBe(CONSERVATIVE_VALUES.aiDailyBudget)
+    expect(await getAiBudgetLimit()).toBe(CONSERVATIVE_VALUES.aiDailyBudget)
   })
 
   it('消耗后剩余递减，超限判定生效', async () => {
