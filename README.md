@@ -86,17 +86,33 @@
 > 严格负面按钮黑名单确保绝不误点「不合适」；所有诊断埋点 fire-and-forget，绝不阻断投递主链路。
 > 详见 [`PROJECT.md`](PROJECT.md) 与 [`docs/UNFINISHED_PLAN.md`](docs/UNFINISHED_PLAN.md)。
 
-### 🎛️ F 层 · 悬浮窗与 AIbot 统一控制（1.1.1）
-页面悬浮窗与 AIbot 后台流水线共用一份控制状态（`src/shared/assistant-state.ts`），任何一方修改都会通过 `chrome.storage.onChanged` 同步到另一端：
+### 🎛️ F 层 · 右侧侧栏与 AIbot 统一控制
+网页右侧侧栏与 AIbot 后台流水线共用一份控制状态（`src/shared/assistant-state.ts`），任何一方修改都会通过 `chrome.storage.onChanged` 同步到另一端：
 
 | 能力 | 说明 |
 |------|------|
-| **右侧收缩三态** | `expanded`（完整面板）/ `collapsed`（贴右侧边缘的机器人 handle，点一下展开）/ `closed`（仅保留恢复入口）；AIbot 启动后自动收缩到右侧，不再遮挡页面 |
-| **配置双向同步** | AIbot 配置面板新增「悬浮窗配置」卡片，可提前设置投递模式（批量沟通 / 精确推荐）、AI 评分、猎聘简历模式与浮窗形态；运行中也可切换，从下一个任务起生效 |
-| **关闭即关闭 AIbot** | 关闭浮窗、浮窗内的「停止」、AIbot 面板的「终止」是同一个动作：终止 campaign、清除 `apply-tick` 闹钟、取消当前任务、广播 `ASSISTANT_CANCEL`，并把状态写成 `closed` |
-| **不再被自愈误伤** | `dismissUnexpectedModals` 清理高 `z-index` 遮罩时跳过扩展自有节点，避免运行一段时间后浮窗被当作页面弹窗隐藏 |
+| **点击图标唤起侧栏** | 点击浏览器工具栏的插件图标，即在当前网页右侧展开整屏高侧栏（宽 380px，留 8px 边距）；再点一次收起为浮球。`chrome://` 等受限页会退化为打开管理后台 |
+| **四种形态** | `expanded`（右侧整高侧栏）/ `bubble`（贴右侧居中的半圆浮球，点击展开）/ `collapsed`（旧版窄把手，兼容历史数据）/ `closed`（关闭并停止 AIbot，仅保留恢复入口） |
+| **叉掉 ≠ 停止** | 侧栏右上角 `×` 只是收起为浮球，AIbot 继续运行；停止请点标题栏的 `⏻` 或 AIbot 配置页「停止」 |
+| **置顶常驻** | 标题栏 `📌` 打开后不再自动收起，新页面也直接展开侧栏；拖动标题栏可把侧栏脱离成可自由移动的浮窗 |
+| **配置双向同步** | AIbot 配置面板的「侧栏形态」卡片可设置侧栏 / 浮球 / 停止与置顶常驻，并同步投递模式、AI 评分、猎聘简历模式；运行中切换从下一个任务起生效 |
+| **停止链路统一** | 标题栏 `⏻`、侧栏「停止」、AIbot 面板「终止」是同一个动作：终止 campaign、清除 `apply-tick` 闹钟、取消当前任务、广播 `ASSISTANT_CANCEL`，并把状态写成 `closed` |
+| **不再被自愈误伤** | `dismissUnexpectedModals` 清理高 `z-index` 遮罩时跳过扩展自有节点，避免运行一段时间后侧栏被当作页面弹窗隐藏 |
 
 > 浏览器 E2E 仍是「真实 Chromium + 模拟页面」，猎聘真实站点选择器仍需人工校准。
+
+### 🔌 G 层 · 外部 AI 接入（MCP / 小龙虾 / Claude Code / Codex）
+把扩展的 47 个能力统一开放给**用户自己的 AI**，本机闭环、默认关闭：
+
+| 能力 | 说明 |
+|------|------|
+| **本地桥接 daemon** | 零依赖 Node 服务，只监听 `127.0.0.1:18790`，命令队列 + 结果回传 + SSE 事件 |
+| **MCP Server** | stdio（Claude Code / Codex / Cursor）与 Streamable HTTP（小龙虾 / 通用客户端）双模式 |
+| **统一 RPC + 工具注册表** | 47 个工具覆盖战报、投递记录、简历、黑名单、面试日历、日报、诊断、导出、AIbot 控制；三级分级门禁（只读 / 写入 / 危险） |
+| **安全** | 一次性配对 token、fail-closed 总开关、危险动作默认拒绝且每次需 `confirm=true`、设置脱敏、地址白名单 |
+| **一条龙脚本** | `./scripts/install.sh` 自动构建 → 生成令牌 → 写入各客户端 MCP 配置 → 启动服务 → 体检 |
+
+> 完整接入指南：[`docs/EXTERNAL_AI.md`](docs/EXTERNAL_AI.md)｜小龙虾 Skill：[`bridge/integrations/openclaw-skill.md`](bridge/integrations/openclaw-skill.md)
 
 ---
 
@@ -109,6 +125,17 @@
 ---
 
 ## 🚀 快速开始
+
+### 给外部 AI 用（下载 → 安装 → 配置 → 运行一条龙）
+
+```bash
+./scripts/install.sh          # macOS / Linux；Windows 用 scripts\install.cmd
+node bridge/bin/cli.mjs doctor
+```
+
+脚本会自动构建 `dist/`、生成访问令牌、写入 Claude Code / Codex / Cursor / OpenClaw 小龙虾 的 MCP 配置并启动本机桥接服务。
+之后只需两步人工操作（Chrome 沙箱限制）：在 `chrome://extensions` 加载 `dist/`，然后到扩展「设置 → 外部 AI 接入」点一次 **连接本地桥接**。
+详见 [`docs/EXTERNAL_AI.md`](docs/EXTERNAL_AI.md)。
 
 ### 安装
 
@@ -131,12 +158,12 @@ npm run build
 > 首次使用只需配 4 项：**简历 → 大模型 API Key → 平台登录 → 安全阀档位（已默认保守）**。
 > 管理后台「仪表盘」顶部的「配置引导」卡片会实时显示完成情况；AI 权限、通知推送、黑名单、导出都可以以后再开。
 
-1. 点击扩展图标 → **简历** → 上传 PDF / DOCX 简历，设为默认
+1. 点击扩展图标唤起右侧侧栏 → 点侧栏右上角 **⚙** 进入管理后台 → **简历** → 上传 PDF / DOCX 简历，设为默认
 2. 打开管理后台 → **设置** → 填入大模型 API Key（默认 DeepSeek，可换通义/Kimi/GLM/自定义）并勾选「启用 AI 分析」
 3. 确认**防封策略**档位为「保守」（默认即保守：30 次/天、5-15 秒间隔、单次扫描 20 个）；稳定跑一周无验证码再升档
 4. 打开任意支持平台（Boss 直聘 / 猎聘 / 51job / 智联 / 脉脉）的搜索或推荐页
 5. 在 **概览** 设置沟通筛选条件（岗位 / 地点 / 薪资 / 学历 / 关键词排除）
-6. 点击 **开始沟通**，右下角浮窗实时显示进度与 AI 匹配结果
+6. 点击 **开始沟通**，网页右侧侧栏实时显示进度与 AI 匹配结果
 7. 在 **追踪** 页查看投递漏斗（已投递 → HR 已读 → 沟通中 → 面试邀约）
 8. 在 **管家** 页让 Agent 自动选岗、生成话术、复盘投递结果
 
@@ -188,7 +215,13 @@ src/
     │   ├── zhaopin/    #   智联招聘
     │   └── maimai/     #   脉脉
     └── types/          # 全局类型定义
-tests/                  # 94 个测试用例（含浏览器 E2E）
+tests/                  # 全量测试用例（含浏览器 E2E）
+bridge/                 # 外部 AI 桥接服务（零依赖 Node：daemon / MCP / CLI / 自测）
+  ├── src/server.mjs    #   长轮询命令队列 + REST/SSE + Streamable HTTP MCP
+  ├── src/mcp-stdio.mjs #   stdio MCP Server
+  └── bin/cli.mjs       #   setup / start / stop / doctor / integrations
+scripts/                # install.sh / install.cmd / uninstall.sh（一条龙）
+docs/EXTERNAL_AI.md     # 外部 AI 接入完整指南
 ```
 
 ## 🔌 接入新平台

@@ -54,6 +54,8 @@
 > **质量收尾基线（2026-11-05）**：`npx vitest run tests` 53 文件 / 718 用例全绿；`npm run lint` 0 error；`npx tsc -b` 0 error；`npx vite build` success。补齐猎聘测试覆盖与 CI 可靠性修复后重新验收。
 >
 > **统一控制基线（2026-11-05，v1.1.1）**：新增 F 层「悬浮窗 / AIbot 统一控制状态」，页面浮窗与后台 campaign 共用 `assistant-state` 单一真源；悬浮窗支持右侧收缩三态、配置页双向同步、关闭即终止 bot 与当前任务。`npx vitest run tests` 54 文件 / 728 用例全绿；`npm run lint` 0 error；`npx tsc -b` 0 error；`npx vite build` success。
+>
+> **自主智能基线（2026-11-06，v1.2.0）**：三批合并验收——① G 层「各平台投递数量可配置」（quota.ts 单一真源 + campaign 即时生效 + 风控同步）；② 安全默认档（safety-preset 三档 + 首启迁移 + 配置引导 + docs/ 配置文档）；③ 自主授权体系（声明式 AuthorizationPolicy 四类授权契约 + fail-closed 判定、L3 经验记忆 experiences 表（Dexie v8→v9）、单一主脑 Planner 挂 campaign tick、清除 induction-engine 与种子提案两处硬编码假统计、画像/授权配置卡片迁至简历页、`safe_auto_reply` 死枚举补活）。授权契约默认 `enabled=false` 未启用时完全回退原 permission 三档逻辑，既有用例零影响。
 
 ---
 
@@ -76,7 +78,7 @@
 - `listSelfHealingEvents(limit?: number): Promise<SelfHealingEvent[]>`
 - `getDeveloperFixSuggestions(): Promise<DeveloperFixSuggestion[]>`（契约兼容别名 `getDiagnosticFixRecommendations`）
 - `clearSelfHealingEvents(): Promise<void>`
-- 存储复用 `db.auditLogs`（`source='self_healing'`），Dexie 保持 v8；事件上限 500 条；所有 DB 异常静默降级，不阻断业务
+- 存储复用 `db.auditLogs`（`source='self_healing'`），事件上限 500 条；所有 DB 异常静默降级，不阻断业务（注：Dexie 已随 L3 经验记忆升级至 v9，新增 `experiences` 表，`agentSkills` 契约不变）
 
 ---
 

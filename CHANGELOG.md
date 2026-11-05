@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased] — 右侧整高侧栏（Kimi 式）+ 置顶常驻
+
+### Added
+
+- **点击插件图标直接唤起侧栏**：`manifest.action` 去掉 `default_popup`，background 新增 `chrome.action.onClicked`，向当前标签页发 `TOGGLE_ASSISTANT_PANEL`；非招聘页会动态注入 content script 后重试，`chrome://` 等受限页退化为打开管理后台
+- **右侧整高侧栏**：注入面板从「右上角 320px 浮窗」改为「贴右侧、整屏高、宽 380px、留 8px 边距」的侧栏形态（`SIDEBAR_WIDTH`），窄视口按 `calc(100vw - 16px)` 自适应
+- **标题栏新增按钮**：`⚙ 管理后台`（打开 options）、`📌 置顶常驻`、`⏻ 停止 AIbot`；`×` 改为「收起为右侧浮球」
+- **收起重做为浮球**：新增 `PanelState = bubble`，收起后显示贴在网页右侧垂直居中的半圆浮球（点击重新展开）
+- **置顶常驻**：`AssistantControlState` 新增 `pinned`；置顶后 AIbot 启动不再自动收起、新页面直接展开侧栏
+- **拖动脱离**：拖动侧栏标题栏会自动脱离为 320px 可自由移动的浮窗（保留原有拖拽与边界夹取行为）
+
+### Changed
+
+- `×` 不再等于「停止 AIbot」：收起为浮球只改形态，bot 继续运行；停止改由 `⏻` 按钮或 AIbot 配置页「停止」触发（`closed` 语义保持不变）
+- `START_CAMPAIGN` / `RESUME_CAMPAIGN` 成功后不再写 `collapsed`，改为未置顶时写 `bubble`
+- 新页面恢复规则：`pinned` → 展开侧栏；残留 `closed` / `bubble` → 恢复为展开
+- AIbot 配置页「浮窗形态」改为「侧栏形态（右侧侧栏 / 收起为浮球 / 停止）」并新增置顶常驻开关
+- 外部 AI 工具 `update_assistant_state` 支持 `bubble` 与 `pinned`
+
 ## [1.2.0] — 2026-11-06 · 安全默认、平台配额、自主授权契约与经验记忆
 
 ### Added
@@ -17,6 +36,12 @@
 - **单一主脑 Planner**：新增 `src/shared/agent/planner.ts`——`replanIfNeeded` 挂在 campaign tick 流水线（3.5 步，失败静默降级）：读授权契约 + 近 7 天真实复盘 + 相关经验 → 纯规则推导建议（每条过授权判定）→ LLM 只润色总结（缺失降级 `local_rules`）→ 仅在授权 auto 且回复率 <20%、样本 ≥10 时有界下调本轮各平台配额 10%（不低于下限，只动 `campaign.quotas` 可回滚，不动全局设置）；按「日期:任务数档位」节流
 - **简历页授权配置 UI**：`CandidatePreferencesCard` 新增「自主授权契约」分区（总开关、投递授权档、配额上限/匹配门槛、主攻方向白名单、可自动调参 chips、应答白名单/禁用话题、硬锁只读展示、最后确认时间）；HR 问答模式补活死枚举第三档「白名单自动发」（`safe_auto_reply`）；卡片标题改为「求职画像 · 底线 · 自主授权」并从设置页迁至简历页（弹窗与管理后台同步迁移，设置页留指向提示）
 - **回归测试**：新增 `tests/authorization.test.ts`（14 例：默认关闭回退、硬锁、过期降级、fail-closed、配额/门槛/调参/白名单/上限/facts 只读、proposeAction 映射）、`tests/experience-store.test.ts`（8 例：样本门槛、去重、userOverride 不覆盖、过期、检索、删除）、`tests/planner.test.ts`（8 例：低回复率建议、无授权全 confirm、授权 auto、过期降级、LLM 缺失降级）
+
+- **外部 AI 接入 / MCP（G 层，同期交付）**：新增 `bridge/` 零依赖 Node 桥接服务（`server.mjs` 命令队列 + 长轮询 + SSE + 一次性配对 token、`mcp-stdio.mjs` stdio MCP、`/mcp` Streamable HTTP MCP），`scripts/install.sh` / `install.cmd` 一条龙（构建 → 生成令牌 → 写入 Claude Code / Codex / Cursor / OpenClaw 小龙虾 MCP 配置 → 启动 → `doctor` 体检）
+- **统一 RPC 与 47 个工具**：`src/shared/bridge/tools.ts` 定义只读 24 / 写入 15 / 危险 8 的工具清单与参数校验、三级门禁、设置脱敏；`src/background/external-ai-rpc.ts` 复用既有 store 与 `campaignService` 分发；`src/offscreen/bridge.ts` 常驻长连接（background 用 1 分钟 alarm 保活）；设置页新增「外部 AI 接入」卡片（开关、配对、测试、工具清单、一键复制配置）
+- **接入安全**：fail-closed 总开关、危险动作默认拒绝且每次需 `confirm=true`、只允许本机回环地址、`/pair` 一次性、background 只接受扩展自身上下文 RPC、`get_settings` 敏感字段脱敏
+- **接入测试**：`tests/external-ai-bridge.test.ts`（22 例：清单 / 参数 / 门禁 / 脱敏 / CSV）与 `bridge/test/selftest.mjs`（12 项端到端：配对 → 心跳 → 长轮询 → MCP 与 REST 结果回传）
+- **接入文档**：`docs/EXTERNAL_AI.md`、`bridge/README.md`、`bridge/integrations/openclaw-skill.md`
 
 ### Changed
 
