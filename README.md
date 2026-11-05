@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-718%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-727%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -85,6 +85,18 @@
 
 > 严格负面按钮黑名单确保绝不误点「不合适」；所有诊断埋点 fire-and-forget，绝不阻断投递主链路。
 > 详见 [`PROJECT.md`](PROJECT.md) 与 [`docs/UNFINISHED_PLAN.md`](docs/UNFINISHED_PLAN.md)。
+
+### 🎛️ F 层 · 悬浮窗与 AIbot 统一控制（1.1.1）
+页面悬浮窗与 AIbot 后台流水线共用一份控制状态（`src/shared/assistant-state.ts`），任何一方修改都会通过 `chrome.storage.onChanged` 同步到另一端：
+
+| 能力 | 说明 |
+|------|------|
+| **右侧收缩三态** | `expanded`（完整面板）/ `collapsed`（贴右侧边缘的机器人 handle，点一下展开）/ `closed`（仅保留恢复入口）；AIbot 启动后自动收缩到右侧，不再遮挡页面 |
+| **配置双向同步** | AIbot 配置面板新增「悬浮窗配置」卡片，可提前设置投递模式（批量沟通 / 精确推荐）、AI 评分、猎聘简历模式与浮窗形态；运行中也可切换，从下一个任务起生效 |
+| **关闭即关闭 AIbot** | 关闭浮窗、浮窗内的「停止」、AIbot 面板的「终止」是同一个动作：终止 campaign、清除 `apply-tick` 闹钟、取消当前任务、广播 `ASSISTANT_CANCEL`，并把状态写成 `closed` |
+| **不再被自愈误伤** | `dismissUnexpectedModals` 清理高 `z-index` 遮罩时跳过扩展自有节点，避免运行一段时间后浮窗被当作页面弹窗隐藏 |
+
+> 浏览器 E2E 仍是「真实 Chromium + 模拟页面」，猎聘真实站点选择器仍需人工校准。
 
 ---
 
@@ -175,8 +187,8 @@ tests/                  # 94 个测试用例（含浏览器 E2E）
 ## 🧪 测试与验收
 
 ```bash
-npm test                                       # tsc -b + vite build + 全部 718 个测试用例
-npx vitest run                                  # 全量单测/E2E：53 文件 / 718 用例
+npm test                                       # tsc -b + vite build + 全部 727 个测试用例
+npx vitest run                                  # 全量单测/E2E：54 文件 / 727 用例
 npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用例（基线 110 + 新增 36）
 ```
 
@@ -189,6 +201,7 @@ npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用�
 
 | 版本 | 内容 |
 |------|------|
+| `v1.1.1` | 🎛️ F 层：悬浮窗右侧收缩三态、AIbot 配置双向同步、关闭浮窗即关闭 AIbot |
 | `bd7464a` | 🦾 E 层：自愈韧性智能体架构 M1–M5（技能热修复 / 多阶降级 / 故障隔离 / 事后归因） |
 | `8d4b343` / `7d255b1` | 🎨 全局浅色主题（白底黑字 + 橙色渐变 CTA），popup / options / 注入浮窗统一 |
 | `4f58b0e` | 🎨 品牌 Logo（握手徽章）接入 + 全局品牌色统一 |

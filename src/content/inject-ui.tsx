@@ -1,6 +1,7 @@
 // Inject a floating UI panel into the Boss Zhipin page
 // Supports: collapsible, filter display, minimize toggle, floating trigger button
 import { DEFAULT_FILTERS, type ApplyFilters } from '../shared/types/filters'
+import type { PanelState } from '../shared/assistant-state'
 
 export interface ChatCopilotData {
   hrMessage?: string
@@ -184,6 +185,80 @@ function installPanelDragging(host: HTMLElement, header: HTMLElement): void {
   window.addEventListener('pointercancel', stopDragging)
 }
 
+/** 悬浮窗三态：展开 / 贴右侧收缩 / 关闭。状态由统一控制状态驱动。 */
+export function setPanelState(host: HTMLElement, state: PanelState): void {
+  const shadow = host.shadowRoot
+  if (!shadow) return
+
+  let handle = shadow.getElementById('edge-handle') as HTMLButtonElement | null
+  if (!handle) {
+    handle = document.createElement('button')
+    handle.id = 'edge-handle'
+    handle.type = 'button'
+    handle.title = '展开智能求职助手'
+    handle.textContent = '🤖'
+    handle.style.cssText = `
+      display: none;
+      width: 30px;
+      height: 92px;
+      padding: 0;
+      border: none;
+      border-radius: 10px 0 0 10px;
+      background: #F97316;
+      color: #FFFFFF;
+      font-size: 15px;
+      cursor: pointer;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.18);
+    `
+    handle.addEventListener('click', () => {
+      window.postMessage({ type: 'BOSS_ASSISTANT_SET_PANEL_STATE', state: 'expanded' }, '*')
+    })
+    shadow.appendChild(handle)
+  }
+
+  const panel = shadow.querySelector('.panel') as HTMLElement | null
+
+  if (state === 'closed') {
+    host.style.display = 'none'
+    handle.style.display = 'none'
+    createFloatingTrigger(host)
+    return
+  }
+
+  // 自愈清理可能把浮窗 display:none，这里兜底恢复可见性
+  if (triggerBtn?.isConnected) {
+    triggerBtn.remove()
+    triggerBtn = null
+  }
+  host.style.display = 'block'
+  host.style.opacity = '1'
+  host.style.pointerEvents = 'auto'
+
+  if (state === 'collapsed') {
+    if (panel) panel.style.display = 'none'
+    handle.style.display = 'flex'
+    host.style.right = '0px'
+    host.style.left = 'auto'
+    host.style.top = '40%'
+    host.style.width = '30px'
+    host.style.maxWidth = '30px'
+    host.style.transform = 'none'
+    isMinimized = false
+    return
+  }
+
+  if (panel) panel.style.display = ''
+  handle.style.display = 'none'
+  host.style.width = ''
+  host.style.maxWidth = ''
+  host.style.right = '20px'
+  host.style.left = 'auto'
+  host.style.top = '80px'
+  restoreFloatingPanel(host)
+}
+
 export function createFloatingPanel(): HTMLElement {
   if (activeHost?.isConnected) {
     restoreFloatingPanel(activeHost)
@@ -224,8 +299,9 @@ export function createFloatingPanel(): HTMLElement {
         </div>
       </div>
       <div class="header-actions">
+        <button class="btn-header" id="btn-collapse" title="收缩到右侧">›</button>
         <button class="btn-header" id="btn-minimize" title="最小化">−</button>
-        <button class="btn-header" id="btn-close" title="关闭">&times;</button>
+        <button class="btn-header" id="btn-close" title="关闭并停止 AIbot">&times;</button>
       </div>
     </div>
     <div class="panel-tabs" id="panel-tabs">
@@ -270,10 +346,14 @@ export function createFloatingPanel(): HTMLElement {
   tabMonitor?.addEventListener('click', () => switchTab('monitor'))
   tabChat?.addEventListener('click', () => switchTab('chat'))
 
-  // Close handler
+  // 关闭浮窗 = 关闭 bot（统一动作，由 content 转发到 background）
   shadow.getElementById('btn-close')?.addEventListener('click', () => {
-    host.style.display = 'none'
-    createFloatingTrigger(host)
+    window.postMessage({ type: 'BOSS_ASSISTANT_SHUTDOWN' }, '*')
+  })
+
+  // 收缩到右侧（状态写入统一控制状态，bot 配置页同步显示）
+  shadow.getElementById('btn-collapse')?.addEventListener('click', () => {
+    window.postMessage({ type: 'BOSS_ASSISTANT_SET_PANEL_STATE', state: 'collapsed' }, '*')
   })
 
   // Minimize handler
@@ -365,7 +445,8 @@ function createFloatingTrigger(host: HTMLElement): void {
   triggerBtn.addEventListener('click', () => {
     triggerBtn?.remove()
     triggerBtn = null
-    restoreFloatingPanel(host)
+    setPanelState(host, 'expanded')
+    window.postMessage({ type: 'BOSS_ASSISTANT_SET_PANEL_STATE', state: 'expanded' }, '*')
   })
   triggerBtn.addEventListener('mouseenter', () => {
     triggerBtn!.style.transform = 'scale(1.1)'
@@ -449,12 +530,9 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
   const progress = stats && stats.total > 0 ? (stats.processed / stats.total * 100) : 0
   const progressColor = status === 'done' ? '#10B981' : progress > 0 ? '#FB923C' : '#9CA3AF'
 
-  // Lock the delivery-mode / scoring toggles while a run is in progress — the
-  // running loop has already captured its mode & filters, so mid-run changes
-  // would be silently ignored and confuse the user.
-  const lockToggles = status === 'scanning' || status === 'matching' || status === 'applying'
-  const lockAttr = lockToggles ? 'disabled' : ''
-  const lockHint = lockToggles ? ' title="扫描/沟通进行中，无法切换"' : ''
+  // 运行中允许切换：改动写入统一控制状态，后台从下一个任务起采用新配置
+  const lockAttr = ''
+  const lockHint = ' title="切换后从下一个任务起生效"'
 
   wrapper.innerHTML = `
     <div class="stat-row">
@@ -559,7 +637,8 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
     }, '*')
   })
   btnStop?.addEventListener('click', () => {
-    window.postMessage({ type: 'BOSS_ASSISTANT_STOP_APPLY' }, '*')
+    // 浮窗「停止」与「关闭」是同一个动作：关闭 bot 流水线
+    window.postMessage({ type: 'BOSS_ASSISTANT_SHUTDOWN' }, '*')
   })
   btnResume?.addEventListener('click', () => {
     window.postMessage({

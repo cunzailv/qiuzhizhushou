@@ -21,6 +21,9 @@ export type MessageType =
   | 'JOB_CARDS_EXTRACTED'
   | 'APPLY_RESULT'
   | 'PAGE_INFO'
+  // 悬浮窗 / AIbot 统一控制
+  | 'ASSISTANT_CONTROL'
+  | 'ASSISTANT_CANCEL'
   // Common
   | 'NOTIFY'
   | 'ERROR'

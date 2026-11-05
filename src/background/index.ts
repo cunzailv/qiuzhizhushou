@@ -42,8 +42,10 @@ import {
 } from '../shared/agent/skill-memory'
 import type { AgentSkill } from '../shared/agent/types'
 import type { JobCard, MatchResult } from '../shared/types/job'
+import { getAssistantState, patchAssistantState } from '../shared/assistant-state'
 
 const MOD = 'Background'
+const APPLY_TICK_ALARM = 'apply-tick'
 
 // 全局捕获 background 抛出的异常与未处理 Promise rejection
 installGlobalErrorCapture()
@@ -182,6 +184,33 @@ async function checkUpcomingInterviews(): Promise<void> {
 }
 
 // Listen for messages from popup/content scripts
+/** 广播取消信号，让正在执行的 campaign 任务尽快中止 */
+async function broadcastAssistantCancel(): Promise<void> {
+  try {
+    const tabs = await chrome.tabs.query({})
+    await Promise.all(
+      tabs
+        .filter((tab) => typeof tab.id === 'number')
+        .map((tab) =>
+          Promise.resolve(
+            chrome.tabs.sendMessage(tab.id as number, { type: 'ASSISTANT_CANCEL' }),
+          ).catch(() => {}),
+        ),
+    )
+  } catch {
+    // 忽略无法送达的页面
+  }
+}
+
+/** 关闭浮窗 = 关闭 bot：终止流水线、清定时器/alarm、取消当前任务、同步三方状态 */
+async function shutdownAssistant() {
+  const campaign = await campaignService.abort()
+  try { await chrome.alarms.clear(APPLY_TICK_ALARM) } catch { /* 预期内异常，安全忽略 */ }
+  await patchAssistantState({ panelState: 'closed' })
+  await broadcastAssistantCancel()
+  return { campaign, state: await getAssistantState() }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const senderInfo = sender.tab ? `tab:${sender.tab.id}` : sender.id ? `ext:${sender.id}` : 'unknown'
   log(MOD, 'onMessage', `Received: ${message.type} from ${senderInfo}`)
@@ -219,7 +248,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       message.payload?.enabledPlatforms,
       message.payload?.windows,
     )
-      .then((cmp) => sendResponse({ success: true, data: cmp }))
+      .then(async (cmp) => {
+        // bot 启动后浮窗自动收缩到右侧，不遮挡页面（用户可随时展开）
+        await patchAssistantState({ panelState: 'collapsed' })
+        sendResponse({ success: true, data: cmp })
+      })
       .catch((err) => sendResponse({ success: false, error: String(err) }))
     return true
   }
@@ -288,16 +321,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'RESUME_CAMPAIGN') {
     log(MOD, 'RESUME_CAMPAIGN', 'Resuming campaign')
     campaignService.resume()
-      .then((cmp) => sendResponse({ success: true, data: cmp }))
+      .then(async (cmp) => {
+        await patchAssistantState({ panelState: 'collapsed' })
+        sendResponse({ success: true, data: cmp })
+      })
       .catch((err) => sendResponse({ success: false, error: String(err) }))
     return true
   }
 
   if (message.type === 'ABORT_CAMPAIGN') {
     log(MOD, 'ABORT_CAMPAIGN', 'Aborting campaign')
-    campaignService.abort()
-      .then((cmp) => sendResponse({ success: true, data: cmp }))
+    shutdownAssistant()
+      .then(({ campaign }) => sendResponse({ success: true, data: campaign }))
       .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  // 悬浮窗 / bot 配置页的统一控制入口
+  if (message.type === 'ASSISTANT_CONTROL') {
+    const action = message.payload?.action
+    if (action === 'shutdown') {
+      shutdownAssistant()
+        .then(({ state }) => sendResponse({ success: true, data: state }))
+        .catch((err) => sendResponse({ success: false, error: String(err) }))
+    } else if (action === 'patch') {
+      patchAssistantState(message.payload?.patch || {})
+        .then((state) => sendResponse({ success: true, data: state }))
+        .catch((err) => sendResponse({ success: false, error: String(err) }))
+    } else {
+      getAssistantState()
+        .then((state) => sendResponse({ success: true, data: state }))
+        .catch((err) => sendResponse({ success: false, error: String(err) }))
+    }
     return true
   }
 

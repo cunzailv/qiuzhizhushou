@@ -351,6 +351,13 @@ function isProtectedDialog(el: HTMLElement): boolean {
   return false
 }
 
+/** 扩展自有 UI 不能被自愈清理当成页面弹窗/遮罩隐藏 */
+function isExtensionOwnedUi(el: HTMLElement): boolean {
+  if (el.id === 'boss-assistant-panel' || el.id === 'boss-assistant-trigger') return true
+  return typeof el.closest === 'function'
+    && !!el.closest('#boss-assistant-panel, #boss-assistant-trigger')
+}
+
 /**
  * 自动识别并关闭页面上的意外阻塞性弹窗（例如“请选择不合适的原因”、“升级提示”、“APP推荐”、“问卷”等）
  * 解除半透明遮罩与 body 滚动/指针锁定，保证自动化与用户操作畅通无阻。
@@ -368,6 +375,7 @@ export function dismissUnexpectedModals(doc: Document = document): boolean {
     const dialogs = Array.from(doc.querySelectorAll<HTMLElement>(MODAL_CONTAINER_SELECTORS))
 
     for (const dialog of dialogs) {
+      if (isExtensionOwnedUi(dialog)) continue
       // 忽略不可见元素
       if (
         dialog.offsetWidth === 0 &&
@@ -485,6 +493,7 @@ export function dismissUnexpectedModals(doc: Document = document): boolean {
     if (!hasActiveChatDialog) {
       const masks = doc.querySelectorAll<HTMLElement>(MASK_BACKDROP_SELECTORS)
       for (const mask of Array.from(masks)) {
+        if (isExtensionOwnedUi(mask)) continue
         if (mask.style.display === 'none') continue
         if (mask.offsetWidth > 0 || mask.offsetHeight > 0 || (mask.getClientRects && mask.getClientRects().length > 0)) {
           mask.style.display = 'none'
@@ -496,6 +505,7 @@ export function dismissUnexpectedModals(doc: Document = document): boolean {
       // 探测高 z-index (>= 1000) 的全屏固定定位遮蔽层
       const fixedDivs = doc.querySelectorAll<HTMLElement>('div[style*="fixed"], div[style*="z-index"]')
       for (const div of Array.from(fixedDivs)) {
+        if (isExtensionOwnedUi(div)) continue
         if (div.style.display === 'none') continue
         const style = div.style
         const zIndex = parseInt(style.zIndex, 10)

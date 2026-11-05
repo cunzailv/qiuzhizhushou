@@ -578,6 +578,9 @@ export const campaignService = {
   pause: async (reason: Campaign['pausedReason'] = 'user') => {
     const cmp = await pauseAgentCampaign(reason)
     if (scheduledTimer) clearTimeout(scheduledTimer)
+    scheduledTimer = null
+    // 暂停/终止后必须同时清掉 alarm 保底，否则 Service Worker 被唤醒后仍会跑下一 tick
+    try { await chrome.alarms.clear(ALARM_APPLY_TICK) } catch { /* 预期内异常，安全忽略 */ }
     return cmp
   },
   resume: async () => {
@@ -588,6 +591,8 @@ export const campaignService = {
   abort: async () => {
     const cmp = await abortAgentCampaign()
     if (scheduledTimer) clearTimeout(scheduledTimer)
+    scheduledTimer = null
+    try { await chrome.alarms.clear(ALARM_APPLY_TICK) } catch { /* 预期内异常，安全忽略 */ }
     return cmp
   },
   togglePlatform: async (platform: PlatformId, enabled: boolean) => {

@@ -17,6 +17,8 @@ const MOD = 'TaskRunner'
 
 export interface TaskRunnerCallbacks {
   onProgress?: (message: string) => void
+  /** 关闭 AIbot 时置为 true；在各阶段间隙中止当前任务，避免「停止无效」 */
+  shouldCancel?: () => boolean
 }
 
 function reportRunnerError(params: {
@@ -164,6 +166,10 @@ export async function executeCampaignTask(
   }
 
   try {
+    if (callbacks?.shouldCancel?.()) {
+      return { taskId: task.id, status: 'failed', failReason: '已取消：AIbot 已关闭' }
+    }
+
     // 1. 优先扫描页面风控状态
     const risk = scanRisk(adapter.getRiskConfig())
     if (risk) {
@@ -351,6 +357,11 @@ export async function executeCampaignTask(
 
     // 6. 执行点击沟通 / 投递
     callbacks?.onProgress?.(`正在沟通投递: ${task.jobTitle}`)
+    if (callbacks?.shouldCancel?.()) {
+      result = { taskId: task.id, status: 'failed', failReason: '已取消：AIbot 已关闭' }
+      return result
+    }
+
     const commSnapshot = adapter.snapshotCommunicationUi()
     const clicked = await adapter.clickApplyButton(detailEl)
 
@@ -386,6 +397,12 @@ export async function executeCampaignTask(
     }
 
     await randomDelay(500, 1000)
+
+    // 关闭 bot 后不得再写库，避免留下「已沟通但未记录」的脏投递
+    if (callbacks?.shouldCancel?.()) {
+      result = { taskId: task.id, status: 'failed', failReason: '已取消：AIbot 已关闭' }
+      return result
+    }
 
     // 8. 投递成功，记录落盘与去重
     await saveApplicationRecord(jobCard, matchResult, activeResume.id, adapter.id)

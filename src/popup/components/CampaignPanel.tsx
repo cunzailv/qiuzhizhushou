@@ -34,6 +34,13 @@ import {
 import type { PlatformAuthInfo } from '../../shared/platform/auth-checker'
 import { PLATFORM_LOGIN_URLS } from '../../shared/platform/auth-checker'
 import { getSetting, setSetting } from '../../shared/db/settings-store'
+import {
+  DEFAULT_ASSISTANT_STATE,
+  getAssistantState,
+  subscribeAssistantState,
+  type AssistantControlState,
+  type PanelState,
+} from '../../shared/assistant-state'
 
 const PLATFORM_INFOS: Array<{ id: PlatformId; name: string; icon: string }> = [
   { id: 'boss', name: 'Boss直聘', icon: '💼' },
@@ -50,7 +57,39 @@ interface CampaignPanelProps {
 
 export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNavigateTab }) => {
   const [stats, setStats] = useState<CampaignStats | null>(null)
+  const [assistant, setAssistant] = useState<AssistantControlState>(DEFAULT_ASSISTANT_STATE)
   const [loading, setLoading] = useState(false)
+
+  // 悬浮窗配置：与页面浮窗、后台调度共享同一份状态
+  useEffect(() => {
+    getAssistantState().then(setAssistant).catch(() => {})
+    return subscribeAssistantState(setAssistant)
+  }, [])
+
+  const updateAssistant = useCallback(async (patch: Partial<AssistantControlState>) => {
+    setAssistant((prev) => ({ ...prev, ...patch }))
+    try {
+      const res = (await chrome.runtime.sendMessage({
+        type: 'ASSISTANT_CONTROL',
+        payload: { action: 'patch', patch },
+      })) as { data?: AssistantControlState }
+      if (res?.data) setAssistant(res.data)
+    } catch { /* 预期内异常，安全忽略 */ }
+  }, [])
+
+  const handlePanelState = useCallback(async (state: PanelState) => {
+    if (state === 'closed') {
+      setAssistant((prev) => ({ ...prev, panelState: 'closed' }))
+      try {
+        await chrome.runtime.sendMessage({
+          type: 'ASSISTANT_CONTROL',
+          payload: { action: 'shutdown' },
+        })
+      } catch { /* 预期内异常，安全忽略 */ }
+      return
+    }
+    await updateAssistant({ panelState: state })
+  }, [updateAssistant])
   const [collectingJobs, setCollectingJobs] = useState(false)
   const [clearingPending, setClearingPending] = useState(false)
   const [enabledPlatforms, setEnabledPlatforms] = useState<Record<PlatformId, boolean>>({
@@ -436,8 +475,13 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
   const handleAbort = async () => {
     setLoading(true)
     try {
-      await chrome.runtime.sendMessage({ type: 'ABORT_CAMPAIGN' })
-      onNotify?.('AIbot 流水线已终止', 'warning')
+      // 与「关闭浮窗」完全同一个动作：终止流水线 + 清定时器 + 三方状态同步
+      await chrome.runtime.sendMessage({
+        type: 'ASSISTANT_CONTROL',
+        payload: { action: 'shutdown' },
+      })
+      setAssistant((prev) => ({ ...prev, panelState: 'closed' }))
+      onNotify?.('AIbot 流水线已终止，浮窗已关闭', 'warning')
       await fetchStats()
     } finally {
       setLoading(false)
@@ -734,6 +778,73 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             )
           })}
         </div>
+      </div>
+
+      {/* 悬浮窗配置：与页面浮窗双向同步 */}
+      <div className="border border-black/10 rounded-lg bg-white/70 p-2.5 space-y-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-700">
+            <Sparkles className="w-3.5 h-3.5 text-primary" />
+            悬浮窗配置
+          </div>
+          <span className="text-[10px] text-slate-400">与页面浮窗实时同步</span>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-slate-500 w-14 shrink-0">投递模式</span>
+          <button onClick={() => updateAssistant({ applyMode: 'batch' })}
+            className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${assistant.applyMode === 'batch' ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
+            ⚡ 批量沟通
+          </button>
+          <button onClick={() => updateAssistant({ applyMode: 'recommend' })}
+            className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${assistant.applyMode === 'recommend' ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
+            🤖 AI自动确认
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-slate-500 w-14 shrink-0">AI 评分</span>
+          <button onClick={() => updateAssistant({ enableAiMatch: true })}
+            className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${assistant.enableAiMatch ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
+            ⭐ 按分筛选
+          </button>
+          <button onClick={() => updateAssistant({ enableAiMatch: false })}
+            className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${!assistant.enableAiMatch ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
+            🚀 不评分沟通
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-slate-500 w-14 shrink-0">猎聘简历</span>
+          <button onClick={() => updateAssistant({ liepinResumeMode: false })}
+            className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${!assistant.liepinResumeMode ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
+            💬 直接沟通
+          </button>
+          <button onClick={() => updateAssistant({ liepinResumeMode: true })}
+            className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${assistant.liepinResumeMode ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
+            📄 投简历
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] text-slate-500 w-14 shrink-0">浮窗形态</span>
+          <button onClick={() => handlePanelState('expanded')}
+            className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${assistant.panelState === 'expanded' ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
+            展开
+          </button>
+          <button onClick={() => handlePanelState('collapsed')}
+            className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${assistant.panelState === 'collapsed' ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
+            右侧收缩
+          </button>
+          <button onClick={() => handlePanelState('closed')}
+            className="flex-1 py-1.5 rounded-md text-[11px] border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 transition">
+            关闭
+          </button>
+        </div>
+
+        <p className="text-[10px] text-slate-400 leading-relaxed">
+          启动 AIbot 后浮窗自动收缩到右侧；关闭浮窗 = 关闭 AIbot；运行中切换模式从下一个任务起生效。
+        </p>
       </div>
 
       {/* 控制操作栏 */}

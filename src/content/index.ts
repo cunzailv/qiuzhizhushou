@@ -20,7 +20,15 @@ import { getCandidatePreferences } from '../shared/db/settings-store'
 
 // 当前活动平台适配器（由 PlatformManager 按网址自动识别，或按设置手动覆盖）。
 let adapter: PlatformAdapter
-import { createFloatingPanel, updatePanelContent, showPanelToast, type ChatCopilotData } from './inject-ui'
+import { createFloatingPanel, updatePanelContent, showPanelToast, setPanelState, type ChatCopilotData } from './inject-ui'
+import {
+  DEFAULT_ASSISTANT_STATE,
+  getAssistantState,
+  isAssistantTaskCancelled,
+  subscribeAssistantState,
+  type AssistantControlState,
+  type PanelState,
+} from '../shared/assistant-state'
 import { randomDelay, scanRisk, checkDailyLimit, incrementCounter } from '../shared/antiBot'
 import { matchResumeToJob } from '../shared/ai'
 import { reactLoop } from '../shared/agent'
@@ -45,6 +53,8 @@ const MOD = 'ContentScript'
 // ------ State ------
 let isApplying = false
 let runStopped = false
+let assistantState: AssistantControlState = DEFAULT_ASSISTANT_STATE
+let campaignTaskCancelled = false
 
 // Content 侧全局未捕获异常上报至 Background
 if (typeof window !== 'undefined') {
@@ -170,6 +180,47 @@ async function loadApplyDefaultsFromSettings(): Promise<void> {
   }
 }
 
+/** 把统一控制状态同步到 content 本地变量与浮窗形态 */
+function syncFromAssistantState(state: AssistantControlState): void {
+  // bot 重新展开/收缩即视为再次启动，解除上一轮的取消标记
+  const reopened = assistantState.panelState === 'closed' && state.panelState !== 'closed'
+  assistantState = state
+  if (reopened) campaignTaskCancelled = false
+  currentMode = state.applyMode === 'recommend' ? 'recommend' : 'batch'
+  currentFilters = { ...currentFilters, enableAiMatch: state.enableAiMatch }
+  liepinResumeMode = state.liepinResumeMode
+  setLiepinResumeMode(liepinResumeMode)
+  if (panelHost) setPanelState(panelHost, state.panelState)
+}
+
+/** 写统一控制状态（后台负责广播给 popup / 其他 tab） */
+function writeAssistantState(patch: Partial<AssistantControlState>): void {
+  try {
+    Promise.resolve(
+      chrome.runtime.sendMessage({ type: 'ASSISTANT_CONTROL', payload: { action: 'patch', patch } }),
+    ).catch(() => {})
+  } catch { /* 预期内异常，安全忽略 */ }
+}
+
+/** 关闭浮窗 = 关闭 bot：立即中止本地链路并通知后台终止流水线 */
+/** 关闭动作在本地立即生效，不等 storage.onChanged 回传，避免关闭后仍有任务被派发执行 */
+function markAssistantShutdown(): void {
+  campaignTaskCancelled = true
+  isApplying = false
+  runStopped = true
+  assistantState = { ...assistantState, panelState: 'closed' }
+}
+
+function shutdownAssistantFromPanel(): void {
+  markAssistantShutdown()
+  if (panelHost) setPanelState(panelHost, 'closed')
+  try {
+    Promise.resolve(
+      chrome.runtime.sendMessage({ type: 'ASSISTANT_CONTROL', payload: { action: 'shutdown' } }),
+    ).catch(() => {})
+  } catch { /* 预期内异常，安全忽略 */ }
+}
+
 // ------ Initialization ------
 async function init(): Promise<void> {
   logGroup(MOD, 'init')
@@ -190,6 +241,7 @@ async function init(): Promise<void> {
 
     // Apply the user's configured one-click defaults before showing the panel.
     await loadApplyDefaultsFromSettings()
+    assistantState = await getAssistantState()
 
     if (defaultResume) {
       log(MOD, 'init', `Resume loaded: ${defaultResume.name}`)
@@ -198,6 +250,8 @@ async function init(): Promise<void> {
     }
 
     panelHost = createFloatingPanel()
+    subscribeAssistantState(syncFromAssistantState)
+    syncFromAssistantState(assistantState)
     const initPageType = adapter.detectPageType()
     updatePanelContent(panelHost, {
       mode: currentMode,
@@ -220,7 +274,7 @@ async function init(): Promise<void> {
 // ------ Listen for popup messages ------
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'EXECUTE_APPLY') {
-    const mode = message.payload?.mode || 'recommend'
+    const mode = message.payload?.mode || currentMode
     const filters = message.payload?.filters
     const pageType = adapter.detectPageType()
     // 只排除纯聊天页；首页、搜索、推荐、详情均可启动
@@ -242,6 +296,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     stopApply()
     sendResponse({ success: true })
   }
+  if (message.type === 'ASSISTANT_CANCEL') {
+    // 关闭 bot 的广播：中止当前任务，也停掉老链路的主循环
+    log(MOD, 'onMessage', 'ASSISTANT_CANCEL')
+    markAssistantShutdown()
+    sendResponse({ success: true })
+  }
   if (message.type === 'EXECUTE_CAMPAIGN_TASK') {
     const task = message.payload?.task
     ;(async () => {
@@ -256,10 +316,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         return
       }
       if (!panelHost?.isConnected) panelHost = createFloatingPanel()
+      // 自愈清理可能隐藏浮窗，每个任务开始时按统一状态恢复形态
+      setPanelState(panelHost!, assistantState.panelState)
+      if (assistantState.panelState === 'closed') {
+        sendResponse({ taskId: task?.id, status: 'failed', failReason: 'AIbot 已关闭' })
+        return
+      }
+      campaignTaskCancelled = false
       const result = await executeCampaignTask(task, adapter, defaultResume, {
+        shouldCancel: () => isAssistantTaskCancelled(assistantState, campaignTaskCancelled),
         onProgress: (msg) => {
           updatePanelContent(panelHost!, {
-            mode: 'recommend',
+            mode: currentMode,
             status: 'applying',
             message: `🤖 [AI流水线] ${msg}`,
             filters: currentFilters,
@@ -333,7 +401,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 
       if (!panelHost?.isConnected) panelHost = createFloatingPanel()
       updatePanelContent(panelHost!, {
-        mode: 'recommend',
+        mode: currentMode,
         status: 'scanning',
         message: `🤖 AIbot 正在按【${careerLabel} · ${freshnessLabel}】精准扫描最新职位入队…`,
         filters: effectiveFilters,
@@ -345,7 +413,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         excludeJobIds,
         onCountChange: (count) => {
           updatePanelContent(panelHost!, {
-            mode: 'recommend',
+            mode: currentMode,
             status: 'scanning',
             message: `🤖 AIbot 正在扫描推荐流，已初筛 ${count} 个岗位卡片…`,
             filters: effectiveFilters,
@@ -436,18 +504,30 @@ window.addEventListener('message', (event) => {
     log(MOD, 'panelMessage', `START_APPLY, mode: ${data.mode || currentMode}`)
     startApply(data.mode || currentMode, data.filters || currentFilters)
   }
-  if (data?.type === 'BOSS_ASSISTANT_STOP_APPLY') {
-    log(MOD, 'panelMessage', 'STOP_APPLY')
-    stopApply()
+  if (data?.type === 'BOSS_ASSISTANT_STOP_APPLY' || data?.type === 'BOSS_ASSISTANT_SHUTDOWN') {
+    log(MOD, 'panelMessage', 'SHUTDOWN (close panel = close bot)')
+    shutdownAssistantFromPanel()
+  }
+  if (data?.type === 'BOSS_ASSISTANT_SET_PANEL_STATE') {
+    const state = data.state as PanelState
+    if (state === 'expanded' || state === 'collapsed' || state === 'closed') {
+      if (panelHost) setPanelState(panelHost, state)
+      // 在配置页里选「关闭」同样等价于关闭 bot
+      if (state === 'closed') shutdownAssistantFromPanel()
+      else writeAssistantState({ panelState: state })
+    }
   }
   if (data?.type === 'BOSS_ASSISTANT_CHANGE_MODE') {
     log(MOD, 'panelMessage', `CHANGE_MODE: ${data.mode}`)
-    currentMode = data.mode
-    updatePanelContent(panelHost!, {
-      mode: currentMode,
-      status: 'idle',
-      filters: currentFilters, resumeMode: liepinResumeMode,
-    })
+    currentMode = data.mode === 'recommend' ? 'recommend' : 'batch'
+    if (panelHost) {
+      updatePanelContent(panelHost, {
+        mode: currentMode,
+        status: 'idle',
+        filters: currentFilters, resumeMode: liepinResumeMode,
+      })
+    }
+    writeAssistantState({ applyMode: currentMode })
   }
   if (data?.type === 'BOSS_ASSISTANT_CHANGE_SCORING') {
     currentFilters = {
@@ -459,6 +539,7 @@ window.addEventListener('message', (event) => {
       status: 'idle',
       filters: currentFilters, resumeMode: liepinResumeMode,
     })
+    writeAssistantState({ enableAiMatch: currentFilters.enableAiMatch })
   }
   if (data?.type === 'BOSS_ASSISTANT_CHANGE_RESUME_MODE') {
     liepinResumeMode = data.enabled === true
@@ -468,6 +549,7 @@ window.addEventListener('message', (event) => {
       status: 'idle',
       filters: currentFilters, resumeMode: liepinResumeMode,
     })
+    writeAssistantState({ liepinResumeMode })
   }
   if (data?.type === 'BOSS_ASSISTANT_SEND_RESUMES') {
     console.log('[求职助手] BOSS_ASSISTANT_SEND_RESUMES received')
@@ -1043,7 +1125,7 @@ async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolea
   } else {
     log(MOD, 'agentApplyToJob', `Fixed selector failed, delegating to AI agent...`)
     updatePanelContent(panelHost!, {
-      mode: 'recommend', status: 'applying',
+      mode: currentMode, status: 'applying',
       message: `🤖 AI思考中: 打开详情 "${job.title}"`,
       filters: currentFilters, resumeMode: liepinResumeMode,
     })
@@ -1053,7 +1135,7 @@ async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolea
       url: job.url,
     }, (thinking) => {
       updatePanelContent(panelHost!, {
-        mode: 'recommend', status: 'applying',
+        mode: currentMode, status: 'applying',
         message: `🤖 ${thinking}`,
         filters: currentFilters, resumeMode: liepinResumeMode,
       })
@@ -1067,7 +1149,7 @@ async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolea
     if (!r1.success) {
       logWarn(MOD, 'agentApplyToJob', `Agent failed goal 1: ${r1.error}`)
       updatePanelContent(panelHost!, {
-        mode: 'recommend', status: 'applying',
+        mode: currentMode, status: 'applying',
         message: `❌ AI无法打开详情: ${job.title}`,
         filters: currentFilters, resumeMode: liepinResumeMode,
       })
@@ -1093,7 +1175,7 @@ async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolea
   } else {
     log(MOD, 'agentApplyToJob', `Fixed click failed, delegating to AI...`)
     updatePanelContent(panelHost!, {
-      mode: 'recommend', status: 'applying',
+      mode: currentMode, status: 'applying',
       message: `🤖 AI思考中: 发起沟通 "${job.title}"`,
       filters: currentFilters, resumeMode: liepinResumeMode,
     })
@@ -1102,7 +1184,7 @@ async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolea
       company: job.companyName,
     }, (thinking) => {
       updatePanelContent(panelHost!, {
-        mode: 'recommend', status: 'applying',
+        mode: currentMode, status: 'applying',
         message: `🤖 ${thinking}`,
         filters: currentFilters, resumeMode: liepinResumeMode,
       })
@@ -1116,7 +1198,7 @@ async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolea
     if (!r2.success) {
       logWarn(MOD, 'agentApplyToJob', `Agent failed goal 2: ${r2.error}`)
       updatePanelContent(panelHost!, {
-        mode: 'recommend', status: 'applying',
+        mode: currentMode, status: 'applying',
         message: `❌ AI无法发起沟通: ${job.title}`,
         filters: currentFilters, resumeMode: liepinResumeMode,
       })

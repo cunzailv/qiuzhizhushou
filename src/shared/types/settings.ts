@@ -23,6 +23,10 @@ export interface PluginSettings {
   // Apply mode
   applyMode: 'batch' | 'recommend'
 
+  // 悬浮窗统一控制状态（与 AIbot 配置页、页面浮窗双向同步）
+  panelState: 'expanded' | 'collapsed' | 'closed'
+  liepinResumeMode: boolean
+
   // Whether AI scoring is used when applying. When false, jobs are sent
   // directly without scoring ("不评分直接投"). Used as the default for the
   // one-click apply (popup + floating panel).
@@ -48,6 +52,8 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   scrollDelay: 1500,
   maxScanCount: 50,
   applyMode: 'batch',
+  panelState: 'expanded',
+  liepinResumeMode: false,
   enableAiMatch: true,
   interviewReminder: true,
   reminderMinutes: 30,

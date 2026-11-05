@@ -1,5 +1,40 @@
 # Changelog
 
+## [1.1.1] — 2026-11-05 · 悬浮窗与 AIbot 统一控制
+
+### Added
+
+- **统一控制状态**：新增 `src/shared/assistant-state.ts`，以 `chrome.storage.local` 的 `setting_` 键为单一真源，定义 `PanelState = expanded | collapsed | closed`、`AssistantApplyMode = batch | recommend`，提供 `getAssistantState` / `patchAssistantState`（相同值不写，防回环）/ `subscribeAssistantState`
+- **悬浮窗右侧收缩**：`inject-ui.tsx` 新增 `#btn-collapse` 与懒创建 `#edge-handle` 边缘把手，实现三态渲染；AIbot 启动成功时后台写入 `collapsed`，页面浮窗自动贴右侧收缩
+- **AIbot 配置页同步**：`CampaignPanel.tsx` 新增「悬浮窗配置」卡片，展示并编辑同一份状态，含投递模式、AI 评分、猎聘简历模式、浮窗形态；`chrome.storage.onChanged` 订阅保证与页面浮窗双向同步
+- **关闭链路统一**：新增 `ASSISTANT_CONTROL`（`shutdown` / `patch` / `get`）与 `ASSISTANT_CANCEL` 消息；`shutdownAssistant()` 同时终止 campaign、清 `apply-tick` alarm、写 `panelState: closed`、广播取消
+- **任务级取消信号**：`TaskRunnerCallbacks` 增加 `shouldCancel`，`executeCampaignTask` 在任务开始、点击投递前、写库前三处检查，取消时返回「已取消：AIbot 已关闭」，不再继续投递或写库
+- **关闭竞态防护**：关闭动作在 content 本地立即置 `runStopped` 与 `assistantState.panelState = 'closed'`，不等 `storage.onChanged` 回传；新增纯函数 `isAssistantTaskCancelled(state, flag)`，即便广播未送达、后台恰好又派发新任务并重置本地标记，只要统一状态仍是 `closed` 就立即取消。bot 重新展开/收缩时自动解除取消标记
+- **运行时模式可切**：运行中不再锁定模式 / AI 评分 / 简历模式开关，切换后从下一个任务起生效；`EXECUTE_APPLY` 默认模式由硬编码 `recommend` 改为读取统一状态
+- **回归测试**：新增 `tests/assistant-control.test.ts`（9 用例）：默认状态、patch 可读、相同值不重复写、订阅与取消订阅、自愈白名单不误伤浮窗、三态切换，以及关闭竞态防护 3 例（本地标记置位 / `closed` 状态兜底 / 展开与收缩不误取消）
+
+### Changed
+
+- `START_CAMPAIGN` / `RESUME_CAMPAIGN` 成功后不再让浮窗保持展开态，改为写入 `collapsed`
+- `ABORT_CAMPAIGN`、popup「终止」、浮窗「关闭」与「停止」全部收敛到同一个 `shutdown` 动作，不再出现「UI 停了但后台仍在跑」
+- `campaign-service.ts` 的 `pause` / `abort` 清理 `scheduledTimer` 后置 `null`，并清除 `chrome.alarms` 的 `apply-tick`，防止 service worker 唤醒后继续 tick
+- `settings.ts` / `message.ts` 补齐 `panelState`、`liepinResumeMode` 字段与两个新消息类型
+- 扩展版本统一升级为 1.1.1（`package.json` / `package-lock.json` / `public/manifest.json`）
+
+### Fixed
+
+- **浮窗运行一段时间后消失**：`dismissUnexpectedModals` 新增 `isExtensionOwnedUi`，扫描 dialogs / masks / 高 `z-index` fixed div 时跳过 `#boss-assistant-panel`、`#boss-assistant-trigger` 及其子节点
+- **悬浮窗配置无法提前设置、只能精确投递**：AIbot 配置面板现在可提前选择批量沟通 / 精确推荐，配置与页面浮窗同一份状态
+- **悬浮窗停止无效**：停止不再只改页面内 `isApplying`，而是走后台 `shutdown` + 广播 `ASSISTANT_CANCEL`，后台 campaign 与当前 content script 任务一起终止；同时本地立即置 `runStopped = true`，让老链路收尾显示「已停止沟通」而非「沟通完成」
+
+### Validation
+
+- `npm run lint`：0 error（42 warnings，为遗留 `explicit-any` 与 unused eslint-disable 技术债）
+- `npx tsc -b`：0 error
+- `npx vitest run tests`：**54 files / 727 tests passed**（在 718 基线上新增 9 个统一控制状态用例），含 10 个 `headless:false` 浏览器 E2E 套件
+- `npx vite build`：success；`dist/manifest.json` = 1.1.1（95 文件），浏览器 E2E 加载该产物
+- `dist.crx` 以原 `dist.pem` 重新打包为 1.1.1，扩展 ID（公钥指纹 `322abd1abace1ee048e85832a1616956`）保持不变
+
 ## [1.1.0] — 2026-11-05 · 自愈韧性智能体架构（M1–M5）
 
 ### Added
