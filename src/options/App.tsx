@@ -40,6 +40,8 @@ export default function App() {
   // H5：后台安装全局错误捕获
   useEffect(() => {
     void import('../shared/db/error-store').then((m) => m.installGlobalErrorCapture()).catch(() => undefined)
+    // 安全阀档位初始化：首次安装写入「保守」档；老用户标记 custom 不覆盖原值
+    void import('../shared/db/settings-store').then((m) => m.resolveSafetyProfile()).catch(() => undefined)
   }, [])
 
   return (
@@ -88,7 +90,7 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 overflow-y-auto p-8">
         <Suspense fallback={<div className="text-sm text-text-muted">加载中...</div>}>
-          {activeNav === 'dashboard' && <Dashboard />}
+          {activeNav === 'dashboard' && <Dashboard onNavigate={setActiveNav} />}
           {activeNav === 'calendar' && <InterviewCalendar />}
           {activeNav === 'blacklist' && <Blacklist />}
           {activeNav === 'audit' && <Audit />}

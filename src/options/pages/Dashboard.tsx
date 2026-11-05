@@ -8,6 +8,7 @@ import { getCareerProfile, type CareerProfile, type CareerStatus } from '../../s
 import type { Application } from '../../shared/types/application'
 import { APPLICATION_STATUS_LABELS } from '../../shared/types/application'
 import { formatRelativeTime } from '../../shared/utils/date'
+import { SetupChecklist } from '../../components/setup-checklist'
 import {
   TrendingUp, Send, Eye, CalendarCheck, Target, FileText, Ban, Compass, Sparkles, ArrowUpRight,
 } from 'lucide-react'
@@ -21,7 +22,11 @@ const STATUS_LABELS: Record<CareerStatus, { label: string; color: string; bg: st
 
 const SKILL_LEVEL_COLOR: Record<string, string> = { 精通: '#F97316', 熟练: '#10B981', 了解: '#9CA3AF' }
 
-export default function Dashboard() {
+interface DashboardProps {
+  onNavigate?: (navId: string) => void
+}
+
+export default function Dashboard({ onNavigate }: DashboardProps = {}) {
   const [stats, setStats] = useState({ total: 0, today: 0, interview: 0, read: 0, passRate: 0 })
   const [resumeCount, setResumeCount] = useState(0)
   const [blacklistCount, setBlacklistCount] = useState(0)
@@ -72,6 +77,9 @@ export default function Dashboard() {
         <h1 className="text-2xl font-bold gradient-text">求职数据看板</h1>
         <p className="text-sm text-text-muted mt-1">全面了解你的求职进度</p>
       </div>
+
+      {/* 配置引导：首屏必配 3+1 / 后续可配置清单 */}
+      <SetupChecklist onNavigate={onNavigate} />
 
       {/* Stats Grid */}
       <div className="grid grid-cols-4 gap-4">

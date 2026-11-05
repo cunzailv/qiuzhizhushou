@@ -1,14 +1,16 @@
 import { getSetting } from '../db/settings-store'
+import { CONSERVATIVE_VALUES } from '../types/safety-preset'
 
 export async function randomDelay(min?: number, max?: number): Promise<void> {
-  const minDelay = min ?? (await getSetting<number>('minDelay', 2000))
-  const maxDelay = max ?? (await getSetting<number>('maxDelay', 8000))
+  // 兜底值统一取保守档，避免设置未写入时按激进间隔跑
+  const minDelay = min ?? (await getSetting<number>('minDelay', CONSERVATIVE_VALUES.minDelay))
+  const maxDelay = max ?? (await getSetting<number>('maxDelay', CONSERVATIVE_VALUES.maxDelay))
   const delay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay
   await new Promise((resolve) => setTimeout(resolve, delay))
 }
 
 export async function getScrollDelay(): Promise<number> {
-  const base = await getSetting<number>('scrollDelay', 1500)
+  const base = await getSetting<number>('scrollDelay', CONSERVATIVE_VALUES.scrollDelay)
   return base + Math.random() * 1000
 }
 

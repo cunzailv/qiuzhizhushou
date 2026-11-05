@@ -1,6 +1,7 @@
 import { db } from './index'
 import type { CandidateProfilePreferences } from '../types/candidate-profile'
 import { DEFAULT_CANDIDATE_PREFERENCES } from '../types/candidate-profile'
+import { DEFAULT_SAFETY_PROFILE, type SafetyProfileId } from '../types/safety-preset'
 
 // 重要：content script 里的 IndexedDB 属于「网页域」（如 zhipin.com），
 // 与 popup/options（扩展域）不是同一个数据库，直接用 Dexie 读设置会读不到。
@@ -144,4 +145,41 @@ export async function saveCandidatePreferences(
   }
   await setSetting(CANDIDATE_PREFS_KEY, updated)
   return updated
+}
+
+// ─────────────── 安全阀档位（Safety Profile）───────────────
+// 只在「首次启动且本地没有任何节奏参数」时写入默认保守档；
+// 老用户若已经调过 dailyLimit / minDelay 等任意一项，标记为 custom，绝不覆盖其数值。
+
+const SAFETY_PROFILE_KEY = 'safetyProfile'
+const SAFETY_PARAM_KEYS = [
+  'dailyLimit',
+  'minDelay',
+  'maxDelay',
+  'scrollDelay',
+  'maxScanCount',
+  'aiDailyBudget',
+  'applyMode',
+] as const
+
+/**
+ * 确定当前安全档位（幂等，可多次调用）。
+ * - 已有 safetyProfile → 原样返回
+ * - 无 safetyProfile 但存在节奏参数 → 标记 custom（老用户，保留其配置）
+ * - 全空 → 写入默认（保守档）
+ */
+export async function resolveSafetyProfile(): Promise<SafetyProfileId> {
+  const saved = await getSetting<SafetyProfileId | null>(SAFETY_PROFILE_KEY, null)
+  if (saved) return saved
+
+  const existing = await Promise.all(
+    SAFETY_PARAM_KEYS.map((k) => getSetting<unknown>(k, null)),
+  )
+  if (existing.some((v) => v !== null && v !== undefined)) {
+    await setSetting(SAFETY_PROFILE_KEY, 'custom')
+    return 'custom'
+  }
+
+  await setSetting(SAFETY_PROFILE_KEY, DEFAULT_SAFETY_PROFILE)
+  return DEFAULT_SAFETY_PROFILE
 }

@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.2.0] — 2026-11-06 · 安全默认（保守档）与配置/功能文档
+
+### Added
+
+- **安全阀档位 `safety-preset`**：新增 `src/shared/types/safety-preset.ts`，把「每日上限 / 操作延迟 / 滚动延迟 / 单次扫描 / AI 预算 / 沟通模式」打包为 `保守 / 标准 / 激进` 三档，参数单一真源，禁止各模块再写魔法数字
+- **设置页档位选择**：管理后台与弹窗的「防封策略」顶部新增三档按钮，点击整组写入；显示「当前：保守/标准/激进/自定义」；手动改任一项参数自动判定为 `custom`（`detectSafetyProfile`），激进档带红色风险提示
+- **首启档位迁移**：`resolveSafetyProfile()`（`src/shared/db/settings-store.ts`）在扩展启动时执行一次——已有档位原样返回；老用户已调过任一节奏参数则标记 `custom`、**不覆盖原值**；完全新装写入 `conservative`
+- **配置引导卡片**：新增 `src/components/setup-checklist.tsx`，挂在管理后台仪表盘顶部，实时只读探测「简历 / 大模型 / 平台登录 / 安全阀」完成状态，未完成可一键跳转；同时列出可后置的 4 项（AI 自主权限、通知推送、黑名单、数据导出）
+- **弹窗配置顺序提示**：弹窗设置页新增文案版「必配 3 项 + 安全阀，其余可后置」
+- **文档**：新增 `docs/CONFIG_GUIDE.md`（配置说明书）、`docs/FEATURES.md`（功能总览）与 `docs/features/01~08`（分功能详解）；README 增加「文档索引」并重写使用流程
+
+### Changed
+
+- **默认值改为保守档**：`dailyLimit` 10000 → **30**、`minDelay/maxDelay` 2000/8000 → **5000/15000**、`maxScanCount` 50 → **20**、`aiDailyBudget` 50 → **30**、`applyMode` batch → **recommend**
+- 兜底值统一取 `CONSERVATIVE_VALUES`：`delay-engine.ts`、`rate-limiter.ts`（日上限兜底 10000→30）、`content/index.ts`（扫描兜底 50→20）、`ai-budget.ts`（预算兜底 50→30）
+- `PluginSettings` 新增 `safetyProfile` 字段，`DEFAULT_SETTINGS` 展开保守档参数
+
+### Validation
+
+- `npx tsc -b`：0 error
+- `npm run lint`：0 error（42 warnings，为遗留技术债）
+- `npx vitest run tests`：**59 files / 785 tests passed**（新增 `tests/safety-preset.test.ts` 16 例：默认保守、三档单调性、custom 判定、老用户迁移不覆盖）
+- `npm run build`：success
+
 ## [1.1.1] — 2026-11-05 · 悬浮窗与 AIbot 统一控制
 
 ### Added
