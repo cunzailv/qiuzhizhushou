@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-94%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-697%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -72,6 +72,19 @@
 | **脉脉** | ✅ 列表 / 详情（保守策略 + 通用兜底） |
 
 > 平台适配通过统一的 `PlatformAdapter` 接口注册，URL 匹配用裸域正则（`(?:^|[/.])domain`）防止跨站误匹配。
+
+### 🦾 E 层 · 自愈韧性智能体架构（M1–M5，2026-11）
+面对 DOM 变动、类名混淆、反爬遮罩与运行时异常，全流程自动降级与兜底：
+
+| 能力 | 说明 |
+|------|------|
+| **技能热修复** | 选择器指纹 + IndexedDB 技能沉淀，命中缓存免发版即时复用；连续失败 3 次自动熔断 |
+| **多阶弹性降级** | 卡片三阶（常规定位 → 模糊分词 → URL 直达）、按钮五阶（技能缓存 → 预设选择器 → 语义黑白名单 → LLM 感知 → 本地安全回退） |
+| **任务故障隔离** | `executeCampaignTask` 的 `try-finally` 边界：单岗位异常自动收敛、不卡死队列，现场无残留复原 |
+| **事后归因** | 自愈事件入库并聚合为「开发者待修清单」，管家面板支持一键复制 GitHub Issue Markdown |
+
+> 严格负面按钮黑名单确保绝不误点「不合适」；所有诊断埋点 fire-and-forget，绝不阻断投递主链路。
+> 详见 [`PROJECT.md`](PROJECT.md) 与 [`docs/UNFINISHED_PLAN.md`](docs/UNFINISHED_PLAN.md)。
 
 ---
 
@@ -162,15 +175,19 @@ tests/                  # 94 个测试用例（含浏览器 E2E）
 ## 🧪 测试与验收
 
 ```bash
-npm test        # tsc 类型检查 + 构建 + 全部 94 个测试用例
+npm test                                       # tsc -b + vite build + 全部 697 个测试用例
+npx vitest run                                  # 全量单测/E2E：51 文件 / 697 用例
+npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用例（基线 110 + 新增 36）
 ```
 
-每个功能阶段（A/B/C/D/UI）都包含浏览器级 E2E 验收（加载 `dist` 扩展 → 真实页面注入 → 截图断言）。
+每个功能阶段（A/B/C/D/E/UI）都包含浏览器级 E2E 验收（加载 `dist` 扩展 → 真实页面注入 → 截图断言）。
+自愈架构另有 Tier 5 白盒对抗压测（并发清理、DB 写失败、500+ 条淘汰、畸形载荷）。
 
 ## 📝 更新日志
 
 | 版本 | 内容 |
 |------|------|
+| `bd7464a` | 🦾 E 层：自愈韧性智能体架构 M1–M5（技能热修复 / 多阶降级 / 故障隔离 / 事后归因） |
 | `8d4b343` / `7d255b1` | 🎨 全局浅色主题（白底黑字 + 橙色渐变 CTA），popup / options / 注入浮窗统一 |
 | `4f58b0e` | 🎨 品牌 Logo（握手徽章）接入 + 全局品牌色统一 |
 | `d1e3d22` | 🌐 D 层：51job / 智联 / 脉脉 多平台适配 |

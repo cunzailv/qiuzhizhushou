@@ -43,11 +43,13 @@
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | 存储层升级与技能热修复引擎 | Dexie v8 升级、agentSkills 结构强化、技能沉淀/检索与跨进程同步 | none | IN_PROGRESS |
-| M2 | 运行时多阶弹性降级与脱困体系 | 卡片模糊多词与 URL 直达、按钮语义启发式与 LLM 感知、弹窗遮罩解除 | M1 | PLANNED |
-| M3 | 任务优先保障与单岗位故障隔离 | executeCampaignTask try-finally 边界、cleanupUi 现场无残留复原 | M2 | PLANNED |
-| M4 | 事后归因与管家开发者待修清单 | 自愈事件记录与查询、管家/后台开发者待修建议视图与导出 | M1, M2, M3 | PLANNED |
-| M5 | 全量自动化测试验收与对抗性加固 | 100% 通过 E2E 完整套件 (Tiers 1-4) + Tier 5 白盒对抗性测试加固 | M1, M2, M3, M4 | PLANNED |
+| M1 | 存储层升级与技能热修复引擎 | Dexie v8 升级、agentSkills 结构强化、技能沉淀/检索与跨进程同步 | none | ✅ DONE |
+| M2 | 运行时多阶弹性降级与脱困体系 | 卡片模糊多词与 URL 直达、按钮语义启发式与 LLM 感知、弹窗遮罩解除 | M1 | ✅ DONE |
+| M3 | 任务优先保障与单岗位故障隔离 | executeCampaignTask try-finally 边界、cleanupUi 现场无残留复原 | M2 | ✅ DONE |
+| M4 | 事后归因与管家开发者待修清单 | 自愈事件记录与查询、管家/后台开发者待修建议视图与导出 | M1, M2, M3 | ✅ DONE |
+| M5 | 全量自动化测试验收与对抗性加固 | 100% 通过 E2E 完整套件 (Tiers 1-4) + Tier 5 白盒对抗性测试加固 | M1, M2, M3, M4 | ✅ DONE |
+
+> **验收基线（2026-11-05，commit `bd7464a`）**：`npx vitest run` 51 文件 / 697 用例全绿；`npx tsc -b` 零 error；`npm run build` 零构建错误。M1–M5 已全部合并至 `main` 并推送 GitHub。
 
 ---
 
@@ -68,7 +70,9 @@
 ### M2/M3 ↔ M4: Diagnostics & Event Logging Contract
 - `recordSelfHealingEvent(event: Omit<SelfHealingEvent, 'id' | 'createdAt'>): Promise<SelfHealingEvent>`
 - `listSelfHealingEvents(limit?: number): Promise<SelfHealingEvent[]>`
-- `getDiagnosticFixRecommendations(): Promise<SelfHealingEvent[]>`
+- `getDeveloperFixSuggestions(): Promise<DeveloperFixSuggestion[]>`（契约兼容别名 `getDiagnosticFixRecommendations`）
+- `clearSelfHealingEvents(): Promise<void>`
+- 存储复用 `db.auditLogs`（`source='self_healing'`），Dexie 保持 v8；事件上限 500 条；所有 DB 异常静默降级，不阻断业务
 
 ---
 
@@ -77,11 +81,12 @@
 - `src/shared/agent/types.ts`: `AgentSkill`, `SelectorFingerprint`, `SkillPatchSource`
 - `src/shared/agent/skill-memory.ts`: `findBestSkill`, `upsertSkill`, `recordSkillFail`, `buildSelectorFingerprint`
 - `src/shared/db/index.ts`: Dexie v8 migration with `agentSkills` compound indexes
-- `src/shared/db/diagnostics-store.ts`: `recordSelfHealingEvent`, `listSelfHealingEvents`, `getDiagnosticFixRecommendations`
-- `src/shared/platform/boss/action-simulator.ts`: `fuzzyMultiWordMatch`, `activateJobCard`, `clickApplyButtonWithResilience`, `dismissUnexpectedModals`
+- `src/shared/types/diagnostics.ts`: `SelfHealingEvent`, `DeveloperFixSuggestion`, `SelfHealingCategory`, `CATEGORY_FIX_TEMPLATES`, `ALL_SELF_HEALING_CATEGORIES`
+- `src/shared/db/diagnostics-store.ts`: `recordSelfHealingEvent`, `listSelfHealingEvents`, `getDeveloperFixSuggestions`, `getDiagnosticFixRecommendations`, `clearSelfHealingEvents`
+- `src/shared/platform/boss/action-simulator.ts`: `fuzzyMultiWordMatch`, `activateJobCardWithFallback`, `clickApplyButtonWithResilience`, `dismissUnexpectedModals`（7 处诊断埋点）
 - `src/content/task-runner.ts`: `executeCampaignTask` (try-finally), `cleanupUi` (exported & fortified)
 - `src/background/index.ts`: Message router for skills and diagnostics
-- `src/popup/pages/Butler.tsx`: Enhanced `errors` subtab with "开发者待修清单" and structured cards
+- `src/popup/pages/Butler.tsx`: 独立 `fixes` subtab「开发者待修清单」+ 一键复制 Markdown
 - `tests/`: Unit and integration test suites:
   - `tests/self-healing-card.test.ts`
   - `tests/self-healing-button.test.ts`
@@ -89,4 +94,6 @@
   - `tests/self-healing-skill.test.ts`
   - `tests/self-healing-mission.test.ts`
   - `tests/self-healing-diagnostics.test.ts`
+  - `tests/adversarial-m3-stress.test.ts`
+  - `tests/adversarial-m4-stress.test.ts`
   - `tests/e2e-self-healing.test.ts`

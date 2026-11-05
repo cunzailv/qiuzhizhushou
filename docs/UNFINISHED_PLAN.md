@@ -1,7 +1,19 @@
-# 未完成计划文档 · 自愈韧性智能体架构
+# 已完成归档 · 自愈韧性智能体架构（原「未完成计划文档」）
 
-> 生成时间：2026-11-05  
-> 分支：`main`（当前 HEAD `d172f2d`，含未 commit 的 M1/M2 工作区修改）
+> 生成时间：2026-11-05　|　归档时间：2026-11-05
+> 状态：**M1–M5 全部完成 ✅**，代码已合并至 `main` 并推送 GitHub（commit `bd7464a`）
+> 本文档保留原始计划与任务分解作为开发过程记录；原「当前未 commit 清单」已随本次提交全部落地，工作区干净。
+
+### 最终验收结果
+
+| 验收项 | 结果 |
+|--------|------|
+| 4 个核心自愈测试基线 | 110 passed |
+| 新增 4 个测试文件 | 59 passed（mission 17 / diagnostics 19 / m3 压测 10 / m4 压测 13） |
+| `npx vitest run` 全量 | 51 文件 / 697 用例全绿 |
+| `npx tsc -b` | 零 error |
+| `npm run build` | 零构建错误（2361 modules） |
+| `git push origin main` | `2be85ed..bd7464a` 成功 |
 
 ---
 
@@ -57,9 +69,9 @@
 
 ---
 
-## 二、未完成里程碑详细计划
+## 二、里程碑详细计划（已全部完成 ✅）
 
-### 🔲 M3 — 任务优先保障与单岗位故障隔离
+### ✅ M3 — 任务优先保障与单岗位故障隔离（已完成）
 
 **目标：** 保证单个岗位的任何异常都不会卡死整条投递流水线；`cleanupUi` 在成功/失败两条路径上都必须执行。
 
@@ -109,7 +121,7 @@ export async function executeCampaignTask(...): Promise<TaskExecutionResponse> {
 
 ---
 
-### 🔲 M4 — 事后归因与管家开发者待修清单
+### ✅ M4 — 事后归因与管家开发者待修清单（已完成）
 
 **目标：** 把每次自愈/降级事件记录到本地库，聚合为结构化"开发者待修建议"，在管家面板新增专属视图，支持一键复制 Markdown/Issue 格式。
 
@@ -225,7 +237,7 @@ void recordSelfHealingEvent({
 
 ---
 
-### 🔲 M5 — 全量自动化测试验收与打包验收
+### ✅ M5 — 全量自动化测试验收与打包验收（已完成）
 
 #### Task 5.1 — 全量测试回归
 
@@ -233,9 +245,9 @@ void recordSelfHealingEvent({
 npx vitest run
 ```
 
-预期：所有 47 个测试文件全部通过（包含 M3/M4 新增的 2 个）。
+**实际结果：51 个测试文件 / 697 用例全部通过**（含 M3/M4 新增的 4 个测试文件）。
 
-> **已知待处理：** `tests/e2e-self-healing.test.ts`（端到端真实 DOM 测试）当前状态未知，需人工确认或补齐 mock。
+> **已确认：** `tests/e2e-self-healing.test.ts`（端到端真实 DOM 测试）同样通过，无遗留待处理项。
 
 #### Task 5.2 — TypeScript 编译验收
 
@@ -263,9 +275,9 @@ git push origin main
 
 ---
 
-## 三、当前未 commit 的工作区改动清单
+## 三、已归档：本次提交包含的改动清单
 
-> 这些改动已完成但尚未 `git commit`，下次开发时需先 `git add -A && git commit`。
+> 以下改动已于 2026-11-05 通过 `git add -A && git commit && git push origin main` 全部落地（commit `bd7464a`，26 files / +8661 / −233）。**当前工作区干净，无未提交改动。**
 
 | 文件 | 说明 |
 |------|------|
@@ -320,20 +332,21 @@ npx vitest run tests/self-healing-button.test.ts tests/self-healing-card.test.ts
 # 3. 编译检查
 npx tsc -b
 
-# 4. 先提交当前未 commit 的 M1/M2 改动
-git add -A
-git commit -m "feat(self-healing): M1 技能热修复 + M2 多阶弹性降级（已测试）"
-git push origin main
+# 4. M1/M2 已随 M3/M4/M5 一并提交（commit bd7464a），此步无需再执行
+git log --oneline -1   # 应显示 bd7464a
 ```
 
-### 开发 M3（约 2-3 小时）
+> ⚠️ **开发路径提醒**：真实代码仓库位于 `/Users/pc/Desktop/zhipinzhushou`（`main` 分支）。
+> WorkBuddy 自动创建的 worktree 可能停留在旧提交，**动手前务必确认 `git log -1` 与 `origin/main` 一致**。
+
+### 开发 M3（已完成 ✅，以下为原始执行步骤）
 
 1. 修改 `src/content/task-runner.ts`：给 `executeCampaignTask` 加 `try-finally`（见 Task 3.1）
 2. 加强 `cleanupUi`（见 Task 3.2）
 3. 写 `tests/self-healing-mission.test.ts`（见 Task 3.3）
 4. 运行 `npx vitest run tests/self-healing-mission.test.ts` 确认通过
 
-### 开发 M4（约 4-6 小时）
+### 开发 M4（已完成 ✅，以下为原始执行步骤）
 
 1. `src/shared/types/diagnostics.ts` ✅ 已完成
 2. 创建 `src/shared/db/diagnostics-store.ts`（见 Task 4.2）
@@ -342,7 +355,7 @@ git push origin main
 5. 修改 `Butler.tsx` 添加 `fixes` 子 Tab（见 Task 4.5）
 6. 写 `tests/self-healing-diagnostics.test.ts`（见 Task 4.6）
 
-### 验收 M5
+### 验收 M5（已完成 ✅）
 
 ```bash
 npx vitest run   # 全量，预期全绿
@@ -365,7 +378,7 @@ src/
 │   │   └── types.ts                          # AgentSkill / SelectorFingerprint
 │   ├── db/
 │   │   ├── index.ts                          # Dexie v8 ✅
-│   │   ├── diagnostics-store.ts              # M4 🔲 待创建
+│   │   ├── diagnostics-store.ts              # M4 ✅ 已创建
 │   │   ├── audit-store.ts                    # 现有审计日志
 │   │   └── error-store.ts                    # 现有错误日志
 │   ├── platform/
@@ -378,13 +391,13 @@ src/
 │       └── ...
 └── popup/
     └── pages/
-        └── Butler.tsx                        # M4 🔲 待添加 fixes 子 Tab
+        └── Butler.tsx                        # M4 ✅ 已添加 fixes 子 Tab
 
 tests/
 ├── self-healing-skill.test.ts               # M1 ✅ 26 用例
 ├── self-healing-button.test.ts              # M2 ✅ 31 用例
 ├── self-healing-card.test.ts               # M2 ✅ 20 用例
 ├── self-healing-modal.test.ts              # M2 ✅ 33 用例
-├── self-healing-mission.test.ts            # M3 🔲 待创建
-└── self-healing-diagnostics.test.ts        # M4 🔲 待创建
+├── self-healing-mission.test.ts            # M3 ✅ 已创建
+└── self-healing-diagnostics.test.ts        # M4 ✅ 已创建
 ```
