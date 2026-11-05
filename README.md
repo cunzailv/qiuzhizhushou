@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-728%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-807%20passed-brightgreen" alt="Tests">
 </p>
 
 ---

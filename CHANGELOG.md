@@ -63,8 +63,9 @@
 
 - `npx tsc -b`：0 error
 - `npm run lint`：0 error（42 warnings，为遗留技术债）
-- `npx vitest run tests`：**59 files / 785 tests passed**（新增 `tests/safety-preset.test.ts` 16 例：默认保守、三档单调性、custom 判定、老用户迁移不覆盖）
-- `npm run build`：success
+- `CI=1 npx vitest run tests`（单线程串行）：**60 files / 807 tests passed**，含 10 个 `headless:false` 浏览器 E2E 套件（本地双线程并发跑浏览器 E2E 会因 headed Chromium 争抢资源偶发超时，串行稳定全绿）
+- `npm run build`：success；`dist/manifest.json` = 1.2.0
+- `dist.crx` 以原 `dist.pem` 重新打包为 1.2.0，扩展 ID 保持 `dccklnbklkmobooaeioifidckbgbgjfg`（即 SHA-256(SPKI DER) 前 128 位；更正 1.1.1 记录中 `322abd1a...` 的指纹算法误差，该值非 Chrome 标准扩展 ID 算法所得，实际扩展 ID 一直未变）
 
 ## [1.1.1] — 2026-11-05 · 悬浮窗与 AIbot 统一控制
 
