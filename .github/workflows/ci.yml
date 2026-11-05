@@ -39,15 +39,35 @@ jobs:
           cache: 'npm'
 
       - run: npm ci
-      # 部分 runner 上 Playwright CDN 不可达：能装则跑全量浏览器 E2E，
-      # 装不上就跳过这 10 个套件，其余逻辑/单测门禁照常执行。
-      - name: Install Chromium (optional)
+      # Playwright CDN 偶发不可达：重试 3 次。若仍失败，把真实报错写进
+      # check-run annotation，这样即使 job 日志需要登录也能定位原因。
+      - name: Install Chromium (retry + diagnostics)
         run: |
-          if npx playwright install chromium; then
+          set +e
+          LOG=/tmp/pw-install.log
+          : > "$LOG"
+          {
+            echo "node=$(node -v) npm=$(npm -v)"
+            echo "playwright=$(npx playwright --version 2>&1)"
+            echo "bin=$(ls -l node_modules/.bin/playwright 2>&1)"
+            echo "PLAYWRIGHT_DOWNLOAD_HOST=${PLAYWRIGHT_DOWNLOAD_HOST:-<unset>}"
+          } | tee -a "$LOG"
+          ok=0
+          for attempt in 1 2 3; do
+            echo "=== attempt ${attempt} ===" | tee -a "$LOG"
+            npx playwright install chromium >> "$LOG" 2>&1
+            rc=$?
+            echo "rc=$rc" | tee -a "$LOG"
+            if [ "$rc" -eq 0 ]; then ok=1; break; fi
+            sleep $((attempt * 5))
+          done
+          if [ "$ok" -eq 1 ]; then
             echo "Chromium ready, browser E2E will run"
+            echo "BROWSER_E2E=enabled" >> "$GITHUB_ENV"
           else
-            echo "::warning::Chromium download failed; browser E2E suites skipped in this run"
+            python3 -c 'import sys; t=open(sys.argv[1],errors="replace").read()[-3500:]; print("::warning::Chromium download failed; browser E2E suites skipped. diagnostics: "+t.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))' "$LOG"
             echo "SKIP_BROWSER_E2E=1" >> "$GITHUB_ENV"
+            echo "BROWSER_E2E=skipped" >> "$GITHUB_ENV"
           fi
       # 扩展 E2E 用 headless:false 加载 MV3 service worker，Linux runner 需要虚拟显示
       - name: Ensure xvfb is available
@@ -55,4 +75,15 @@ jobs:
           if ! command -v xvfb-run >/dev/null 2>&1; then
             sudo apt-get update -qq && sudo apt-get install -y xvfb
           fi
-      - run: xvfb-run -a npm test
+      - name: Run tests
+        run: |
+          set +e
+          xvfb-run -a npm test > /tmp/npm-test.log 2>&1
+          rc=$?
+          tail -n 40 /tmp/npm-test.log
+          if [ "$rc" -eq 0 ]; then
+            python3 -c 'import sys,re,os; t=open(sys.argv[1],errors="replace").read(); s=" | ".join(x.strip() for x in t.splitlines() if re.search(r"Test Files|Tests  |Duration",x)); print("::notice::BROWSER_E2E="+os.environ.get("BROWSER_E2E","?")+" vitest: "+s.replace("%","%25"))' /tmp/npm-test.log
+          else
+            python3 -c 'import sys; t=open(sys.argv[1],errors="replace").read()[-3500:]; print("::error::npm test failed. tail: "+t.replace("%","%25").replace("\r","%0D").replace("\n","%0A"))' /tmp/npm-test.log
+          fi
+          exit "$rc"
