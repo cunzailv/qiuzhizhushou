@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.2.0] — 2026-11-06 · 安全默认（保守档）与配置/功能文档
+## [1.2.0] — 2026-11-06 · 安全默认、平台配额、自主授权契约与经验记忆
 
 ### Added
 
@@ -10,12 +10,29 @@
 - **配置引导卡片**：新增 `src/components/setup-checklist.tsx`，挂在管理后台仪表盘顶部，实时只读探测「简历 / 大模型 / 平台登录 / 安全阀」完成状态，未完成可一键跳转；同时列出可后置的 4 项（AI 自主权限、通知推送、黑名单、数据导出）
 - **弹窗配置顺序提示**：弹窗设置页新增文案版「必配 3 项 + 安全阀，其余可后置」
 - **文档**：新增 `docs/CONFIG_GUIDE.md`（配置说明书）、`docs/FEATURES.md`（功能总览）与 `docs/features/01~08`（分功能详解）；README 增加「文档索引」并重写使用流程
+- **各平台投递数量可修改（G 层）**：新增 `quota.ts` 平台配额单一真源——`DEFAULT_PLATFORM_QUOTAS`（由推荐安全配额派生）、`normalizePlatformQuotas` 脏数据兜底、`chrome.storage.local` 持久化（`aibot_platform_quotas` 键）、区间限制 1–500；`queue-store.ts` 新增 `updateCampaignQuotas` 即时生效、campaign 领任务时按平台配额过滤、`rate-limiter.ts` 每日风控上限与自定义配额同步；AIbot 配置面板新增各平台投递数量编辑卡片（新增 `tests/platform-quotas.test.ts` 覆盖存储真源 / campaign 即时生效 / 风控同步）
+- **声明式自主授权契约（AuthorizationPolicy）**：新增 `src/shared/agent/authorization.ts`——用户在简历页事前编写「事实（简历只读）/ 应答（话题白名单+每日上限）/ 策略（投递授权档、配额上限、匹配门槛、主攻方向白名单、可自动调参项）/ 硬锁」四类授权，运行时 `evaluateAuthorization` 查表判定 `auto / confirm / deny` 替代逐次弹确认；默认 `enabled=false` 未启用时完全回退原有 `permission.ts` 三档逻辑（向后兼容）；fail-closed：未覆盖/超范围/解析失败一律停下问；`updatedAt` 超 14 天自动降级为 confirm；硬锁（改简历事实、绕过风控=deny；offer 决策、薪资谈判=confirm）永不可下放
+- **授权接入执行链**：`action-executor.ts` 的 `decidePermission` 前置授权判定（deny→'denied'）；`proposeAction` 把执行上下文映射为结构化动作（apply / send_greeting / browse），send_greeting 的话题白名单用 goal 匹配
+- **L3 经验记忆**：新增 `src/shared/types/experience.ts` + `src/shared/db/experience-store.ts`（Dexie v9 新增 `experiences` 表）——AI 归纳的规律性结论必须带 `evidenceIds`、样本 ≥5 才下结论、30 天过期、同 pattern 去重 upsert、用户禁用/删除后 `userOverride` 永不被 AI 覆盖；关键词分词匹配检索（单用户数据量级不引入向量库）
+- **单一主脑 Planner**：新增 `src/shared/agent/planner.ts`——`replanIfNeeded` 挂在 campaign tick 流水线（3.5 步，失败静默降级）：读授权契约 + 近 7 天真实复盘 + 相关经验 → 纯规则推导建议（每条过授权判定）→ LLM 只润色总结（缺失降级 `local_rules`）→ 仅在授权 auto 且回复率 <20%、样本 ≥10 时有界下调本轮各平台配额 10%（不低于下限，只动 `campaign.quotas` 可回滚，不动全局设置）；按「日期:任务数档位」节流
+- **简历页授权配置 UI**：`CandidatePreferencesCard` 新增「自主授权契约」分区（总开关、投递授权档、配额上限/匹配门槛、主攻方向白名单、可自动调参 chips、应答白名单/禁用话题、硬锁只读展示、最后确认时间）；HR 问答模式补活死枚举第三档「白名单自动发」（`safe_auto_reply`）；卡片标题改为「求职画像 · 底线 · 自主授权」并从设置页迁至简历页（弹窗与管理后台同步迁移，设置页留指向提示）
+- **回归测试**：新增 `tests/authorization.test.ts`（14 例：默认关闭回退、硬锁、过期降级、fail-closed、配额/门槛/调参/白名单/上限/facts 只读、proposeAction 映射）、`tests/experience-store.test.ts`（8 例：样本门槛、去重、userOverride 不覆盖、过期、检索、删除）、`tests/planner.test.ts`（8 例：低回复率建议、无授权全 confirm、授权 auto、过期降级、LLM 缺失降级）
 
 ### Changed
 
 - **默认值改为保守档**：`dailyLimit` 10000 → **30**、`minDelay/maxDelay` 2000/8000 → **5000/15000**、`maxScanCount` 50 → **20**、`aiDailyBudget` 50 → **30**、`applyMode` batch → **recommend**
 - 兜底值统一取 `CONSERVATIVE_VALUES`：`delay-engine.ts`、`rate-limiter.ts`（日上限兜底 10000→30）、`content/index.ts`（扫描兜底 50→20）、`ai-budget.ts`（预算兜底 50→30）
 - `PluginSettings` 新增 `safetyProfile` 字段，`DEFAULT_SETTINGS` 展开保守档参数
+- **清除两处硬编码假统计**：`induction-engine.ts` 的 `runInductionAnalysis` 重写——删除「500+ JD / +40.2%」等写死数字，改用 `buildReview()` 真实投递记录统计（样本不足明示「不构成统计结论」），对已存在 pending 提案刷新真实数据；`butler-evolution-store.ts` 三条种子提案的 insight/evidenceStats 改为诚实版（sampleSize:0、liftRate:'待验证'）
+- 零回复岗位方向（count≥3 且回复率 0）自动沉淀为 L3 经验供后续降权参考
+- `CandidateProfilePreferences` 新增可选 `authorization` 字段，spread merge 读取零迁移；Dexie v8 → v9（新增 `experiences` 表索引）
+- 管家演进提案（butler evolution）与自主重规划决策均写入审计日志留痕
+
+### Fixed
+
+- `tests/self-healing-diagnostics.test.ts` 断言 Dexie 版本 8 → 9（新增 experiences 表）
+- `tests/butler-evolution.test.ts` 断言改为「真实投递记录」且不再匹配虚构提升率
+- `tests/aibot-browser-e2e.test.ts` 「运行中」文案 strict mode 冲突（状态徽标与说明文字同时命中），改为精确匹配
 
 ### Validation
 
