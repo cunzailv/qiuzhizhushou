@@ -31,7 +31,8 @@ describe('extension application flow', () => {
     const extensionId = new URL(serviceWorker.url()).host
     const bootstrapPopup = await context.newPage()
     await bootstrapPopup.goto(`chrome-extension://${extensionId}/src/popup/index.html`)
-    await bootstrapPopup.getByText('求职助手').waitFor()
+    // 概览页的第二层标题「求职助手」已移除，用 App 全局品牌头作为渲染完成锚点
+    await bootstrapPopup.getByRole('heading', { name: '求职投递助手' }).waitFor()
     await bootstrapPopup.close()
 
     await serviceWorker.evaluate(async () => {
@@ -980,8 +981,10 @@ describe('extension application flow', () => {
     expect(initialPanelText).toContain('按分筛选')
     expect(initialPanelText).toContain('不评分沟通')
 
-    await host.locator('#score-direct').click()
-    await host.locator('#btn-start').click()
+    // 侧栏正文已换成内嵌的完整面板，旧内联控件保留在隐藏容器里驱动同一条链路，
+    // 因此用 dispatchEvent 直接触发监听器（不依赖可见性）
+    await host.locator('#score-direct').dispatchEvent('click')
+    await host.locator('#btn-start').dispatchEvent('click')
 
     await expect.poll(async () => host.evaluate(
       (node) => node.shadowRoot?.textContent ?? '',
@@ -1170,6 +1173,8 @@ describe('extension application flow', () => {
       }
     })
     const box = metrics.host
+    // 点浮球后直接回到整高侧栏（440px），不再有小浮窗中间态
+    expect(Math.round(box.width), JSON.stringify(metrics)).toBe(404)
     expect(box.x).toBeGreaterThanOrEqual(8)
     expect(box.y).toBeGreaterThanOrEqual(8)
     expect(box.x + box.width, JSON.stringify(metrics)).toBeLessThanOrEqual(metrics.viewport.width - 8)
@@ -1178,13 +1183,13 @@ describe('extension application flow', () => {
     await page.close()
   }, 20_000)
 
-  it('drags the floating panel by its header and clamps it to the viewport', async () => {
+  it('keeps the sidebar pinned to the right edge (no draggable floating window)', async () => {
     const page = await context.newPage()
-    await page.setViewportSize({ width: 800, height: 600 })
+    await page.setViewportSize({ width: 1000, height: 820 })
     await page.route('https://www.zhipin.com/**', async (route) => {
       await route.fulfill({
         headers: { 'content-type': 'text/html; charset=utf-8' },
-        body: '<!doctype html><html><body><main>Draggable panel fixture</main></body></html>',
+        body: '<!doctype html><html><body><main>Sidebar fixture</main></body></html>',
       })
     })
     await page.goto('https://www.zhipin.com/web/geek/job-recommend')
@@ -1192,61 +1197,39 @@ describe('extension application flow', () => {
     await expect.poll(() => host.count()).toBe(1)
     const header = host.locator('.panel-header')
     const before = await host.boundingBox()
-    if (!before) throw new Error('floating panel is not visible')
+    if (!before) throw new Error('sidebar is not visible')
+    expect(Math.round(before.width)).toBe(440)
 
-    await header.dispatchEvent('pointerdown', {
-      pointerId: 1,
-      button: 0,
-      clientX: before.x + 80,
-      clientY: before.y + 20,
-    })
-    await page.evaluate(() => {
-      window.dispatchEvent(new PointerEvent('pointermove', {
-        pointerId: 1,
-        clientX: 220,
-        clientY: 260,
-        bubbles: true,
-      }))
-      window.dispatchEvent(new PointerEvent('pointerup', {
-        pointerId: 1,
-        clientX: 220,
-        clientY: 260,
-        bubbles: true,
-      }))
-    })
+    // 拖标题栏不应把侧栏脱离成 400px 小浮窗
+    for (const [pointerId, clientX, clientY] of [[1, 220, 260], [2, 5000, 5000]] as const) {
+      await header.dispatchEvent('pointerdown', {
+        pointerId,
+        button: 0,
+        clientX: before.x + 80,
+        clientY: before.y + 20,
+      })
+      await page.evaluate(({ pointerId, clientX, clientY }) => {
+        window.dispatchEvent(new PointerEvent('pointermove', {
+          pointerId, clientX, clientY, bubbles: true,
+        }))
+        window.dispatchEvent(new PointerEvent('pointerup', {
+          pointerId, clientX, clientY, bubbles: true,
+        }))
+      }, { pointerId, clientX, clientY })
+    }
 
-    const moved = await host.boundingBox()
-    if (!moved) throw new Error('floating panel disappeared after drag')
-    expect(Math.round(moved.x)).not.toBe(Math.round(before.x))
-    expect(Math.round(moved.y)).not.toBe(Math.round(before.y))
+    const after = await host.boundingBox()
+    if (!after) throw new Error('sidebar disappeared after drag')
+    expect(Math.round(after.x)).toBe(Math.round(before.x))
+    expect(Math.round(after.y)).toBe(Math.round(before.y))
+    expect(Math.round(after.width)).toBe(Math.round(before.width))
+    expect(Math.round(after.height)).toBe(Math.round(before.height))
 
-    await header.dispatchEvent('pointerdown', {
-      pointerId: 2,
-      button: 0,
-      clientX: moved.x + 80,
-      clientY: moved.y + 20,
-    })
-    await page.evaluate(() => {
-      window.dispatchEvent(new PointerEvent('pointermove', {
-        pointerId: 2,
-        clientX: 5000,
-        clientY: 5000,
-        bubbles: true,
-      }))
-      window.dispatchEvent(new PointerEvent('pointerup', {
-        pointerId: 2,
-        clientX: 5000,
-        clientY: 5000,
-        bubbles: true,
-      }))
-    })
-
-    const clamped = await host.boundingBox()
-    if (!clamped) throw new Error('floating panel disappeared after clamped drag')
-    expect(clamped.x).toBeGreaterThanOrEqual(8)
-    expect(clamped.y).toBeGreaterThanOrEqual(8)
-    expect(clamped.x + clamped.width).toBeLessThanOrEqual(792)
-    expect(clamped.y + clamped.height).toBeLessThanOrEqual(592)
+    const viewport = await page.evaluate(() => ({ w: window.innerWidth, h: window.innerHeight }))
+    expect(after.x).toBeGreaterThanOrEqual(8)
+    expect(after.y).toBeGreaterThanOrEqual(8)
+    expect(after.x + after.width).toBeLessThanOrEqual(viewport.w - 8)
+    expect(after.y + after.height).toBeLessThanOrEqual(viewport.h - 8)
 
     await page.close()
   }, 20_000)

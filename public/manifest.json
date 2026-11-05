@@ -64,7 +64,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["src/assets/*"],
+      "resources": ["src/assets/*", "src/popup/index.html", "assets/*"],
       "matches": [
         "https://www.zhipin.com/*",
         "https://zhipin.com/*",

@@ -1,19 +1,16 @@
 import React, { useState, useEffect } from 'react'
 import { Card } from '../../components/ui/card'
-import { Badge } from '../../components/ui/badge'
-import { Button } from '../../components/ui/button'
 import { getStats } from '../../shared/db/application-store'
-import { getAllApplications } from '../../shared/db/application-store'
-import { formatRelativeTime } from '../../shared/utils/date'
-import { getSetting, setSetting } from '../../shared/db/settings-store'
+import { loadSharedApplyFilters, persistSharedFilters } from '../../shared/agent/filter-config'
 import { log } from '../../shared/utils/logger'
-import type { Application } from '../../shared/types/application'
-import { APPLICATION_STATUS_LABELS } from '../../shared/types/application'
 import type { ApplyFilters } from '../../shared/types/filters'
 import { DEFAULT_FILTERS } from '../../shared/types/filters'
 import FilterPanel from '../components/FilterPanel'
+import BatchControlCard from '../components/BatchControlCard'
+import { subscribeAssistantState } from '../../shared/assistant-state'
+import type { AssistantRuntimeState } from '../../shared/runtime-state'
 import {
-  TrendingUp, Send, Eye, CalendarCheck, Target, ExternalLink,
+  TrendingUp, Send, Eye, CalendarCheck, Target,
 } from 'lucide-react'
 
 const MOD = 'Popup:Dashboard'
@@ -21,18 +18,17 @@ const MOD = 'Popup:Dashboard'
 interface DashboardProps {
   onStartApply?: (filters: ApplyFilters) => void
   onStopApply?: () => void
-  platformName?: string
   applyRunning?: boolean
+  runtime: AssistantRuntimeState
 }
 
 export default function Dashboard({
   onStartApply,
   onStopApply,
-  platformName,
   applyRunning,
+  runtime,
 }: DashboardProps) {
   const [stats, setStats] = useState({ total: 0, today: 0, interview: 0, read: 0, passRate: 0 })
-  const [recentApps, setRecentApps] = useState<Application[]>([])
   const [filters, setFilters] = useState<ApplyFilters>(DEFAULT_FILTERS)
   const [filterCollapsed, setFilterCollapsed] = useState(true)
 
@@ -40,41 +36,24 @@ export default function Dashboard({
     loadData()
   }, [])
 
+  // AIbot 页 / 设置页 / 网页浮窗改了 AI 评分开关时，概览筛选条件实时同步
+  useEffect(() => {
+    return subscribeAssistantState((state) => {
+      setFilters((prev) => prev.enableAiMatch === state.enableAiMatch
+        ? prev
+        : { ...prev, enableAiMatch: state.enableAiMatch })
+    })
+  }, [])
+
   async function loadData() {
     const s = await getStats()
     setStats(s)
-    const apps = await getAllApplications()
-    setRecentApps(apps.slice(0, 5))
 
-    // Load saved filters
+    // 与 AIbot 全自动流水线共用同一份筛选配置（shared/agent/filter-config）
     try {
-      const savedJobTitles = await getSetting<string>('filterJobTitles', '')
-      const savedLocations = await getSetting<string>('filterLocations', '')
-      const savedSalaryMin = await getSetting<number | null>('filterSalaryMin', null)
-      const savedSalaryMax = await getSetting<number | null>('filterSalaryMax', null)
-      const savedExperience = await getSetting<string>('filterExperience', '')
-      const savedEducation = await getSetting<string>('filterEducation', '')
-      const savedExcludeKeywords = await getSetting<string>('filterExcludeKeywords', '')
-      const savedPublishTime = await getSetting<string>('filterPublishTime', 'week')
-      const savedEnableAi = await getSetting<boolean>(
-        'enableAiMatch',
-        await getSetting<boolean>('filterEnableAiMatch', true),
-      )
-      const savedMinScore = await getSetting<number>('filterMinMatchScore', 60)
-      setFilters({
-        jobTitles: savedJobTitles,
-        locations: savedLocations,
-        salaryMin: savedSalaryMin,
-        salaryMax: savedSalaryMax,
-        experience: savedExperience,
-        education: savedEducation,
-        excludeKeywords: savedExcludeKeywords,
-        publishTime: savedPublishTime,
-        enableAiMatch: savedEnableAi,
-        minMatchScore: savedMinScore,
-      })
+      setFilters(await loadSharedApplyFilters())
     } catch {
-      // Use defaults
+      // 保留 DEFAULT_FILTERS
     }
   }
 
@@ -82,24 +61,19 @@ export default function Dashboard({
     const newFilters = { ...filters, ...updates }
     setFilters(newFilters)
     log(MOD, 'filterChange', 'Filters updated:', Object.keys(updates).map(k => `${k}=${(updates as Record<string, unknown>)[k]}`).join(', '))
-    // Persist to settings
-    try {
-      // we can ignore await Promise.all - just fire and forget for perf
-      const f = newFilters
-      if (updates.jobTitles !== undefined) setSetting('filterJobTitles', f.jobTitles)
-      if (updates.locations !== undefined) setSetting('filterLocations', f.locations)
-      if (updates.salaryMin !== undefined) setSetting('filterSalaryMin', f.salaryMin)
-      if (updates.salaryMax !== undefined) setSetting('filterSalaryMax', f.salaryMax)
-      if (updates.experience !== undefined) setSetting('filterExperience', f.experience)
-      if (updates.education !== undefined) setSetting('filterEducation', f.education)
-      if (updates.excludeKeywords !== undefined) setSetting('filterExcludeKeywords', f.excludeKeywords)
-      if (updates.publishTime !== undefined) setSetting('filterPublishTime', f.publishTime)
-      if (updates.enableAiMatch !== undefined) setSetting('filterEnableAiMatch', f.enableAiMatch)
-      if (updates.minMatchScore !== undefined) setSetting('filterMinMatchScore', f.minMatchScore)
-    } catch { /* ignore */ }
+    // 持久化到共享配置：AI 评分开关双写 enableAiMatch / filterEnableAiMatch，
+    // 让 content 与 AIbot 全自动流水线立即读到同一份值。
+    void persistSharedFilters(updates).catch(() => {})
   }
 
+  // 两处「开始」入口（筛选卡片 / 批量沟通控制台）统一锁定：避免重复申请锁把运行进度清零
+  const startLocked = !!applyRunning || runtime.mode === 'manual' || runtime.mode === 'autopilot'
+
   function handleStart() {
+    if (startLocked) {
+      log(MOD, 'handleStart', 'Ignored — another run is active')
+      return
+    }
     log(MOD, 'handleStart', 'User clicked 开始智能沟通', {
       jobTitles: filters.jobTitles,
       locations: filters.locations,
@@ -107,6 +81,8 @@ export default function Dashboard({
       experience: filters.experience,
       education: filters.education,
       excludeKeywords: filters.excludeKeywords,
+      enableAiMatch: filters.enableAiMatch,
+      minMatchScore: filters.minMatchScore,
     })
     onStartApply?.(filters)
   }
@@ -119,63 +95,10 @@ export default function Dashboard({
     { label: '转化率', value: `${stats.passRate}%`, icon: Target, color: '#F59E0B' },
   ]
 
-  function getStatusBadge(status: Application['status']) {
-    const variants: Record<string, 'default' | 'success' | 'danger' | 'warning' | 'info'> = {
-      applied: 'default',
-      read: 'info',
-      communicating: 'warning',
-      interview: 'success',
-      rejected: 'danger',
-      hired: 'success',
-    }
-    return <Badge variant={variants[status]}>{APPLICATION_STATUS_LABELS[status]}</Badge>
-  }
-
-  function renderScore(score: number | null | undefined) {
-    if (score === null || score === undefined) {
-      return <span className="text-[10px] text-text-muted">未评分</span>
-    }
-    const color = score >= 60 ? '#10B981' : score >= 40 ? '#F59E0B' : '#EF4444'
-    return (
-      <span
-        className="text-[11px] font-semibold px-1.5 py-0.5 rounded"
-        style={{ color, background: `${color}1A` }}
-        title="岗位匹配评分"
-      >
-        {score}分
-      </span>
-    )
-  }
-
-  function openJobDetail(app: Application) {
-    if (!app.jobId) return
-    const url = `https://www.zhipin.com/job_detail/${app.jobId}.html`
-    if (typeof chrome !== 'undefined' && chrome.tabs?.create) {
-      chrome.tabs.create({ url }).catch(() => window.open(url, '_blank'))
-    } else {
-      window.open(url, '_blank')
-    }
-  }
-
   return (
     <div className="p-4 space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold gradient-text">求职助手</h1>
-          <p className="text-xs text-text-muted mt-0.5">{platformName || '招聘平台'} · 智能投递</p>
-        </div>
-        {applyRunning ? (
-          <Button size="sm" variant="danger" onClick={() => onStopApply?.()}>
-            停止
-          </Button>
-        ) : (
-          <Button size="sm" onClick={handleStart}>
-            <Send className="w-3.5 h-3.5" />
-            开始沟通
-          </Button>
-        )}
-      </div>
+      {/* 品牌头与「开始沟通」已移除：App 全局头部已有标题与平台徽章，
+          启动入口统一收敛到「沟通筛选条件」与「批量沟通控制台」两处 */}
 
       {/* Filters */}
       <FilterPanel
@@ -184,6 +107,7 @@ export default function Dashboard({
         onStartApply={handleStart}
         collapsed={filterCollapsed}
         onToggleCollapse={() => setFilterCollapsed(!filterCollapsed)}
+        startDisabled={startLocked}
       />
 
       {/* Stats Grid */}
@@ -197,36 +121,15 @@ export default function Dashboard({
         ))}
       </div>
 
-      {/* Recent Applications */}
-      <div>
-        <h3 className="text-sm font-semibold text-text-secondary mb-3">最近投递</h3>
-        <div className="space-y-2">
-          {recentApps.length === 0 ? (
-            <p className="text-xs text-text-muted text-center py-6">暂无沟通记录，快去沟通吧！</p>
-          ) : (
-            recentApps.map((app) => (
-              <Card
-                key={app.id}
-                className="flex items-center gap-3 py-2.5 px-3 hover:brightness-95 transition-all"
-                onClick={() => openJobDetail(app)}
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-text-primary truncate">{app.jobTitle}</p>
-                  <p className="text-[10px] text-text-muted truncate">{app.companyName} · {app.salary}</p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {renderScore(app.matchScore)}
-                  <span className="text-[10px] text-text-muted">{formatRelativeTime(app.appliedAt)}</span>
-                  {getStatusBadge(app.status)}
-                  {app.jobId ? (
-                    <ExternalLink className="w-3 h-3 text-text-muted" />
-                  ) : null}
-                </div>
-              </Card>
-            ))
-          )}
-        </div>
-      </div>
+      {/* 批量沟通控制台（替换原「最近投递」，与「追踪」页不再重复） */}
+      <BatchControlCard
+        runtime={runtime}
+        filters={filters}
+        applyRunning={!!applyRunning}
+        onStartApply={handleStart}
+        onStopApply={() => onStopApply?.()}
+        onFilterChange={handleFilterChange}
+      />
     </div>
   )
 }

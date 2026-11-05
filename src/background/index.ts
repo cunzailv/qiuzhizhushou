@@ -10,6 +10,13 @@ import { resetDailyCounter } from '../shared/antiBot'
 import { log, logError, logGroup, logGroupEnd } from '../shared/utils/logger'
 import { butlerRunDaily, getActiveFollowUps } from '../shared/agent/butler'
 import { campaignService } from './campaign-service'
+import {
+  acquireRunMode,
+  getRuntimeState,
+  patchRuntimeState,
+  releaseRunMode,
+  type RunMode,
+} from '../shared/runtime-state'
 import { appendTasksToCampaign } from '../shared/agent/queue-store'
 import { checkAllPlatformsAuth } from '../shared/platform/auth-checker'
 import {
@@ -43,6 +50,12 @@ import {
 import type { AgentSkill } from '../shared/agent/types'
 import type { JobCard, MatchResult } from '../shared/types/job'
 import { getAssistantState, patchAssistantState } from '../shared/assistant-state'
+import { getPlatformEntries } from '../shared/platform'
+import {
+  findAssistantTabId,
+  findJobSiteTabId,
+  runAssistantEntry,
+} from '../shared/assistant-entry'
 import { handleExternalAiRpc } from './external-ai-rpc'
 import {
   getExternalAiConfig, saveExternalAiConfig, getExternalAiStatus,
@@ -260,6 +273,8 @@ async function shutdownAssistant() {
   const campaign = await campaignService.abort()
   try { await chrome.alarms.clear(APPLY_TICK_ALARM) } catch { /* 预期内异常，安全忽略 */ }
   await patchAssistantState({ panelState: 'closed' })
+  // 全局停止：无论当前是半自动还是全自动，都释放互斥锁
+  await releaseRunMode('idle')
   await broadcastAssistantCancel()
   return { campaign, state: await getAssistantState() }
 }
@@ -278,6 +293,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     handleExternalAiRpc(message.payload || {}, { shutdownAssistant })
       .then(sendResponse)
       .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }))
+    return true
+  }
+
+  // ─── 半自动 / 全自动互斥锁（单一真源：setting_runtimeState）───
+  if (message.type === 'RUNTIME_GET') {
+    getRuntimeState().then((state) => sendResponse({ ok: true, state })).catch(() => sendResponse({ ok: false }))
+    return true
+  }
+  if (message.type === 'RUNTIME_ACQUIRE') {
+    const mode = message.payload?.mode as RunMode
+    if (mode !== 'manual' && mode !== 'autopilot') {
+      sendResponse({ ok: false, error: '无效的运行模式' })
+      return true
+    }
+    acquireRunMode(mode)
+      .then((result) => sendResponse({ ok: result.ok, state: result.state, conflict: result.conflict }))
+      .catch((err) => sendResponse({ ok: false, error: String(err) }))
+    return true
+  }
+  if (message.type === 'RUNTIME_RELEASE') {
+    const mode = (message.payload?.mode ?? 'idle') as RunMode
+    releaseRunMode(mode).then((state) => sendResponse({ ok: true, state })).catch(() => sendResponse({ ok: false }))
+    return true
+  }
+  if (message.type === 'RUNTIME_PATCH') {
+    patchRuntimeState(message.payload?.patch ?? {})
+      .then((state) => sendResponse({ ok: true, state }))
+      .catch(() => sendResponse({ ok: false }))
     return true
   }
 
@@ -325,6 +368,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     sendResponse({ success: true })
   }
 
+  if (message.type === 'OPEN_ASSISTANT_SIDEBAR') {
+    void openSidebarInActiveTab()
+      .then(async (success) => {
+        // 当前页不是招聘网站时自动去招聘网站展开侧栏，避免按钮「点了没反应」
+        if (!success) await openJobSiteWithSidebar()
+        sendResponse({ success: true })
+      })
+      .catch(() => sendResponse({ success: false }))
+    return true
+  }
+
+  if (message.type === 'OPEN_ASSISTANT_PANEL') {
+    void focusOrCreateAssistantPanel()
+      .then(() => sendResponse({ success: true }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
+  if (message.type === 'OPEN_SIDEBAR_ON_JOB_SITE') {
+    void openJobSiteWithSidebar()
+      .then((success) => sendResponse({ success }))
+      .catch(() => sendResponse({ success: false }))
+    return true
+  }
+
   if (message.type === 'OPEN_OPTIONS') {
     chrome.tabs.create({ url: chrome.runtime.getURL('src/options/index.html') })
     sendResponse({ success: true })
@@ -353,16 +421,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Campaign 自动化流水线控制消息
   if (message.type === 'START_CAMPAIGN') {
     log(MOD, 'START_CAMPAIGN', 'Starting campaign from popup/options')
-    campaignService.start(
-      message.payload?.quotas,
-      message.payload?.enabledPlatforms,
-      message.payload?.windows,
-    )
-      .then(async (cmp) => {
-        // bot 启动后自动收起为右侧浮球，不遮挡页面；置顶常驻时不打扰
-        const state = await getAssistantState()
-        if (!state.pinned) await patchAssistantState({ panelState: 'bubble' })
-        sendResponse({ success: true, data: cmp })
+    // 二次校验：Popup 已申请锁，这里兜住外部 AI / 旧客户端绕过 UI 的情况
+    getRuntimeState()
+      .then((rt) => {
+        if (rt.mode !== 'autopilot') {
+          sendResponse({ success: false, error: rt.mode === 'manual'
+            ? '概览的半自动沟通正在运行，请先停止后再启动 AIbot'
+            : '未取得全自动运行锁，请从 AIbot 页启动' })
+          return
+        }
+        campaignService.start(
+          message.payload?.quotas,
+          message.payload?.enabledPlatforms,
+          message.payload?.windows,
+        )
+          .then(async (cmp) => {
+            // 侧栏正文就是完整助手面板（含 AIbot 实时日志），开跑后保持展开，
+            // 不再像旧浮窗版本那样自动收起成半圆浮球。
+            const state = await getAssistantState()
+            if (state.panelState !== 'expanded') await patchAssistantState({ panelState: 'expanded' })
+            sendResponse({ success: true, data: cmp })
+          })
+          .catch(async (err) => {
+            await releaseRunMode('autopilot')
+            sendResponse({ success: false, error: String(err) })
+          })
       })
       .catch((err) => sendResponse({ success: false, error: String(err) }))
     return true
@@ -433,20 +516,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'PAUSE_CAMPAIGN') {
     log(MOD, 'PAUSE_CAMPAIGN', 'Pausing campaign')
     campaignService.pause(message.payload?.reason || 'user')
-      .then((cmp) => sendResponse({ success: true, data: cmp }))
+      .then(async (cmp) => {
+        // 暂停即让出互斥锁，用户可切到概览跑半自动；恢复时再重新申请。
+        await releaseRunMode('autopilot')
+        sendResponse({ success: true, data: cmp })
+      })
       .catch((err) => sendResponse({ success: false, error: String(err) }))
     return true
   }
 
   if (message.type === 'RESUME_CAMPAIGN') {
     log(MOD, 'RESUME_CAMPAIGN', 'Resuming campaign')
-    campaignService.resume()
-      .then(async (cmp) => {
+    ;(async () => {
+      // 恢复等同重新启动：必须重新取得 autopilot 锁，防止与概览半自动并行
+      const lock = await acquireRunMode('autopilot')
+      if (!lock.ok) {
+        sendResponse({
+          success: false,
+          error: lock.conflict === 'manual'
+            ? '概览的半自动沟通正在运行，请先停止后再恢复 AIbot'
+            : '无法取得全自动运行锁，请重试',
+        })
+        return
+      }
+      try {
+        const cmp = await campaignService.resume()
         const state = await getAssistantState()
-        if (!state.pinned) await patchAssistantState({ panelState: 'bubble' })
+        if (state.panelState !== 'expanded') await patchAssistantState({ panelState: 'expanded' })
         sendResponse({ success: true, data: cmp })
-      })
-      .catch((err) => sendResponse({ success: false, error: String(err) }))
+      } catch (err) {
+        await releaseRunMode('autopilot')
+        sendResponse({ success: false, error: String(err) })
+      }
+    })().catch((err) => sendResponse({ success: false, error: String(err) }))
     return true
   }
 
@@ -723,7 +825,47 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true
 })
 
-// ─── 点击扩展图标：在网页右侧唤起侧栏（不再弹 popup） ───
+// ─── 点击扩展图标 / 后台「返回助手」：永远回到助手，绝不把用户困在后台 ───
+const POPUP_PAGE_URL = chrome.runtime.getURL('src/popup/index.html')
+
+function extensionOrigin(): string {
+  try {
+    return new URL(chrome.runtime.getURL('')).origin
+  } catch {
+    return ''
+  }
+}
+
+/** 复用已打开的独立助手面板；没有才新建。绝不重复打开管理后台 */
+async function focusOrCreateAssistantPanel(): Promise<void> {
+  const tabs = await chrome.tabs.query({ currentWindow: true })
+  const existingId = findAssistantTabId(tabs, POPUP_PAGE_URL)
+  if (existingId !== null) {
+    await chrome.tabs.update(existingId, { active: true })
+    return
+  }
+  await chrome.tabs.create({ url: `${POPUP_PAGE_URL}?standalone=1` })
+}
+
+/** 「返回助手侧栏」：激活已有招聘网站标签页并展开侧栏；没有则新开平台首页 */
+async function openJobSiteWithSidebar(): Promise<boolean> {
+  const entries = getPlatformEntries()
+  const isJobSite = (url: string) => entries.some((entry) => entry.matchesUrl(url))
+  const tabs = await chrome.tabs.query({ currentWindow: true })
+  const existingId = findJobSiteTabId(tabs, isJobSite)
+
+  // 写统一控制状态，所有招聘网站标签页会通过 storage.onChanged 同步展开
+  await patchAssistantState({ panelState: 'expanded' })
+
+  if (existingId !== null) {
+    await chrome.tabs.update(existingId, { active: true })
+    return true
+  }
+  const homeUrl = entries[0]?.homeUrl || 'https://www.zhipin.com/'
+  await chrome.tabs.create({ url: homeUrl })
+  return true
+}
+
 async function toggleAssistantPanelInTab(tabId: number): Promise<boolean> {
   try {
     await chrome.tabs.sendMessage(tabId, { type: 'TOGGLE_ASSISTANT_PANEL' })
@@ -745,20 +887,23 @@ async function toggleAssistantPanelInTab(tabId: number): Promise<boolean> {
   }
 }
 
+// 「侧栏」按钮：在网页右侧唤起整高侧栏（面板正文就是完整的助手面板）
+// 受限页面（chrome:// / 扩展页）注入不了时由调用方去招聘网站展开，绝不打开管理后台
+async function openSidebarInActiveTab(): Promise<boolean> {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+  if (!tab?.id) return false
+  const url = tab.url ?? ''
+  // chrome:// 等受限页面无法注入脚本
+  if (!/^https?:/i.test(url)) return false
+  return toggleAssistantPanelInTab(tab.id)
+}
+
 chrome.action.onClicked.addListener((tab) => {
-  void (async () => {
-    if (!tab.id) return
-    const url = tab.url ?? ''
-    // chrome:// 等受限页面无法注入脚本，退化为打开管理后台
-    if (!/^https?:/i.test(url)) {
-      await chrome.tabs.create({ url: chrome.runtime.getURL('src/options/index.html') })
-      return
-    }
-    const handled = await toggleAssistantPanelInTab(tab.id)
-    if (!handled) {
-      await chrome.tabs.create({ url: chrome.runtime.getURL('src/options/index.html') })
-    }
-  })()
+  void runAssistantEntry(tab.url ?? '', extensionOrigin(), {
+    tryToggleSidebar: () =>
+      tab.id ? toggleAssistantPanelInTab(tab.id) : Promise.resolve(false),
+    openAssistantPanel: focusOrCreateAssistantPanel,
+  }).catch((error) => logError(MOD, 'action.onClicked', 'Unable to open assistant', error))
 })
 
 // Keep service worker alive

@@ -38,7 +38,7 @@ import { generateDailyButlerReport } from '../shared/agent/butler/daily-report-g
 import { getDailyReportConfig } from '../shared/db/butler-evolution-store'
 import { recordError } from '../shared/db/error-store'
 import { extractTargetCareers } from '../shared/agent/job-filter'
-import { getSetting } from '../shared/db/settings-store'
+import { loadSharedApplyFilters } from '../shared/agent/filter-config'
 import { replanIfNeeded } from '../shared/agent/planner'
 import { sendWebhookNotification } from '../shared/notification/webhook-notifier'
 import {
@@ -47,6 +47,7 @@ import {
   formatDiscoveryLogMessage,
 } from '../shared/agent/job-discovery'
 import type { ApplyFilters } from '../shared/types/filters'
+import { releaseRunMode } from '../shared/runtime-state'
 import { log, logWarn, logError } from '../shared/utils/logger'
 
 const MOD = 'CampaignService'
@@ -124,6 +125,8 @@ export async function runCampaignTick(): Promise<void> {
     if (isCampaignFinished(campaign)) {
       campaign.status = 'done'
       await pauseAgentCampaign('user')
+      // 自然完成也要让出互斥锁，否则概览半自动会被永久锁住
+      await releaseRunMode('autopilot')
       await appendCampaignLog('🎉 所有已启用平台的投递任务均已圆满完成！', 'success')
       sendNotification('🎉 投递活动已完成', '所有已开启平台的投递配额已达成或岗位已投完！')
 
@@ -198,6 +201,7 @@ export async function runCampaignTick(): Promise<void> {
         await appendCampaignLog('🎉 所有已开启平台的投递配额均已达成！', 'success')
         campaign.status = 'done'
         await pauseAgentCampaign('user')
+        await releaseRunMode('autopilot')
         sendNotification('🎉 投递活动已完成', '所有开启平台的配额已全部投完！')
 
         // 事后自动触发生成今日“管家日报”
@@ -327,34 +331,14 @@ async function autoCollectJobsForCampaign(
     ...campaign.tasks.filter((t) => t.company && t.jobTitle).map((t) => `${t.platform}:${t.company.trim()}:${t.jobTitle.trim()}`),
   ]))
 
-  // 1. 获取默认简历与用户筛选偏好
+  // 1. 获取默认简历与用户筛选偏好（与概览共用同一份配置，不再硬编码评分开关/最低分）
   const defaultResume = await getDefaultResume()
-  const filterJobTitles = await getSetting<string>('filterJobTitles', '')
-  const filterLocations = await getSetting<string>('filterLocations', '')
-  const filterSalaryMin = await getSetting<number | null>('filterSalaryMin', null)
-  const filterSalaryMax = await getSetting<number | null>('filterSalaryMax', null)
-  const filterExperience = await getSetting<string>('filterExperience', '')
-  const filterEducation = await getSetting<string>('filterEducation', '')
-  const filterExcludeKeywords = await getSetting<string>('filterExcludeKeywords', '')
-  const filterPublishTime = await getSetting<string>('filterPublishTime', 'week')
-
-  const filters: ApplyFilters = {
-    jobTitles: filterJobTitles,
-    locations: filterLocations,
-    salaryMin: filterSalaryMin,
-    salaryMax: filterSalaryMax,
-    experience: filterExperience,
-    education: filterEducation,
-    excludeKeywords: filterExcludeKeywords,
-    publishTime: filterPublishTime,
-    enableAiMatch: true,
-    minMatchScore: 60,
-  }
+  const filters: ApplyFilters = await loadSharedApplyFilters()
 
   // 2. 依据简历与筛选偏好提取意向职业清单与轮转关键词 (Feature D)
   const keywordInfo = await getNextSearchKeyword(defaultResume, undefined, filters)
   const targetCareers = extractTargetCareers(defaultResume, filters)
-  const primaryCareerKeyword = keywordInfo.keyword || targetCareers[0] || filterJobTitles.split(/\s+/)[0] || ''
+  const primaryCareerKeyword = keywordInfo.keyword || targetCareers[0] || filters.jobTitles.split(/\s+/)[0] || ''
   const careerLabel = targetCareers.length > 0 ? targetCareers.join(' / ') : keywordInfo.keyword
 
   for (const platform of activePlatforms) {

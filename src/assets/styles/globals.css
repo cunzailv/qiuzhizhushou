@@ -2,6 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 内嵌在网页右侧侧栏（iframe）时：铺满可用宽高，去掉 popup 的固定尺寸 */
+html.app-embedded,
+html.app-embedded body,
+html.app-embedded #root {
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
 @layer base {
   * {
     box-sizing: border-box;
@@ -75,4 +84,10 @@
   .badge {
     @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
   }
+}
+
+/* 独立助手面板标签页（点图标无法注入侧栏时的兜底形态）：居中面板 + 留白底色 */
+body.app-standalone {
+  min-height: 100vh;
+  background: #eef0f4;
 }

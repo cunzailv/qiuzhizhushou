@@ -40,6 +40,7 @@ import {
 import type { PlatformAuthInfo } from '../../shared/platform/auth-checker'
 import { PLATFORM_LOGIN_URLS } from '../../shared/platform/auth-checker'
 import { getSetting, setSetting } from '../../shared/db/settings-store'
+import { persistSharedFilters } from '../../shared/agent/filter-config'
 import {
   DEFAULT_ASSISTANT_STATE,
   getAssistantState,
@@ -47,6 +48,12 @@ import {
   type AssistantControlState,
   type PanelState,
 } from '../../shared/assistant-state'
+import {
+  DEFAULT_RUNTIME_STATE,
+  getRuntimeState,
+  subscribeRuntimeState,
+  type AssistantRuntimeState,
+} from '../../shared/runtime-state'
 
 const PLATFORM_INFOS: Array<{ id: PlatformId; name: string; icon: string }> = [
   { id: 'boss', name: 'Boss直聘', icon: '💼' },
@@ -64,12 +71,19 @@ interface CampaignPanelProps {
 export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNavigateTab }) => {
   const [stats, setStats] = useState<CampaignStats | null>(null)
   const [assistant, setAssistant] = useState<AssistantControlState>(DEFAULT_ASSISTANT_STATE)
+  const [runtime, setRuntime] = useState<AssistantRuntimeState>(DEFAULT_RUNTIME_STATE)
   const [loading, setLoading] = useState(false)
 
   // 悬浮窗配置：与页面浮窗、后台调度共享同一份状态
   useEffect(() => {
     getAssistantState().then(setAssistant).catch(() => {})
     return subscribeAssistantState(setAssistant)
+  }, [])
+
+  // 全局运行锁：概览半自动运行时，全自动入口必须禁用
+  useEffect(() => {
+    getRuntimeState().then(setRuntime).catch(() => {})
+    return subscribeRuntimeState(setRuntime)
   }, [])
 
   const updateAssistant = useCallback(async (patch: Partial<AssistantControlState>) => {
@@ -96,6 +110,13 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
     }
     await updateAssistant({ panelState: state })
   }, [updateAssistant])
+
+  /** AI 评分开关：写 assistant-state 单一真源 + 共享筛选配置（概览会实时同步） */
+  const handleAiMatchChange = useCallback((enabled: boolean) => {
+    void updateAssistant({ enableAiMatch: enabled })
+    void persistSharedFilters({ enableAiMatch: enabled }).catch(() => {})
+  }, [updateAssistant])
+
   const [collectingJobs, setCollectingJobs] = useState(false)
   const [clearingPending, setClearingPending] = useState(false)
   const [enabledPlatforms, setEnabledPlatforms] = useState<Record<PlatformId, boolean>>({
@@ -466,13 +487,36 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
     }
   }
 
-  // 启动流水线
+  // 启动流水线（全自动）：先申请 autopilot 锁，与概览的半自动互斥
   const handleStart = async () => {
+    if (runtime.mode === 'manual') {
+      onNotify?.('概览的半自动沟通正在运行，请先在概览页点「停止」', 'warning')
+      return
+    }
+    try {
+      const lock = await chrome.runtime.sendMessage({
+        type: 'RUNTIME_ACQUIRE', payload: { mode: 'autopilot' },
+      }) as { ok?: boolean; conflict?: string; error?: string } | undefined
+      if (!lock?.ok) {
+        onNotify?.(
+          lock?.conflict === 'manual'
+            ? '概览的半自动沟通正在运行，请先停止后再启动 AIbot'
+            : `启动失败：${lock?.error || '运行状态未就绪'}`,
+          'warning',
+        )
+        return
+      }
+    } catch {
+      onNotify?.('无法取得全自动运行锁，请重试', 'error')
+      return
+    }
+
     const activePlatformIds = (Object.keys(enabledPlatforms) as PlatformId[]).filter(
       (p) => enabledPlatforms[p],
     )
     if (activePlatformIds.length === 0) {
       onNotify?.('请至少开启一个要投递的招聘平台！', 'warning')
+      void chrome.runtime.sendMessage({ type: 'RUNTIME_RELEASE', payload: { mode: 'autopilot' } }).catch(() => {})
       return
     }
 
@@ -502,9 +546,11 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         onNotify?.(`AIbot 已启动！正在调度 [${activePlatformIds.join(', ')}]`, 'success')
         await fetchStats()
       } else {
+        void chrome.runtime.sendMessage({ type: 'RUNTIME_RELEASE', payload: { mode: 'autopilot' } }).catch(() => {})
         onNotify?.(`启动失败: ${res.error}`, 'error')
       }
     } catch (err) {
+      void chrome.runtime.sendMessage({ type: 'RUNTIME_RELEASE', payload: { mode: 'autopilot' } }).catch(() => {})
       onNotify?.(`启动异常: ${String(err)}`, 'error')
     } finally {
       setLoading(false)
@@ -523,13 +569,22 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
     }
   }
 
-  // 恢复
+  // 恢复（等同重启：后台会重新申请 autopilot 锁，与概览半自动互斥）
   const handleResume = async () => {
     setLoading(true)
     try {
-      await chrome.runtime.sendMessage({ type: 'RESUME_CAMPAIGN' })
-      onNotify?.('AIbot 已恢复投递', 'success')
-      await fetchStats()
+      const res = (await chrome.runtime.sendMessage({ type: 'RESUME_CAMPAIGN' })) as {
+        success: boolean
+        error?: string
+      }
+      if (res?.success) {
+        onNotify?.('AIbot 已恢复投递', 'success')
+        await fetchStats()
+      } else {
+        onNotify?.(res?.error || '恢复失败，请重试', 'warning')
+      }
+    } catch (err) {
+      onNotify?.(`恢复异常: ${String(err)}`, 'error')
     } finally {
       setLoading(false)
     }
@@ -906,6 +961,11 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
           <span className="text-[10px] text-slate-400">与页面浮窗实时同步</span>
         </div>
 
+        <p className="text-[10px] leading-relaxed text-text-muted rounded-md bg-primary/5 border border-primary/15 px-2 py-1.5">
+          🔗 岗位、地点、薪资、AI 评分等<strong className="text-primary-light">沟通筛选条件与概览共用</strong>，
+          请到「概览 → 沟通筛选条件」修改；此处改评分开关也会同步回概览。
+        </p>
+
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-slate-500 w-14 shrink-0">投递模式</span>
           <button onClick={() => updateAssistant({ applyMode: 'batch' })}
@@ -920,11 +980,11 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
 
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] text-slate-500 w-14 shrink-0">AI 评分</span>
-          <button onClick={() => updateAssistant({ enableAiMatch: true })}
+          <button onClick={() => handleAiMatchChange(true)}
             className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${assistant.enableAiMatch ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
             ⭐ 按分筛选
           </button>
-          <button onClick={() => updateAssistant({ enableAiMatch: false })}
+          <button onClick={() => handleAiMatchChange(false)}
             className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${!assistant.enableAiMatch ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
             🚀 不评分沟通
           </button>
@@ -942,19 +1002,21 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
           </button>
         </div>
 
-        <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-slate-500 w-14 shrink-0">侧栏形态</span>
-          <button onClick={() => handlePanelState('expanded')}
-            className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${assistant.panelState === 'expanded' ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
-            右侧侧栏
-          </button>
-          <button onClick={() => handlePanelState('bubble')}
-            className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${assistant.panelState === 'bubble' ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
-            收起为浮球
-          </button>
+        <div className="space-y-1.5">
+          <span className="text-[10px] text-slate-500">面板形态</span>
+          <div className="grid grid-cols-2 gap-1.5">
+            <button onClick={() => handlePanelState('expanded')}
+              className={`py-1.5 rounded-md text-[11px] border transition ${assistant.panelState === 'expanded' ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
+              整高侧栏
+            </button>
+            <button onClick={() => handlePanelState('bubble')}
+              className={`py-1.5 rounded-md text-[11px] border transition ${assistant.panelState === 'bubble' ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
+              半圆浮球
+            </button>
+          </div>
           <button onClick={() => handlePanelState('closed')}
-            className="flex-1 py-1.5 rounded-md text-[11px] border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 transition">
-            停止
+            className="w-full py-1.5 rounded-md text-[11px] border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 transition">
+            停止并关闭 AIbot
           </button>
         </div>
 
@@ -973,17 +1035,22 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         </button>
 
         <p className="text-[10px] text-slate-400 leading-relaxed">
-          点击浏览器工具栏的插件图标即可在网页右侧展开侧栏；右上角 × 收起为浮球（AIbot 继续运行），📌 置顶后不再自动收起。
+          点击浏览器工具栏的插件图标 → 网页右侧展开整高侧栏（完整助手面板）；点右上角 × → 收起成半圆浮球；再点浮球 → 还原整高侧栏。📌 置顶后新页面也保持展开、不再自动收起。
         </p>
       </div>
 
       {/* 控制操作栏 */}
       <div className="space-y-2 pt-1">
         <div className="flex items-center gap-2">
+          {runtime.mode === 'manual' && (
+            <div className="w-full rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-relaxed text-amber-700">
+              ✋ 概览的<strong>半自动</strong>沟通正在运行。两条流水线互斥，请先在概览页点「停止」再启动 AIbot 全自动。
+            </div>
+          )}
           {!isRunning && !isPaused && (
             <button
               onClick={handleStart}
-              disabled={loading}
+              disabled={loading || runtime.mode === 'manual'}
               className="flex-1 py-2.5 px-3 rounded-lg bg-gradient-to-r from-brand-orange to-primary text-white font-medium text-xs flex items-center justify-center gap-1.5 shadow-sm hover:brightness-105 active:scale-[0.99] transition disabled:opacity-50 cursor-pointer"
             >
               <Play className="w-3.5 h-3.5 fill-current" />

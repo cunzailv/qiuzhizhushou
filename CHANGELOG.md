@@ -1,23 +1,34 @@
 # Changelog
 
-## [Unreleased] — 右侧整高侧栏（Kimi 式）+ 置顶常驻
+## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用
 
 ### Added
 
-- **点击插件图标直接唤起侧栏**：`manifest.action` 去掉 `default_popup`，background 新增 `chrome.action.onClicked`，向当前标签页发 `TOGGLE_ASSISTANT_PANEL`；非招聘页会动态注入 content script 后重试，`chrome://` 等受限页退化为打开管理后台
-- **右侧整高侧栏**：注入面板从「右上角 320px 浮窗」改为「贴右侧、整屏高、宽 380px、留 8px 边距」的侧栏形态（`SIDEBAR_WIDTH`），窄视口按 `calc(100vw - 16px)` 自适应
-- **标题栏新增按钮**：`⚙ 管理后台`（打开 options）、`📌 置顶常驻`、`⏻ 停止 AIbot`；`×` 改为「收起为右侧浮球」
-- **收起重做为浮球**：新增 `PanelState = bubble`，收起后显示贴在网页右侧垂直居中的半圆浮球（点击重新展开）
-- **置顶常驻**：`AssistantControlState` 新增 `pinned`；置顶后 AIbot 启动不再自动收起、新页面直接展开侧栏
-- **拖动脱离**：拖动侧栏标题栏会自动脱离为 320px 可自由移动的浮窗（保留原有拖拽与边界夹取行为）
+- **侧栏正文 = 完整助手面板**：侧栏不再自绘「投递监控 / 管家中控」精简界面，改为同源 iframe 内嵌 `src/popup/index.html`，把概览 / AIbot / 管家 / 简历 / 追踪 / 设置原样搬进整高侧栏。应用检测 `window.self !== window.top` 后加 `app-embedded` 类铺满宽高；`web_accessible_resources` 放行 popup HTML 与 `assets/*`；旧内联正文移入隐藏容器 `#panel-legacy` 以保住既有消息链路
+- **概览批量沟通控制台**：新增 `src/popup/components/BatchControlCard.tsx`，替换与「追踪」页重复的「最近投递」。展示实时状态 / 进度条 / 匹配推荐 / 今日剩余额度 / 投递模式 / AI 评分 / 开始停止 / 最近 3 条匹配结果；进度由 content 在扫描、匹配、沟通各阶段经 `runtime-state` 上报
+- **全局运行状态与互斥锁**：新增 `src/shared/runtime-state.ts`（`setting_runtimeState` 单一真源）。`RunMode = idle | manual | autopilot`，由 background 原子仲裁 `RUNTIME_ACQUIRE / RELEASE / PATCH / GET`。概览半自动与 AIbot 全自动绝不并行：冲突时启动按钮禁用 + toast 提示，content 在 `EXECUTE_APPLY` / `EXECUTE_CAMPAIGN_TASK` 入口再做一次冲突拦截
+- **陈旧锁兜底**：运行时锁带 `startedAt`，超过 2 小时视为陈旧可抢占，避免刷新 / 崩溃后永久锁死
+- **筛选条件单一真源**：新增 `src/shared/agent/filter-config.ts`（`loadSharedApplyFilters` / `persistSharedFilters`）。概览与 AIbot 全自动流水线读同一批设置键；AI 评分开关以 `setting_enableAiMatch` 为准、旧 `filterEnableAiMatch` 作回退并双写兼容
+- **回归测试**：新增 `tests/runtime-state.test.ts`（18 例：默认值 / 冲突仲裁 / 幂等 / 陈旧锁 / 进度上报 / 订阅）、`tests/shared-filters.test.ts`（8 例：全字段读取 / 评分开关与最低分 / 旧键回退 / 写后即读）与 `tests/assistant-entry.test.ts`（16 例：可注入判定 / 决策 / 标签页复用 / 编排，明确断言「绝不打开后台」）
+- **入口决策单一真源**：新增 `src/shared/assistant-entry.ts`（`canHostSidebar` / `planAssistantEntry` / `runAssistantEntry` / `findJobSiteTabId` / `findAssistantTabId`），把「点图标该去哪」从 background 里抽成可单测的纯函数
+- **独立助手面板**：popup 新增 `?standalone=1` 标签页形态（`body.app-standalone` 居中留白），顶部提示 + 右上角「展开侧栏」按钮；background 用 `focusOrCreateAssistantPanel()` 复用已开面板，不重复开标签页
+- **后台页回家按钮**：`src/options/App.tsx` 左侧栏顶部新增「返回助手侧栏」与「打开独立助手面板」
 
 ### Changed
 
-- `×` 不再等于「停止 AIbot」：收起为浮球只改形态，bot 继续运行；停止改由 `⏻` 按钮或 AIbot 配置页「停止」触发（`closed` 语义保持不变）
-- `START_CAMPAIGN` / `RESUME_CAMPAIGN` 成功后不再写 `collapsed`，改为未置顶时写 `bubble`
-- 新页面恢复规则：`pinned` → 展开侧栏；残留 `closed` / `bubble` → 恢复为展开
-- AIbot 配置页「浮窗形态」改为「侧栏形态（右侧侧栏 / 收起为浮球 / 停止）」并新增置顶常驻开关
-- 外部 AI 工具 `update_assistant_state` 支持 `bubble` 与 `pinned`
+- **去掉小浮窗**：`PanelState` 收敛为 `expanded | bubble | collapsed | closed`，删除 `floating`、`FLOATING_WIDTH/HEIGHT`、`applyFloatingLayout()`、`detachSidebarToFloating()`、拖动脱离与视口夹取逻辑。现在是「整高侧栏 ⇄ 半圆浮球」两态，侧栏固定贴右侧不可拖动；历史残留 `floating` 归一为 `expanded`
+- **AIbot 流水线不再硬编码评分配置**：`campaign-service.ts` 的 `enableAiMatch: true` / `minMatchScore: 60` 改为 `loadSharedApplyFilters()`，概览改筛选后全自动补仓立即生效
+- **AI 评分开关双向同步**：概览筛选面板、批量沟通控制台、AIbot 配置页三处改动都会写同一份共享配置；任一侧改动，其他侧经 `storage.onChanged` 实时刷新
+- **暂停/恢复参与互斥**：`PAUSE_CAMPAIGN` 让出 autopilot 锁（可切到概览跑半自动），`RESUME_CAMPAIGN` 重新申请锁并在半自动运行时拒绝；campaign 自然完成 / 中止 / 异常也释放锁
+- **开跑 AIbot 保持侧栏展开**：`START_CAMPAIGN` / `RESUME_CAMPAIGN` 不再把面板收起成浮球——侧栏正文含实时行为日志，收起会让用户看不到运行过程
+- **关闭链路统一**：`shutdownAssistant()` 释放所有运行锁；`APPLY_ENDED` 与 content 收尾双重释放（幂等），不会误清对方状态
+- **概览头部去冗余**：移除概览页第二层标题「求职助手 / {平台} · 智能投递」与顶部「开始沟通 / 停止」按钮（App 全局头部已有品牌名与平台徽章）。启动入口从三处收敛为两处：「沟通筛选条件」的「开始智能沟通」与「批量沟通控制台」的「开始批量沟通（半自动）」；同时删掉与控制台重复的那条 AIbot 互斥提示，只保留控制台一条。`Dashboard` 不再接收 `platformName` prop
+- **文案与文档**：概览筛选卡片与 AIbot 配置页各加「配置共用」说明；README F 层、快速开始、本 CHANGELOG、实施计划同步到最终形态；`CampaignPanel` 面板形态改为「整高侧栏 / 半圆浮球 / 停止」并修正残留的「还原成小浮窗」文案
+
+### Fixed
+
+- **点击插件图标不再跳进管理后台、后台也不再「回不来」**：旧 `chrome.action.onClicked` 在注入侧栏失败时无条件 `chrome.tabs.create(src/options/index.html)`；而后台页是 `chrome-extension://`，content script 永远注入不进去，于是再点图标又开一个后台页，形成死循环，且后台页没有任何返回助手的入口。现改为 `runAssistantEntry()` 统一编排：扩展页 / 受限页连注入都不尝试，直接打开或复用独立助手面板；普通 http(s) 页注入失败也回退到助手面板；`OPEN_ASSISTANT_SIDEBAR` 失败时回退到「去招聘网站展开侧栏」。显式 `OPEN_OPTIONS`（设置按钮）保留，但不再是任何兜底路径
+- **修正文档与注释中的错误描述**：README「受限页退化为打开管理后台」、background 里 `openSidebarInActiveTab` 的同类注释均已改正；独立面板提示语改为指向真正可用的「展开侧栏」按钮
 
 ## [1.2.0] — 2026-11-06 · 安全默认、平台配额、自主授权契约与经验记忆
 

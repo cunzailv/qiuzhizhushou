@@ -147,6 +147,46 @@ describe('悬浮窗三态', () => {
   })
 })
 
+describe('两态收起：整高侧栏 ⇄ 半圆浮球', () => {
+  it('bubble 只留半圆浮球，点浮球直接展开整高侧栏', () => {
+    const host = createFloatingPanel()
+    setPanelState(host, 'bubble')
+
+    expect(host.style.display).toBe('none')
+    const trigger = document.getElementById('boss-assistant-trigger') as HTMLElement
+    expect(trigger).not.toBeNull()
+
+    trigger.click()
+
+    expect(host.style.display).toBe('block')
+    expect(host.style.width).toContain('440px')
+    expect(host.style.bottom).toBe('8px')
+    expect(document.getElementById('boss-assistant-trigger')).toBeNull()
+  })
+
+  it('关闭态的浮球点击同样回到整高侧栏', () => {
+    const host = createFloatingPanel()
+    setPanelState(host, 'closed')
+
+    const trigger = document.getElementById('boss-assistant-trigger') as HTMLElement
+    expect(trigger).not.toBeNull()
+
+    trigger.click()
+
+    expect(host.style.display).toBe('block')
+    expect(host.style.bottom).toBe('8px')
+    expect(host.style.width).toContain('440px')
+  })
+
+  it('拖动标题栏不会把侧栏脱离成浮窗', () => {
+    const host = createFloatingPanel()
+    const header = host.shadowRoot!.querySelector('.panel-header') as HTMLElement
+    expect(getComputedStyle(header).cursor).not.toBe('move')
+    expect(host.style.bottom).toBe('8px')
+    expect(host.style.width).toContain('440px')
+  })
+})
+
 describe('关闭竞态防护', () => {
   it('本地取消标记置位时立即取消任务', () => {
     expect(isAssistantTaskCancelled(DEFAULT_ASSISTANT_STATE, true)).toBe(true)

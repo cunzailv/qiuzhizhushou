@@ -12,9 +12,11 @@ interface FilterPanelProps {
   onStartApply: () => void
   collapsed: boolean
   onToggleCollapse: () => void
+  /** AIbot 全自动运行中时锁住半自动入口 */
+  startDisabled?: boolean
 }
 
-export default function FilterPanel({ filters, onChange, collapsed, onToggleCollapse, onStartApply }: FilterPanelProps) {
+export default function FilterPanel({ filters, onChange, collapsed, onToggleCollapse, onStartApply, startDisabled }: FilterPanelProps) {
   const activeCount = [
     filters.jobTitles, filters.locations,
     filters.salaryMin || filters.salaryMax,
@@ -42,6 +44,10 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
 
       {!collapsed && (
         <div className="space-y-2.5 p-3 bg-black/[0.02] rounded-xl border border-black/10">
+          <p className="text-[10px] leading-relaxed text-text-muted rounded-lg bg-primary/5 border border-primary/15 px-2 py-1.5">
+            🔗 此配置<strong className="text-primary-light">同时作用于概览半自动与 AIbot 全自动流水线</strong>，改一次两边同时生效。
+          </p>
+
           {/* Job Title */}
           <FilterField
             icon={<Search className="w-3 h-3 text-primary-light" />}
@@ -181,11 +187,18 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
           {/* Start Button */}
           <button
             onClick={onStartApply}
-            className="w-full mt-1 py-2.5 rounded-xl bg-gradient-to-r from-primary to-primary-light text-white text-sm font-semibold hover:shadow-lg hover:shadow-primary/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+            disabled={startDisabled}
+            title={startDisabled ? '当前已有沟通任务在运行，或 AIbot 全自动占用了运行锁' : undefined}
+            className="w-full mt-1 py-2.5 rounded-xl bg-gradient-to-r from-primary to-primary-light text-white text-sm font-semibold hover:shadow-lg hover:shadow-primary/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Sparkles className="w-4 h-4" />
             开始智能沟通
           </button>
+          {startDisabled && (
+            <p className="text-[10px] text-amber-700 leading-relaxed">
+              已有沟通任务在运行，或 AIbot 全自动占用了运行锁；如需重新开始请先点「停止」。
+            </p>
+          )}
         </div>
       )}
     </div>

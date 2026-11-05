@@ -48,14 +48,16 @@ describe('E3 confirm card E2E', () => {
     await page.screenshot({ path: '/tmp/ui-confirm-card.png' })
 
     // 断言确认卡片文本（vitest 无 Playwright matcher，用手动断言）
+    // 侧栏正文已换成内嵌完整面板，旧内联正文在隐容器 #panel-legacy 中保留以驱动
+    // 同一条消息链路，因此这里按「已挂载」而非「可见」断言，并用 dispatchEvent 触发点击。
     const panel = page.locator('#boss-assistant-panel')
-    await panel.getByText('需要确认').waitFor({ timeout: 5000 })
-    expect(await panel.getByText('需要确认').isVisible()).toBe(true)
-    expect(await panel.getByText('确认执行').isVisible()).toBe(true)
-    expect(await panel.getByText('取消').isVisible()).toBe(true)
+    await panel.getByText('需要确认').waitFor({ state: 'attached', timeout: 5000 })
+    expect(await panel.getByText('需要确认').count()).toBeGreaterThan(0)
+    expect(await panel.getByText('确认执行').count()).toBeGreaterThan(0)
+    expect(await panel.getByText('取消').count()).toBeGreaterThan(0)
 
     // 点击确认 → 卡片消失、回到 applying
-    await panel.getByText('确认执行').click()
+    await panel.getByText('确认执行').dispatchEvent('click')
     await page.waitForTimeout(500)
     expect(await panel.getByText('需要确认').count()).toBe(0)
     await page.close()

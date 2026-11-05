@@ -9,12 +9,18 @@ import {
   getPlatformsMeta,
 } from '../shared/platform'
 import {
-  LayoutDashboard, FileText, ListChecks, Settings2, Bot, Sparkles,
+  LayoutDashboard, FileText, ListChecks, Settings2, Bot, Sparkles, PanelRight,
 } from 'lucide-react'
 import logoUrl from '../assets/logo-transparent.png'
 import PlatformShortcuts from './components/PlatformShortcuts'
 import { CampaignPanel } from './components/CampaignPanel'
 import { installGlobalErrorCapture } from '../shared/db/error-store'
+import {
+  DEFAULT_RUNTIME_STATE,
+  getRuntimeState,
+  subscribeRuntimeState,
+  type AssistantRuntimeState,
+} from '../shared/runtime-state'
 
 installGlobalErrorCapture()
 // 安全阀档位初始化（首次安装写保守档，老用户标记 custom 不覆盖）
@@ -130,6 +136,7 @@ export default function App() {
   const [platformOverride, setPlatformOverride] = useState('auto')
   const [platforms, setPlatforms] = useState<Array<{ id: string; name: string; icon: string }>>([])
   const [applyRunning, setApplyRunning] = useState(false)
+  const [runtime, setRuntime] = useState<AssistantRuntimeState>(DEFAULT_RUNTIME_STATE)
   const [runningTabId, setRunningTabId] = useState<number | null>(null)
   const [activeTabId, setActiveTabId] = useState<number | null>(null)
   const [toast, setToast] = useState<ToastState>({
@@ -158,12 +165,19 @@ export default function App() {
     getSetting<string>('platformOverride', 'auto').then((o) => setPlatformOverride(o || 'auto'))
   }, [])
 
-  // 接收 content 脚本「运行结束」通知，复位「停止」按钮。
+  // 全局运行状态（半自动 / 全自动互斥锁 + 进度），供概览台与按钮禁用使用
+  useEffect(() => {
+    getRuntimeState().then(setRuntime).catch(() => {})
+    return subscribeRuntimeState(setRuntime)
+  }, [])
+
+  // 接收 content 脚本「运行结束」通知，复位「停止」按钮并释放 manual 锁。
   useEffect(() => {
     const listener = (message: { type?: string; stopped?: boolean }) => {
       if (message?.type === 'APPLY_ENDED') {
         setApplyRunning(false)
         setRunningTabId(null)
+        void chrome.runtime.sendMessage({ type: 'RUNTIME_RELEASE', payload: { mode: 'manual' } }).catch(() => {})
       }
     }
     chrome.runtime.onMessage.addListener(listener)
@@ -235,6 +249,30 @@ export default function App() {
   }
 
   const handleStartApply = async (filters: ApplyFilters) => {
+    if (applyRunning) {
+      showToast('批量沟通正在进行中，请先点「停止」再重新开始', 'info')
+      return
+    }
+    // 半自动与全自动互斥：先向 background 申请 manual 锁
+    try {
+      const lock = await chrome.runtime.sendMessage({
+        type: 'RUNTIME_ACQUIRE', payload: { mode: 'manual' },
+      }) as { ok?: boolean; conflict?: string; error?: string } | undefined
+      if (!lock?.ok) {
+        showToast(
+          lock?.conflict === 'autopilot'
+            ? 'AIbot 全自动正在运行，请先在 AIbot 页终止后再开始半自动沟通'
+            : `无法开始：${lock?.error || '运行状态未就绪'}`,
+          'warning',
+        )
+        return
+      }
+    } catch (error) {
+      log(MOD, 'handleStartApply', 'Failed to acquire manual lock', error)
+      showToast('无法取得运行锁，请重试', 'error')
+      return
+    }
+
     log(MOD, 'handleStartApply', 'User clicked 开始投递', {
       jobTitles: filters.jobTitles,
       locations: filters.locations,
@@ -297,7 +335,51 @@ export default function App() {
     } catch (error) {
       const message = error instanceof Error ? error.message : '未知错误'
       log(MOD, 'handleStartApply', 'Failed to start apply', error)
+      void chrome.runtime.sendMessage({ type: 'RUNTIME_RELEASE', payload: { mode: 'manual' } }).catch(() => {})
       showToast(`启动失败：${message}。请刷新页面后重试`, 'error')
+    }
+  }
+
+  // 内嵌在网页侧栏 iframe 里时，隐藏「打开侧栏」入口并铺满侧栏高度；
+  // standalone=1 表示作为独立标签页打开（点图标时无法注入侧栏的兜底形态）。
+  const inSidebarFrame = window.self !== window.top
+  const standalone = new URLSearchParams(window.location.search).get('standalone') === '1'
+
+  useEffect(() => {
+    if (!inSidebarFrame) return
+    document.documentElement.classList.add('app-embedded')
+    return () => document.documentElement.classList.remove('app-embedded')
+  }, [inSidebarFrame])
+
+  useEffect(() => {
+    if (!standalone) return
+    document.body.classList.add('app-standalone')
+    return () => document.body.classList.remove('app-standalone')
+  }, [standalone])
+
+  /** 在网页右侧展开侧栏 */
+  const handleOpenSidebar = async () => {
+    try {
+      // 独立面板标签页本身是 chrome-extension:// 页面，注入不了侧栏；
+      // 让 background 直接去招聘网站标签页展开（没有则新开一个）。
+      if (standalone) {
+        const result = await chrome.runtime.sendMessage({ type: 'OPEN_SIDEBAR_ON_JOB_SITE' })
+        showToast(
+          result?.success ? '已在招聘网站展开整高侧栏' : '展开侧栏失败，请手动打开招聘网站后点插件图标',
+          result?.success ? 'success' : 'warning',
+        )
+        return
+      }
+      const result = await chrome.runtime.sendMessage({ type: 'OPEN_ASSISTANT_SIDEBAR' })
+      if (result?.success) {
+        showToast('已在网页右侧展开侧栏', 'success')
+        setTimeout(() => window.close(), 500)
+      } else {
+        showToast('当前页面无法展开侧栏，请打开招聘网站页面后重试', 'warning')
+      }
+    } catch (error) {
+      log(MOD, 'handleOpenSidebar', 'Failed to open sidebar', error)
+      showToast('展开侧栏失败', 'error')
     }
   }
 
@@ -316,6 +398,7 @@ export default function App() {
       showToast('已发送停止指令', 'success')
       setApplyRunning(false)
       setRunningTabId(null)
+      void chrome.runtime.sendMessage({ type: 'RUNTIME_RELEASE', payload: { mode: 'manual' } }).catch(() => {})
     } catch (error) {
       const message = error instanceof Error ? error.message : '未知错误'
       log(MOD, 'handleStopApply', 'Failed to stop', error)
@@ -324,7 +407,15 @@ export default function App() {
   }
 
   return (
-    <div className="w-[440px] max-h-[600px] overflow-y-auto bg-surface-darkest">
+    <div
+      className={
+        inSidebarFrame
+          ? 'w-full h-full overflow-y-auto bg-surface-darkest'
+          : standalone
+            ? 'w-full max-w-[520px] mx-auto min-h-screen overflow-y-auto bg-surface-darkest shadow-xl'
+            : 'w-[440px] max-h-[600px] overflow-y-auto bg-surface-darkest'
+      }
+    >
       {/* Header */}
       <div className="sticky top-0 z-10 bg-white/85 backdrop-blur-md border-b border-black/10">
         {/* 品牌行 */}
@@ -344,7 +435,18 @@ export default function App() {
               AI 匹配评估 · 多平台一键投递
             </p>
           </div>
-          <div className="ml-auto shrink-0">
+          <div className="ml-auto shrink-0 flex items-center gap-1.5">
+            {/* 已经在网页右侧侧栏里运行时不再显示「打开侧栏」 */}
+            {!inSidebarFrame && (
+              <button
+                onClick={handleOpenSidebar}
+                title={standalone ? '去招聘网站展开整高侧栏' : '在网页右侧展开整高侧栏'}
+                className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary-light hover:bg-primary/20 transition"
+              >
+                <PanelRight className="w-3 h-3" />
+                {standalone ? '展开侧栏' : '侧栏'}
+              </button>
+            )}
             {effectivePlatformName ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary-light border border-primary/20">
                 <span className="w-1.5 h-1.5 rounded-full bg-primary-light animate-pulse" />
@@ -380,6 +482,12 @@ export default function App() {
         </div>
       </div>
 
+      {standalone && (
+        <div className="px-3.5 py-2 text-[11px] leading-relaxed text-primary-light bg-primary/5 border-b border-black/5">
+          💡 当前是独立助手面板。点右上角「展开侧栏」即可在招聘网站右侧展开整高侧栏；之后点浏览器工具栏的插件图标也能随时唤起助手。
+        </div>
+      )}
+
       {/* 平台官网直达：五个平台一键跳转，无需手动输网址 */}
       <PlatformShortcuts />
 
@@ -389,8 +497,8 @@ export default function App() {
           <Dashboard
             onStartApply={handleStartApply}
             onStopApply={handleStopApply}
-            platformName={effectivePlatformName}
             applyRunning={applyRunning}
+            runtime={runtime}
           />
         )}
         {activeTab === 'pipeline' && (

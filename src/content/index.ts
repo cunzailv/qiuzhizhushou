@@ -50,8 +50,30 @@ import {
   isJobMatchingFreshness,
 } from '../shared/agent/job-filter'
 import { getBlacklist } from '../shared/db/blacklist-store'
+import { getRuntimeState, reportBatchProgress } from '../shared/runtime-state'
 
 const MOD = 'ContentScript'
+
+/**
+ * 半自动批量沟通结束：先落最终进度，再释放 manual 互斥锁。
+ * 两处释放（这里 + popup 收到 APPLY_ENDED 时）幂等，不会误清对方的锁。
+ */
+async function endManualRun(
+  patch: Parameters<typeof reportBatchProgress>[0],
+  stopped = false,
+): Promise<void> {
+  try {
+    await reportBatchProgress({ status: 'done', ...patch })
+  } catch { /* 进度上报失败不影响主链路 */ }
+  // 所有出口（含无简历 / 无岗位 / 风控中断等提前 return）都统一通知 popup，
+  // 避免「停止」按钮卡在运行态；两处释放锁幂等。
+  try {
+    await chrome.runtime.sendMessage({ type: 'RUNTIME_RELEASE', payload: { mode: 'manual' } })
+  } catch { /* popup 未打开时忽略 */ }
+  try {
+    void chrome.runtime.sendMessage({ type: 'APPLY_ENDED', stopped }).catch(() => {})
+  } catch { /* 预期内异常，安全忽略 */ }
+}
 
 // ------ State ------
 let isApplying = false
@@ -270,7 +292,7 @@ async function init(): Promise<void> {
     await loadApplyDefaultsFromSettings()
     const storedState = await getAssistantState()
     assistantState = normalizeInitialPanelState(storedState)
-    if (storedState.panelState === 'closed' || storedState.panelState === 'bubble') {
+    if (assistantState.panelState === 'expanded' && storedState.panelState !== 'expanded') {
       // 上次「关闭 / 收起浮球」不应让本次打开页面继续隐藏；同步写回，配置页也会跟着恢复
       await patchAssistantState({ panelState: 'expanded' }).catch(() => {})
     }
@@ -315,15 +337,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'EXECUTE_APPLY') {
     const mode = message.payload?.mode || currentMode
     const filters = message.payload?.filters
-    const pageType = adapter.detectPageType()
-    // 只排除纯聊天页；首页、搜索、推荐、详情均可启动
-    if (pageType === 'chat') {
-      sendResponse({ success: false, error: '当前是聊天页面，请切换到岗位列表或推荐页' })
-      return true
-    }
-    log(MOD, 'onMessage', `EXECUTE_APPLY from popup, mode: ${mode}`, filters ? `filters: ${JSON.stringify(filters)}` : 'no filters')
-    startApply(mode, filters)
-    sendResponse({ success: true })
+    ;(async () => {
+      const pageType = adapter.detectPageType()
+      // 只排除纯聊天页；首页、搜索、推荐、详情均可启动
+      if (pageType === 'chat') {
+        sendResponse({ success: false, error: '当前是聊天页面，请切换到岗位列表或推荐页' })
+        return
+      }
+      // 互斥二次校验：popup 已在 background 申请 manual 锁，这里兜住外部 AI / 旧客户端
+      // 绕过 UI 直接派发的情况。只拦截「全自动正在跑」的真实冲突，不强制要求持锁，
+      // 以兼容网页浮窗旧入口与 E2E 直接派发。
+      const rt = await getRuntimeState().catch(() => null)
+      if (rt?.mode === 'autopilot') {
+        sendResponse({ success: false, error: 'AIbot 全自动正在运行，请先终止后再开始半自动沟通' })
+        return
+      }
+      log(MOD, 'onMessage', `EXECUTE_APPLY from popup, mode: ${mode}`, filters ? `filters: ${JSON.stringify(filters)}` : 'no filters')
+      startApply(mode, filters)
+      sendResponse({ success: true })
+    })().catch(() => sendResponse({ success: false, error: '运行状态校验失败，请重试' }))
+    return true
   }
   if (message.type === 'EXECUTE_SEND_RESUMES') {
     log(MOD, 'onMessage', 'EXECUTE_SEND_RESUMES from popup')
@@ -359,6 +392,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       setPanelState(panelHost!, assistantState.panelState)
       if (assistantState.panelState === 'closed') {
         sendResponse({ taskId: task?.id, status: 'failed', failReason: 'AIbot 已关闭' })
+        return
+      }
+      // 互斥二次校验：概览半自动正在跑时，绝不执行全自动投递任务（防抢同一页面 DOM）
+      const rt = await getRuntimeState().catch(() => null)
+      if (rt?.mode === 'manual') {
+        sendResponse({
+          taskId: task?.id,
+          status: 'failed',
+          failReason: '概览半自动批量沟通正在运行，AIbot 任务已跳过（互斥保护）',
+        })
         return
       }
       campaignTaskCancelled = false
@@ -549,9 +592,10 @@ window.addEventListener('message', (event) => {
   }
   if (data?.type === 'BOSS_ASSISTANT_SET_PANEL_STATE') {
     const state = data.state as PanelState
-    if (state === 'expanded' || state === 'collapsed' || state === 'closed' || state === 'bubble') {
+    const allowed: PanelState[] = ['expanded', 'bubble', 'collapsed', 'closed']
+    if (allowed.includes(state)) {
       if (panelHost) setPanelState(panelHost, state)
-      // 「关闭」仍然等价于关闭 bot；「收起为浮球」只改形态，bot 继续跑
+      // 「关闭」仍然等价于关闭 bot；「收起为浮球 / 小浮窗」只改形态，bot 继续跑
       if (state === 'closed') shutdownAssistantFromPanel()
       else writeAssistantState({ panelState: state })
     }
@@ -703,6 +747,28 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
   filters = { ...currentFilters, ...filters }
   currentFilters = filters
   lastRiskWarning = ''
+  matchResults = []
+
+  // 概览「批量沟通控制台」的实时进度来源（不影响原有浮窗渲染链路）
+  const report = (patch: Parameters<typeof reportBatchProgress>[0]) =>
+    reportBatchProgress(patch).catch(() => {})
+  /** 概览控制台只展示最近 3 条，避免与「追踪」页的完整列表重复 */
+  const toRecentMatches = () => matchResults.slice(-3).reverse().map((r) => ({
+    title: r.title,
+    companyName: r.companyName,
+    score: r.score,
+    recommended: r.recommended,
+    scoreBypassed: r.scoreBypassed,
+    prefiltered: r.prefiltered,
+  }))
+  await report({
+    status: 'scanning',
+    stats: { total: 0, processed: 0, matched: 0 },
+    recentMatches: [],
+    dailyRemaining: null,
+    message: '已收到启动指令，正在读取简历并扫描岗位…',
+  })
+
   if (!panelHost?.isConnected) panelHost = createFloatingPanel()
   updatePanelContent(panelHost, {
     mode: currentMode,
@@ -726,6 +792,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
     logWarn(MOD, 'startApply', 'BLOCKED: no default resume')
     showPanelToast(panelHost!, msg, 'warning')
     isApplying = false
+    void endManualRun({ message: '未设置默认简历，请先在「简历」页上传' })
     logGroupEnd()
     return
   }
@@ -763,6 +830,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
       filters, resumeMode: liepinResumeMode,
     })
     isApplying = false
+    void endManualRun({ message: '未找到岗位卡片，请到搜索页或推荐页再试' })
     logGroupEnd()
     return
   }
@@ -785,6 +853,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
     })
     showPanelToast(panelHost!, '没有符合筛选条件的岗位', 'warning')
     isApplying = false
+    void endManualRun({ message: `找到 ${allJobs.length} 个岗位，均不符合筛选条件` })
     logGroupEnd()
     return
   }
@@ -828,11 +897,16 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
         : `筛选后 ${jobs.length} 个岗位，开始匹配分析...`,
     filters, resumeMode: liepinResumeMode,
   })
+  await report({
+    status: 'matching',
+    stats: { total: jobs.length, processed: 0, matched: 0 },
+    message: `筛选后 ${jobs.length} 个岗位，开始匹配分析…`,
+  })
 
-  matchResults = []
   let matchedCount = 0
   let appliedCount = 0
   let processedCount = 0
+  let dailyRemaining: number | null = null
 
   for (const job of jobs) {
     if (!isApplying) break
@@ -856,6 +930,11 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
           filters: currentFilters, resumeMode: liepinResumeMode,
         })
         isApplying = false
+        void endManualRun({
+          message: `沟通中断：${risk.message}`,
+          stats: { total: jobs.length, processed: processedCount, matched: matchedCount },
+          recentMatches: toRecentMatches(),
+        })
         logGroupEnd()
         return
       }
@@ -878,6 +957,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
 
     // Check daily limit before processing this job
     const limitCheck = await checkDailyLimit()
+    dailyRemaining = limitCheck.remaining
     if (!limitCheck.allowed) {
       showPanelToast(panelHost!, `今日投递次数已达上限，剩余 ${limitCheck.remaining} 次`, 'warning')
       logWarn(MOD, 'startApply', `Daily limit reached — stopping run (${limitCheck.remaining} remaining)`)
@@ -902,6 +982,13 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
         matchResults,
         message: `粗筛未过: ${job.title} (${preScore}分)`,
         filters: currentFilters, resumeMode: liepinResumeMode,
+      })
+      await report({
+        status: 'matching',
+        stats: { total: jobs.length, processed: processedCount, matched: matchedCount },
+        recentMatches: toRecentMatches(),
+        dailyRemaining,
+        message: `粗筛未过：${job.title} (${preScore}分)`,
       })
       await randomDelay(200, 500)
       continue
@@ -992,6 +1079,15 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
         : `分析: ${job.title} — ${evaluatedMatch.score}分 ${evaluatedMatch.isRecommended ? '✓推荐' : '×跳过'}`,
       filters: currentFilters, resumeMode: liepinResumeMode,
     })
+    await report({
+      status: evaluatedMatch.isRecommended ? 'applying' : 'matching',
+      stats: { total: jobs.length, processed: processedCount, matched: matchedCount },
+      recentMatches: toRecentMatches(),
+      dailyRemaining,
+      message: scoreBypassed
+        ? `筛选通过：${job.title}`
+        : `分析：${job.title} — ${evaluatedMatch.score}分 ${evaluatedMatch.isRecommended ? '✓推荐' : '×跳过'}`,
+    })
 
     // Apply if batch mode + recommended  OR  AI自动确认 mode
     if (evaluatedMatch.isRecommended) {
@@ -1014,20 +1110,31 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
   // When the UI says the run is complete, a new run must be accepted immediately.
   isApplying = false
   const finishedByStop = runStopped
+  const finalMessage = finishedByStop
+    ? '已停止沟通'
+    : (currentMode === 'batch'
+        ? `沟通完成！成功 ${appliedCount}/${processedCount} 个岗位`
+        : currentFilters.enableAiMatch
+          ? `分析完成！发现 ${matchedCount} 个匹配岗位`
+          : `筛选完成！共 ${matchedCount} 个岗位可直投`)
   updatePanelContent(panelHost!, {
     mode: currentMode,
     stats: { total: jobs.length, processed: processedCount, matched: matchedCount },
     status: finishedByStop ? 'pause' : 'done',
     matchResults,
-    message: finishedByStop
-      ? '已停止沟通'
-      : (currentMode === 'batch'
-          ? `沟通完成！成功 ${appliedCount}/${processedCount} 个岗位`
-          : currentFilters.enableAiMatch
-            ? `分析完成！发现 ${matchedCount} 个匹配岗位`
-            : `筛选完成！共 ${matchedCount} 个岗位可直投`),
+    message: finalMessage,
     filters: currentFilters, resumeMode: liepinResumeMode,
   })
+
+  // 落最终进度并释放 manual 互斥锁；放在 APPLY_ENDED 之前，
+  // 保证所有进度上报都已完成，不会与释放动作产生写入竞态。
+  await endManualRun({
+    status: finishedByStop ? 'paused' : 'done',
+    stats: { total: jobs.length, processed: processedCount, matched: matchedCount },
+    recentMatches: toRecentMatches(),
+    dailyRemaining,
+    message: finalMessage,
+  }, finishedByStop)
 
   if (currentMode === 'batch') {
     showPanelToast(
@@ -1036,12 +1143,7 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
       appliedCount > 0 ? 'success' : 'warning',
     )
   }
-  // 通知 popup「本次运行已结束」，使其复位「停止」按钮状态。
-  try {
-    chrome.runtime.sendMessage({ type: 'APPLY_ENDED', stopped: finishedByStop })
-  } catch {
-    // popup 未打开时忽略
-  }
+  // 「本次运行已结束」已由 endManualRun 统一通知 popup，这里不再重复发送。
   logGroupEnd()
 }
 
@@ -1562,6 +1664,8 @@ function stopApply(): void {
     })
     showPanelToast(panelHost!, '已停止', 'warning')
   }
+  // 立即把概览控制台切到暂停态；真正的锁释放在 startApply 收尾时统一处理
+  void reportBatchProgress({ status: 'paused', message: '已停止沟通' }).catch(() => {})
 }
 
 // ------ Start ------

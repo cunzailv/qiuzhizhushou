@@ -1,6 +1,7 @@
 import React, { Suspense, lazy, useState, useEffect } from 'react'
 import {
   LayoutDashboard, CalendarDays, Ban, Download, Settings2, Activity, Bot, Brain, Send, FileText,
+  ArrowLeft, PanelRight,
 } from 'lucide-react'
 import logoUrl from '../assets/logo-transparent.png'
 
@@ -37,6 +38,19 @@ const NAV_ITEMS: NavItem[] = [
 export default function App() {
   const [activeNav, setActiveNav] = useState('dashboard')
 
+  const sendToBackground = async (type: string) => {
+    try {
+      await chrome.runtime.sendMessage({ type })
+    } catch {
+      // 扩展上下文异常时静默降级，不打断后台页本身
+    }
+  }
+
+  // 后台页是 chrome-extension:// 协议，注入不了网页侧栏，
+  // 因此必须给出明确的「回助手」入口：直接去招聘网站展开侧栏 / 打开独立助手面板。
+  const handleBackToSidebar = () => void sendToBackground('OPEN_SIDEBAR_ON_JOB_SITE')
+  const handleOpenAssistantPanel = () => void sendToBackground('OPEN_ASSISTANT_PANEL')
+
   // H5：后台安装全局错误捕获
   useEffect(() => {
     void import('../shared/db/error-store').then((m) => m.installGlobalErrorCapture()).catch(() => undefined)
@@ -49,7 +63,7 @@ export default function App() {
       {/* Sidebar */}
       <aside className="w-56 bg-surface-dark/80 border-r border-black/10 flex flex-col p-4 shrink-0">
         {/* Logo */}
-        <div className="mb-8 px-2 flex items-center gap-2.5">
+        <div className="mb-5 px-2 flex items-center gap-2.5">
           <img
             src={logoUrl}
             alt="求职投递助手"
@@ -59,6 +73,27 @@ export default function App() {
             <h1 className="text-lg font-bold leading-tight gradient-text">求职投递助手</h1>
             <p className="text-[10px] text-text-muted mt-0.5 leading-tight">智能求职 · 管理后台</p>
           </div>
+        </div>
+
+        {/* 返回助手：后台页无法注入网页侧栏，这里是唯一的主界面入口 */}
+        <div className="mb-5 space-y-2 rounded-xl border border-primary/20 bg-primary/5 p-2.5">
+          <button
+            onClick={handleBackToSidebar}
+            className="w-full flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-primary to-primary-light px-3 py-2.5 text-xs font-semibold text-white hover:brightness-105 active:scale-[0.98] transition"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            返回助手侧栏
+          </button>
+          <button
+            onClick={handleOpenAssistantPanel}
+            className="w-full flex items-center justify-center gap-2 rounded-lg border border-black/10 bg-white px-3 py-2 text-[11px] font-medium text-text-secondary hover:bg-black/5 transition"
+          >
+            <PanelRight className="w-3.5 h-3.5" />
+            打开独立助手面板
+          </button>
+          <p className="text-[10px] leading-relaxed text-text-muted px-0.5">
+            在招聘网站页面点浏览器工具栏的插件图标，即可展开右侧整高侧栏。
+          </p>
         </div>
 
         {/* Navigation */}

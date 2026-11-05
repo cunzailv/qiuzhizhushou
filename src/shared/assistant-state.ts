@@ -5,17 +5,17 @@
 import { getSetting, setSetting } from './db/settings-store'
 
 /**
- * 侧栏/浮窗形态：
- * - expanded：网页右侧整高侧栏展开
- * - bubble：收起为右侧浮球（AIbot 继续运行，点击浮球或插件图标可再次展开）
+ * 面板形态（两态收起）：
+ * - expanded：网页右侧整高侧栏 —— 点浏览器工具栏图标 / 点浮球进入
+ * - bubble：右侧垂直居中的半圆浮球 —— 点面板右上角 × 进入
  * - collapsed：沿右边缘的窄把手（旧形态，仅兼容历史数据）
- * - closed：关闭并停止 AIbot
+ * - closed：关闭并停止 AIbot（入口仍是浮球，点开回到侧栏）
  */
-export type PanelState = 'expanded' | 'collapsed' | 'closed' | 'bubble'
+export type PanelState = 'expanded' | 'bubble' | 'collapsed' | 'closed'
 export type AssistantApplyMode = 'batch' | 'recommend'
 
 export interface AssistantControlState {
-  /** 悬浮窗形态：侧栏展开 / 浮球收起 / 窄把手 / 关闭 */
+  /** 面板形态：整高侧栏 / 半圆浮球 / 窄把手 / 关闭 */
   panelState: PanelState
   /** 置顶常驻：开启后不再自动收起，新页面也直接展开侧栏 */
   pinned: boolean
@@ -99,12 +99,15 @@ export function isAssistantTaskCancelled(
  * 「收起浮球 / 关闭 AIbot」都是一次性运行时动作，不是跨页面的永久偏好：
  * - 置顶常驻：新页面直接展开侧栏
  * - 其余情况：残留的 closed / bubble 恢复为展开，避免刷新后助手一直不可见
+ * - 历史版本可能残留 floating（已废弃的小浮窗），一并归一为展开
+ * - collapsed 是旧版窄把手，保留兼容
  */
 export function normalizeInitialPanelState(
   state: AssistantControlState,
 ): AssistantControlState {
   if (state.pinned) return { ...state, panelState: 'expanded' }
-  if (state.panelState === 'closed' || state.panelState === 'bubble') {
+  const legacyFloating = (state.panelState as string) === 'floating'
+  if (legacyFloating || state.panelState === 'closed' || state.panelState === 'bubble') {
     return { ...state, panelState: 'expanded' }
   }
   return state

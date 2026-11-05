@@ -68,7 +68,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   }, ['platform', 'quota']),
   t('set_platform_enabled', '开关某个平台是否参与自动投递。', 'write', { platform: s('平台 ID'), enabled: b('是否开启') }, ['platform', 'enabled']),
   t('update_assistant_state', '修改侧栏形态 / 置顶常驻 / 投递模式 / AI 评分开关（与网页右侧侧栏双向同步）。', 'write', {
-    panelState: s('expanded（右侧侧栏） / bubble（收起为浮球） / collapsed / closed（停止）'), pinned: b('是否置顶常驻'), applyMode: s('batch / recommend'), enableAiMatch: b('是否启用 AI 评分'), liepinResumeMode: b('猎聘是否走投简历模式'),
+    panelState: s('expanded（右侧整高侧栏） / bubble（右侧半圆浮球） / collapsed（旧窄把手） / closed（停止）'), pinned: b('是否置顶常驻'), applyMode: s('batch / recommend'), enableAiMatch: b('是否启用 AI 评分'), liepinResumeMode: b('猎聘是否走投简历模式'),
   }),
   t('update_daily_report_config', '更新管家日报配置。', 'write', { config: o('完整配置对象') }, ['config']),
   t('generate_daily_report', '立即生成管家日报。', 'write', { date: s('YYYY-MM-DD') }),

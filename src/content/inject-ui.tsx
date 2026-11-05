@@ -1,5 +1,5 @@
-// Inject a floating UI panel into the Boss Zhipin page
-// Supports: collapsible, filter display, minimize toggle, floating trigger button
+// 网页右侧整高侧栏（正文为内嵌的完整助手面板）+ 半圆浮球入口。
+// 单一控制状态在 src/shared/assistant-state.ts，popup / content / background 三方同步。
 import { DEFAULT_FILTERS, type ApplyFilters } from '../shared/types/filters'
 import type { PanelState } from '../shared/assistant-state'
 
@@ -42,7 +42,6 @@ export interface PanelContent {
 let isMinimized = false
 let triggerBtn: HTMLDivElement | null = null
 let activeHost: HTMLElement | null = null
-let resizeListenerInstalled = false
 let currentPlatformName = ''
 
 export interface InPageChatMessage {
@@ -92,21 +91,7 @@ export function setPlatformName(name: string): void {
 
 const VIEWPORT_MARGIN = 8
 /** 右侧侧栏宽度（网页窄于该值时自动留出 8px 边距） */
-const SIDEBAR_WIDTH = 380
-
-function clampPanelToViewport(host: HTMLElement): void {
-  if (!host.isConnected || host.style.display === 'none') return
-
-  const rect = host.getBoundingClientRect()
-  const maxLeft = Math.max(VIEWPORT_MARGIN, window.innerWidth - rect.width - VIEWPORT_MARGIN)
-  const maxTop = Math.max(VIEWPORT_MARGIN, window.innerHeight - rect.height - VIEWPORT_MARGIN)
-  const left = Math.min(Math.max(rect.left, VIEWPORT_MARGIN), maxLeft)
-  const top = Math.min(Math.max(rect.top, VIEWPORT_MARGIN), maxTop)
-
-  host.style.right = 'auto'
-  host.style.left = `${left}px`
-  host.style.top = `${top}px`
-}
+const SIDEBAR_WIDTH = 440
 
 function restoreFloatingPanel(host: HTMLElement): void {
   const shadow = host.shadowRoot
@@ -137,10 +122,6 @@ function restoreFloatingPanel(host: HTMLElement): void {
   if (btnMinimize) btnMinimize.textContent = '−'
 }
 
-function isSidebarLayout(host: HTMLElement): boolean {
-  return host.style.bottom === `${VIEWPORT_MARGIN}px`
-}
-
 /**
  * 侧栏形态：贴网页右侧、整屏高、宽 380px（窄视口自动留出 8px 边距）。
  * 与浮窗共用同一个 panel，仅尺寸与定位不同。
@@ -168,90 +149,9 @@ function applySidebarLayout(host: HTMLElement): void {
     panel.style.maxHeight = 'none'
     panel.style.borderRadius = '16px'
   }
-  if (header) header.style.cursor = 'move'
+  if (header) header.style.cursor = 'default'
 }
 
-/** 拖动侧栏标题栏 → 脱离成可自由移动的浮窗 */
-function detachSidebarToFloating(host: HTMLElement, rect: DOMRect): boolean {
-  const shadow = host.shadowRoot
-  if (!shadow || !isSidebarLayout(host)) return false
-
-  const panel = shadow.querySelector('.panel') as HTMLElement | null
-  const width = Math.min(320, Math.max(260, Math.round(rect.width)))
-  const left = Math.max(
-    VIEWPORT_MARGIN,
-    Math.min(rect.left, window.innerWidth - width - VIEWPORT_MARGIN),
-  )
-
-  host.style.bottom = 'auto'
-  host.style.height = 'auto'
-  host.style.width = `${width}px`
-  host.style.left = `${left}px`
-  host.style.top = `${Math.max(VIEWPORT_MARGIN, rect.top)}px`
-  host.style.right = 'auto'
-
-  if (panel) {
-    panel.style.width = '100%'
-    panel.style.height = 'auto'
-    panel.style.maxHeight = `calc(100vh - ${VIEWPORT_MARGIN * 2}px)`
-  }
-  return true
-}
-
-function installPanelDragging(host: HTMLElement, header: HTMLElement): void {
-  let draggingPointerId: number | null = null
-  let offsetX = 0
-  let offsetY = 0
-
-  const stopDragging = (event: PointerEvent) => {
-    if (draggingPointerId !== event.pointerId) return
-    try {
-      header.releasePointerCapture(event.pointerId)
-    } catch {
-      // Synthetic events and a pointer released outside the page may have no capture.
-    }
-    draggingPointerId = null
-    document.body.style.userSelect = ''
-  }
-
-  header.addEventListener('pointerdown', (event) => {
-    if (event.button !== 0) return
-    if ((event.target as Element | null)?.closest('.header-actions')) return
-
-    // 侧栏拖动标题栏 = 脱离成浮窗；浮窗拖动 = 自由移动
-    detachSidebarToFloating(host, host.getBoundingClientRect())
-    const rect = host.getBoundingClientRect()
-    draggingPointerId = event.pointerId
-    offsetX = event.clientX - rect.left
-    offsetY = event.clientY - rect.top
-    host.style.right = 'auto'
-    host.style.left = `${rect.left}px`
-    host.style.top = `${rect.top}px`
-    document.body.style.userSelect = 'none'
-
-    try {
-      header.setPointerCapture(event.pointerId)
-    } catch {
-      // Synthetic pointer events used by browser tests do not create active pointers.
-    }
-    event.preventDefault()
-  })
-
-  window.addEventListener('pointermove', (event) => {
-    if (draggingPointerId !== event.pointerId) return
-    host.style.left = `${event.clientX - offsetX}px`
-    host.style.top = `${event.clientY - offsetY}px`
-    clampPanelToViewport(host)
-  })
-  window.addEventListener('pointerup', stopDragging)
-  window.addEventListener('pointercancel', stopDragging)
-}
-
-/**
- * 形态切换：expanded（右侧整高侧栏）/ bubble（右侧浮球，bot 继续）/
- * collapsed（旧版窄把手，兼容历史数据）/ closed（关闭并停止 AIbot）。
- * 状态由统一控制状态驱动，popup 与侧栏双向同步。
- */
 export function setPanelState(host: HTMLElement, state: PanelState): void {
   const shadow = host.shadowRoot
   if (!shadow) return
@@ -286,7 +186,7 @@ export function setPanelState(host: HTMLElement, state: PanelState): void {
 
   const panel = shadow.querySelector('.panel') as HTMLElement | null
 
-  // 浮球与关闭都只保留页面上的小入口，不销毁 host（内容仍在，便于秒开）
+  // 浮球与关闭都只保留网页右侧的半圆入口，不销毁 host（内容仍在，便于秒开）
   if (state === 'closed' || state === 'bubble') {
     host.style.display = 'none'
     handle.style.display = 'none'
@@ -329,6 +229,28 @@ export function setPinned(host: HTMLElement, pinned: boolean): void {
   btn.classList.toggle('active', pinned)
   btn.title = pinned ? '取消置顶常驻' : '置顶常驻'
   btn.setAttribute('aria-pressed', String(pinned))
+}
+
+/**
+ * 侧栏正文 = 完整助手面板（概览 / AIbot / 管家 / 简历 / 追踪 / 设置）。
+ * 用同源 iframe 复用 popup 的 React 应用，保证和原来的面板完全一致，
+ * 不再重复实现一套 UI。应用检测到自己被内嵌时会自动铺满侧栏宽高。
+ */
+function ensureAppFrame(container: HTMLElement): void {
+  if (container.querySelector('iframe')) return
+  let appUrl = ''
+  try {
+    appUrl = chrome.runtime?.getURL?.('src/popup/index.html') ?? ''
+  } catch {
+    appUrl = ''
+  }
+  // 单测 / 无扩展上下文时拿不到扩展地址，跳过内嵌（正文由旧版渲染函数兜底）
+  if (!appUrl) return
+  const frame = document.createElement('iframe')
+  frame.id = 'assistant-app-frame'
+  frame.src = appUrl
+  frame.style.cssText = 'width:100%;height:100%;border:none;display:block;background:#FFFFFF;'
+  container.appendChild(frame)
 }
 
 export function createFloatingPanel(): HTMLElement {
@@ -383,19 +305,24 @@ export function createFloatingPanel(): HTMLElement {
         <button class="btn-header btn-header-stop" id="btn-stop" title="停止 AIbot" aria-label="停止 AIbot">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v9"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>
         </button>
-        <button class="btn-header" id="btn-close" title="收起为浮窗" aria-label="收起为浮窗">
+        <button class="btn-header" id="btn-close" title="收起为浮球" aria-label="收起为浮球">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
       </div>
     </div>
-    <div class="panel-tabs" id="panel-tabs">
-      <button class="panel-tab ${activeTab === 'monitor' ? 'active' : ''}" id="tab-monitor">📊 投递监控</button>
-      <button class="panel-tab ${activeTab === 'chat' ? 'active' : ''}" id="tab-chat">💬 管家中控</button>
-    </div>
-    <div class="filter-bar" id="filter-bar" style="${activeTab === 'monitor' ? '' : 'display:none;'}"></div>
     <div class="panel-body" id="panel-body">
-      <div id="panel-content" style="${activeTab === 'monitor' ? '' : 'display:none;'}"></div>
-      <div id="panel-chat-content" style="${activeTab === 'chat' ? 'display:flex;' : 'display:none;'}"></div>
+      <div id="panel-app-content"></div>
+      <!-- 旧版内联正文（投递监控 / 管家中控）：面板正文已换成完整助手面板，
+           这里仅保留容器让既有渲染函数不报错，始终隐藏 -->
+      <div id="panel-legacy" style="display:none">
+        <div class="panel-tabs" id="panel-tabs">
+          <button class="panel-tab active" id="tab-monitor">📊 投递监控</button>
+          <button class="panel-tab" id="tab-chat">💬 管家中控</button>
+        </div>
+        <div class="filter-bar" id="filter-bar"></div>
+        <div id="panel-content"></div>
+        <div id="panel-chat-content"></div>
+      </div>
     </div>
   `
   shadow.appendChild(panel)
@@ -409,23 +336,14 @@ export function createFloatingPanel(): HTMLElement {
 
   const switchTab = (tab: 'monitor' | 'chat') => {
     activeTab = tab
-    if (tab === 'monitor') {
-      tabMonitor?.classList.add('active')
-      tabChat?.classList.remove('active')
-      if (filterBar) filterBar.style.display = ''
-      if (panelContent) panelContent.style.display = ''
-      if (panelChatContent) panelChatContent.style.display = 'none'
-    } else {
-      tabChat?.classList.add('active')
-      tabMonitor?.classList.remove('active')
-      if (filterBar) filterBar.style.display = 'none'
-      if (panelContent) panelContent.style.display = 'none'
-      if (panelChatContent) {
-        panelChatContent.style.display = 'flex'
-        renderInPageChat(host)
-      }
-    }
+    tabMonitor?.classList.toggle('active', tab === 'monitor')
+    tabChat?.classList.toggle('active', tab === 'chat')
+    if (filterBar) filterBar.style.display = tab === 'monitor' ? '' : 'none'
+    if (panelContent) panelContent.style.display = tab === 'monitor' ? '' : 'none'
+    if (panelChatContent) panelChatContent.style.display = tab === 'chat' ? 'flex' : 'none'
+    if (tab === 'chat') renderInPageChat(host)
   }
+
 
   tabMonitor?.addEventListener('click', () => switchTab('monitor'))
   tabChat?.addEventListener('click', () => switchTab('chat'))
@@ -462,20 +380,12 @@ export function createFloatingPanel(): HTMLElement {
     }
   })
 
+  const appContent = shadow.getElementById('panel-app-content')
+  if (appContent) ensureAppFrame(appContent)
+
   document.body.appendChild(host)
   activeHost = host
   isMinimized = false
-  const header = shadow.querySelector('.panel-header') as HTMLElement
-  installPanelDragging(host, header)
-  if (!resizeListenerInstalled) {
-    window.addEventListener('resize', () => {
-      // 侧栏由 CSS 定位自适应，只有脱离成浮窗时才需要夹回视口
-      if (activeHost?.isConnected && !isSidebarLayout(activeHost)) {
-        clampPanelToViewport(activeHost)
-      }
-    })
-    resizeListenerInstalled = true
-  }
   return host
 }
 
@@ -511,7 +421,9 @@ function toggleMinimize(host: HTMLElement): void {
   }
 }
 
-// Floating trigger button shown after panel is closed
+/**
+ * 网页右侧垂直居中的半圆浮球，点击后直接展开整高侧栏。
+ */
 function createFloatingTrigger(host: HTMLElement): void {
   if (triggerBtn?.isConnected) return
   document.getElementById('boss-assistant-trigger')?.remove()
@@ -539,7 +451,7 @@ function createFloatingTrigger(host: HTMLElement): void {
     transition: transform 0.2s, box-shadow 0.2s;
   `
   triggerBtn.innerHTML = '🤖'
-  triggerBtn.title = '打开智能求职助手'
+  triggerBtn.title = '展开智能求职助手侧栏'
   triggerBtn.addEventListener('click', () => {
     triggerBtn?.remove()
     triggerBtn = null
@@ -706,6 +618,13 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
       <button class="debug-btn" id="btn-copy-card" title="复制首张岗位卡片HTML，用于排查公司名/职位描述提取">🐞 复制卡片HTML</button>
     </div>
     ${matchResults && matchResults.length > 0 ? buildMatchResults(matchResults) : ''}
+    ${(!matchResults || matchResults.length === 0) && (status === 'idle' || status === 'done') && !content.isChatPage ? `
+    <div class="panel-empty">
+      <div class="panel-empty-icon">🗂️</div>
+      <div class="panel-empty-title">还没有扫描到职位</div>
+      <div class="panel-empty-hint">点上方「开始智能沟通」扫描当前页职位卡片<br/>匹配到的岗位会显示在这里</div>
+    </div>
+    ` : ''}
     <div style="margin-top:8px;padding-top:6px;border-top:1px solid rgba(0,0,0,0.06);font-size:9px;color:#6B7280;">
       平台:${currentPlatformName} | 聊天页:${content.isChatPage ? '是' : '否'} | 状态:${status}
     </div>
@@ -1240,12 +1159,12 @@ function getStyles(): string {
 
     .panel-header {
       background: linear-gradient(135deg, #F97316 0%, #FB923C 100%);
-      padding: 10px 14px;
+      padding: 6px 10px 6px 12px;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      cursor: move;
-      touch-action: none;
+      cursor: default;
+      touch-action: auto;
       flex-shrink: 0;
     }
     .header-left {
@@ -1253,7 +1172,7 @@ function getStyles(): string {
       align-items: center;
       gap: 6px;
     }
-    .header-icon { font-size: 16px; }
+    .header-icon { font-size: 14px; }
 .header-titles { display: flex; flex-direction: column; line-height: 1.15; gap: 1px; }
 .platform-badge {
   font-size: 10px;
@@ -1263,7 +1182,7 @@ function getStyles(): string {
 }
     .panel-header h3 {
       color: white;
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 600;
     }
     .header-actions {
@@ -1331,14 +1250,40 @@ function getStyles(): string {
 
     /* Body */
     .panel-body {
-      padding: 12px 14px;
+      padding: 0;
       max-height: none;
       min-height: 0;
       flex: 1 1 auto;
-      overflow-y: auto;
-      scrollbar-width: thin;
-      scrollbar-color: rgba(0,0,0,0.15) transparent;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
     }
+    /* 侧栏正文：完整助手面板 */
+    #panel-app-content {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: block;
+    }
+    /* 正文铺满侧栏高度，空闲态在剩余空间居中提示，避免大片空白 */
+    #panel-content {
+      display: flex;
+      flex-direction: column;
+      min-height: 100%;
+    }
+    .panel-empty {
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 24px 10px;
+      text-align: center;
+    }
+    .panel-empty-icon { font-size: 28px; opacity: 0.5; line-height: 1; }
+    .panel-empty-title { font-size: 12px; font-weight: 600; color: #6B7280; }
+    .panel-empty-hint { font-size: 11px; line-height: 1.75; color: #9CA3AF; }
+
     .panel-body::-webkit-scrollbar { width: 4px; }
     .panel-body::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.15); border-radius: 2px; }
 
