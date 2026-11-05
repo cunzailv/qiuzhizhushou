@@ -30,6 +30,7 @@
 - `npx tsc -b`：0 error
 - `npx vite build`：success（2361 modules，仅 1 条 1MB chunk 体积警告）
 - `dist.crx` 以原 `dist.pem` 重新打包为 1.1.0，扩展 ID（公钥指纹 `322abd1abace1ee048e85832a1616956`）保持不变
+- GitHub Actions：`lint-and-build`（lint + build）全绿；`test` job 在 runner 无法下载 Chromium 时自动跳过 10 个浏览器 E2E 套件，仍执行 43 文件 / 685 用例。浏览器 E2E 需 headed Chromium + 已构建的 `dist`，以本地全量验收为准
 
 ## [1.0.0] — 2026-07-27
 

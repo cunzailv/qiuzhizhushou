@@ -183,6 +183,8 @@ npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用�
 每个功能阶段（A/B/C/D/E/UI）都包含浏览器级 E2E 验收（加载 `dist` 扩展 → 真实页面注入 → 截图断言）。
 自愈架构另有 Tier 5 白盒对抗压测（并发清理、DB 写失败、500+ 条淘汰、畸形载荷）。
 
+> CI 说明：`lint-and-build` 执行 lint + build；`test` job 在 Chromium 可下载时跑全量，下载失败时自动跳过 10 个浏览器 E2E 套件（`SKIP_BROWSER_E2E=1`），仍执行 43 文件 / 685 个逻辑用例，保证逻辑门禁始终可用。浏览器 E2E 依赖 headed Chromium 与已构建的 `dist`，以本地全量验收为准。
+
 ## 📝 更新日志
 
 | 版本 | 内容 |
