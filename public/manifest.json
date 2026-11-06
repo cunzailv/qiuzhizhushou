@@ -51,6 +51,13 @@
   "host_permissions": [
     "http://127.0.0.1/*",
     "http://localhost/*",
+    "https://api.deepseek.com/*",
+    "https://*.deepseek.com/*",
+    "https://api.openai.com/*",
+    "https://*.openai.com/*",
+    "https://dashscope.aliyuncs.com/*",
+    "https://api.moonshot.cn/*",
+    "https://open.bigmodel.cn/*",
     "https://www.zhipin.com/*",
     "https://zhipin.com/*",
     "*://*.liepin.com/*",

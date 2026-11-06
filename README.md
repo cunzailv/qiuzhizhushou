@@ -5,7 +5,7 @@
 <p align="center">
   <h1 align="center">🤝 智能求职助手</h1>
   <p align="center">
-    多平台 AI 驱动的求职投递 Chrome 扩展 —— AI 匹配评估 · 管家 Agent · 精投/海投双模式 · 简历管理
+    多平台 AI 驱动的求职投递 Chrome 扩展 —— AI 匹配评估 · Tool-Calling 中控 Agent · 精投/海投双模式 · 简历管理
   </p>
 </p>
 
@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-985%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-999%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -111,6 +111,21 @@
 
 > 浏览器 E2E 仍是「真实 Chromium + 模拟页面」，猎聘真实站点选择器仍需人工校准。
 
+### 🧠 智能中控对话台 · 真正的 Tool-Calling Agent（2026-11）
+旧版「对话台」是 12 条正则 + 8 个写死动作 + 固定兜底文案，问开放问题只会回固定引导。现已换成 `src/shared/agent/butler/chat-engine.ts`：
+
+| 能力 | 说明 |
+|------|------|
+| **能自己查数据** | 复用扩展内部 46 个工具（战报 / 投递记录 / 错误日志 / 简历 / 黑名单 / 配额 / 导出 / AIbot 控制…），由 AI SDK 7 `generateText + tools + stepCountIs(5)` 自动多步调用；涉及具体数字必须先查真实数据，系统提示词明令禁止编造 |
+| **能连续追问** | 最多 12 条多轮上下文写入 `chrome.storage.local`，重开面板自动恢复，模型侧与界面侧同源；「那再调高一点」这类追问不会再失忆 |
+| **危险动作人工审批** | `read / write / dangerous` 三级门禁：危险工具在模型循环里一律挂起，UI 弹审批卡，确认后才带 `confirm=true` 重放；后台执行入口 `BUTLER_EXEC_TOOL_MSG` 只接受扩展自身上下文并二次校验，模型绕过 UI 也执行不了 |
+| **执行过程可见** | 每条回复可展开工具轨迹（工具名 / 风险级别 / 成功或失败 / 真实结果摘要），回答用 markdown 渲染，不再是一段写死的模板 |
+| **降级绝不静默** | 顶部徽章明确标注当前模式：AI Agent / JSON 兼容模式 / 本地规则模式。没配 Key、原生 function calling 不可用、请求失败、今日 AI 预算用尽，都会给出黄色提示条说明原因与下一步，不会假装 AI 在工作 |
+| **三级容错链** | 原生 function calling → 结构化 JSON 工具协议（兼容不支持 tools 的模型）→ 旧规则引擎离线兜底，旧 `chat-to-action.ts` 与原有测试全部保留 |
+| **共用成本护栏** | 对话台调用同样计入每日 AI 预算（`consumeAiCall`），预算耗尽直接提示并回退本地，不绕开护栏 |
+
+> 新增 `host_permissions` 覆盖 DeepSeek / OpenAI / DashScope / Moonshot / 智谱五个内置预设的接口域名；自定义 OpenAI 兼容服务的跨域仍取决于该服务自身是否允许扩展来源。
+
 ### 🔌 G 层 · 外部 AI 接入（MCP / 小龙虾 / Claude Code / Codex）
 把扩展的 47 个能力统一开放给**用户自己的 AI**，本机闭环、默认关闭：
 
@@ -175,7 +190,7 @@ npm run build
 5. 在 **概览** 设置沟通筛选条件（岗位 / 地点 / 薪资 / 学历 / 关键词排除）
 6. 在概览点 **开始批量沟通（半自动）**（或展开筛选卡片点「开始智能沟通」），批量沟通控制台实时显示进度与 AI 匹配结果
 7. 在 **追踪** 页查看投递漏斗（已投递 → HR 已读 → 沟通中 → 面试邀约）
-8. 在 **管家** 页让 Agent 自动选岗、生成话术、复盘投递结果
+8. 在 **管家 → 智能中控对话台** 直接提问或下指令（如「今天为什么只投了 8 份，结合错误日志分析」）；Agent 会自己查数据、连续调工具、记住上下文，危险操作会先弹确认卡
 
 ---
 
@@ -198,9 +213,9 @@ npm run build
 | 构建 | Vite 5 + crxjs（Manifest V3） |
 | 样式 | Tailwind CSS 3 + shadow DOM 注入 |
 | 数据 | Dexie (IndexedDB) + chrome.storage |
-| AI | OpenAI / DeepSeek / 自定义兼容接口 + 本地语义精筛 |
-| 测试 | Vitest（94 用例）+ Playwright（E2E） |
-| UI 组件 | Lucide React + Recharts |
+| AI | OpenAI / DeepSeek / 自定义兼容接口 + 本地语义精筛 + AI SDK 7 tool-calling 循环 |
+| 测试 | Vitest（999 用例 / 73 文件）+ Playwright（E2E） |
+| UI 组件 | Lucide React + Recharts + react-markdown / remark-gfm |
 
 ## 📁 项目结构
 
@@ -214,6 +229,7 @@ src/
 └── shared/
     ├── ai/             # AI 模型对接 & 匹配引擎（画像/JD/评分/精筛）
     ├── agent/          # 求职管家 Agent（选岗/策略/沟通/跟进/记忆）
+    │   └── butler/     #   智能中控对话台（Tool-Calling 引擎 + 旧规则离线兜底）
     ├── antiBot/        # 防封 & 延迟引擎
     ├── db/             # 数据库 & 状态同步
     ├── export/         # 数据导出
@@ -246,8 +262,8 @@ docs/EXTERNAL_AI.md     # 外部 AI 接入完整指南
 ## 🧪 测试与验收
 
 ```bash
-npm test                                       # tsc -b + vite build + 全部 728 个测试用例
-npx vitest run                                  # 全量单测/E2E：54 文件 / 728 用例
+npm test                                       # tsc -b + vite build + 全部 999 个测试用例
+npx vitest run                                  # 全量单测/E2E：73 文件 / 999 用例
 npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用例（基线 110 + 新增 36）
 ```
 
@@ -260,6 +276,7 @@ npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用�
 
 | 版本 | 内容 |
 |------|------|
+| `未发布` | 🧠 智能中控对话台升级为 Tool-Calling Agent：多轮上下文 + 46 个内部工具自动调用 + 危险动作审批 + 执行轨迹 + 三级可见降级 |
 | `v1.1.1` | 🎛️ F 层：悬浮窗右侧收缩三态、AIbot 配置双向同步、关闭浮窗即关闭 AIbot |
 | `bd7464a` | 🦾 E 层：自愈韧性智能体架构 M1–M5（技能热修复 / 多阶降级 / 故障隔离 / 事后归因） |
 | `8d4b343` / `7d255b1` | 🎨 全局浅色主题（白底黑字 + 橙色渐变 CTA），popup / options / 注入浮窗统一 |

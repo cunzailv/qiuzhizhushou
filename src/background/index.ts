@@ -57,12 +57,13 @@ import {
   findJobSiteTabId,
   runAssistantEntry,
 } from '../shared/assistant-entry'
-import { handleExternalAiRpc } from './external-ai-rpc'
+import { handleExternalAiRpc, executeToolForButler } from './external-ai-rpc'
 import {
   getExternalAiConfig, saveExternalAiConfig, getExternalAiStatus,
 } from '../shared/bridge/config'
 import {
   MSG_EXTERNAL_AI_RPC, MSG_EXTERNAL_AI_STATUS, MSG_EXTERNAL_AI_CONTROL,
+  BUTLER_EXEC_TOOL_MSG,
 } from '../shared/bridge/types'
 
 const MOD = 'Background'
@@ -309,6 +310,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false
     }
     handleExternalAiRpc(message.payload || {}, { shutdownAssistant })
+      .then(sendResponse)
+      .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }))
+    return true
+  }
+
+  // ─── 智能中控对话台：AI 工具循环调用扩展内部工具 ───
+  // 与外部 AI RPC 分开：只接受扩展自身上下文，且危险动作必须带 confirm=true。
+  if (message.type === BUTLER_EXEC_TOOL_MSG) {
+    if (sender.id && sender.id !== chrome.runtime.id) {
+      sendResponse({ ok: false, error: '拒绝来自扩展外部的消息' })
+      return false
+    }
+    executeToolForButler(
+      String(message.payload?.tool || ''),
+      (message.payload?.args || {}) as Record<string, unknown>,
+      { shutdownAssistant },
+    )
       .then(sendResponse)
       .catch((err) => sendResponse({ ok: false, error: String(err?.message || err) }))
     return true

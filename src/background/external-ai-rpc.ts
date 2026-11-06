@@ -207,6 +207,36 @@ function buildHandlers(deps: RpcDeps): Record<string, Handler> {
   }
 }
 
+/**
+ * 智能中控对话台专用执行入口。
+ *
+ * 与 handleExternalAiRpc 的区别：这里代表「用户本人在扩展界面里下指令」，
+ * 因此不走外部 AI 的 fail-closed 总开关（用户本来就能在 UI 里改配置），
+ * 但保留参数校验，并对 dangerous 工具强制 confirm=true 作为第二道防线——
+ * 即使模型绕过 UI 审批卡，也执行不了真实投递 / 清空数据。
+ */
+export async function executeToolForButler(
+  toolName: string,
+  args: Record<string, unknown>,
+  deps: RpcDeps,
+): Promise<BridgeResult> {
+  const tool = getTool(toolName)
+  if (!tool) return { ok: false, error: `未知工具：${toolName}` }
+  const invalid = validateArgs(tool, args)
+  if (invalid) return { ok: false, error: invalid }
+  if (tool.risk === 'dangerous' && args.confirm !== true) {
+    return { ok: false, error: '危险动作必须经用户确认（confirm=true）后才能执行' }
+  }
+  try {
+    const handler = buildHandlers(deps)[tool.name]
+    if (!handler) return { ok: false, error: `工具 ${tool.name} 尚未实现 handler` }
+    const data = await handler(args)
+    return { ok: true, data: data ?? null }
+  } catch (err) {
+    return { ok: false, error: String((err as { message?: string })?.message || err) }
+  }
+}
+
 export async function handleExternalAiRpc(request: RpcRequest, deps: RpcDeps): Promise<BridgeResult> {
   const tool = getTool(request?.tool)
   if (!tool) return { ok: false, error: `未知工具：${request?.tool ?? '(空)'}` }

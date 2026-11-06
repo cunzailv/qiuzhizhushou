@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用
+## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用、智能中控对话台 Tool-Calling Agent
 
 ### Added
 
@@ -13,9 +13,18 @@
 - **入口决策单一真源**：新增 `src/shared/assistant-entry.ts`（`canHostSidebar` / `planAssistantEntry` / `runAssistantEntry` / `findJobSiteTabId` / `findAssistantTabId`），把「点图标该去哪」从 background 里抽成可单测的纯函数
 - **独立助手面板**：popup 新增 `?standalone=1` 标签页形态（`body.app-standalone` 居中留白），顶部提示 + 右上角「展开侧栏」按钮；background 用 `focusOrCreateAssistantPanel()` 复用已开面板，不重复开标签页
 - **后台页回家按钮**：`src/options/App.tsx` 左侧栏顶部新增「返回助手侧栏」与「打开独立助手面板」
+- **智能中控对话台 Tool-Calling 引擎（B 计划）**：新增 `src/shared/agent/butler/chat-engine.ts`，用 AI SDK 7 `generateText + tools + stepCountIs(5)` 把 46 个扩展内部工具交给模型自动多步调用；系统提示词明令「涉及具体数字必须先查真实数据」，60 秒缓存的真实数据快照（战报 / 投递统计 / 错误日志）让开放问题也有据可依
+- **三级容错链与可见降级**：原生 function calling → 结构化 JSON 工具协议 → 旧规则引擎离线兜底；AI 未配置 / 请求失败 / 预算耗尽都在 UI 显示模式徽章 + 黄色原因提示，不再静默假装 AI 在工作
+- **多轮上下文与历史持久化**：最多 12 轮写入 `butler_chat_history_v1`，重开面板自动恢复；`buildNextHistory` / `parseJsonFallbackResponse` 等纯函数可直接单测
+- **回归测试**：新增 `tests/butler-chat-engine.test.ts`（14 例：工具清单 / JSON 协议 / 历史裁剪 / 数据快照缓存 / Agent 主路径 / 多轮上下文 / 危险审批重放 / 三层降级 / 历史持久化 / AI SDK 真实集成冒烟 / 预算护栏）
 
 ### Changed
 
+- **对话台 UI 重写**：`ButlerChatView.tsx` 改为 markdown 渲染 + 工具执行轨迹（可展开）+ 模式徽章 + 降级提示 + 审批卡；审批确认 / 取消后立即移除卡片并禁用按钮，杜绝危险动作被重复点击执行
+- **后台工具执行新增独立门禁**：`external-ai-rpc.ts` 增加 `executeToolForButler()`，`background/index.ts` 新增 `BUTLER_EXEC_TOOL_MSG` 路由，仅接受扩展自身上下文；保留参数校验并对 `dangerous` 强制 `confirm=true`，与外部 AI 的 fail-closed 总开关互不绕过
+- **依赖与权限**：新增 `ai@7` / `@ai-sdk/openai-compatible@3` / `zod@4` / `react-markdown@10` / `remark-gfm@4`；`manifest.json` 的 `host_permissions` 增加 DeepSeek / OpenAI / DashScope / Moonshot / 智谱接口域名
+- **对话台纳入成本护栏**：新引擎调用同样计入每日 AI 预算，预算耗尽直接提示并回退本地规则
+- **文档同步**：README 新增「智能中控对话台」章节、测试徽章 985 → 999、功能全景与技术栈、使用流程第 8 步、更新日志；项目结构补充 `butler/`
 - **去掉小浮窗**：`PanelState` 收敛为 `expanded | bubble | collapsed | closed`，删除 `floating`、`FLOATING_WIDTH/HEIGHT`、`applyFloatingLayout()`、`detachSidebarToFloating()`、拖动脱离与视口夹取逻辑。现在是「整高侧栏 ⇄ 半圆浮球」两态，侧栏固定贴右侧不可拖动；历史残留 `floating` 归一为 `expanded`
 - **AIbot 流水线不再硬编码评分配置**：`campaign-service.ts` 的 `enableAiMatch: true` / `minMatchScore: 60` 改为 `loadSharedApplyFilters()`，概览改筛选后全自动补仓立即生效
 - **AI 评分开关双向同步**：概览筛选面板、批量沟通控制台、AIbot 配置页三处改动都会写同一份共享配置；任一侧改动，其他侧经 `storage.onChanged` 实时刷新
@@ -27,6 +36,9 @@
 
 ### Fixed
 
+- **对话台「怎么问都一样」**：旧版 12 条正则 + 8 个写死动作 + 固定兜底引导，且 `chatCompletion()` 失败时静默返回空串让用户误以为 AI 在工作。现在开放问题由模型结合真实工具数据回答，失败原因全部可见
+- **模型只调工具不给总结时被误判失败**：`runAiSdkToolLoop` 在 `result.text` 为空但有工具轨迹时，改用真实执行轨迹生成兜底回复，不再一路降级到离线固定文案
+- **审批卡可被重复点击**：确认或取消后立即从消息中移除审批卡并在执行期间禁用按钮，避免危险工具（如清空数据）被重复执行
 - **点击插件图标不再跳进管理后台、后台也不再「回不来」**：旧 `chrome.action.onClicked` 在注入侧栏失败时无条件 `chrome.tabs.create(src/options/index.html)`；而后台页是 `chrome-extension://`，content script 永远注入不进去，于是再点图标又开一个后台页，形成死循环，且后台页没有任何返回助手的入口。现改为 `runAssistantEntry()` 统一编排：扩展页 / 受限页连注入都不尝试，直接打开或复用独立助手面板；普通 http(s) 页注入失败也回退到助手面板；`OPEN_ASSISTANT_SIDEBAR` 失败时回退到「去招聘网站展开侧栏」。显式 `OPEN_OPTIONS`（设置按钮）保留，但不再是任何兜底路径
 - **修正文档与注释中的错误描述**：README「受限页退化为打开管理后台」、background 里 `openSidebarInActiveTab` 的同类注释均已改正；独立面板提示语改为指向真正可用的「展开侧栏」按钮
 

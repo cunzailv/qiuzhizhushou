@@ -7,6 +7,9 @@
 export const BRIDGE_PROTOCOL_VERSION = '1'
 export const DEFAULT_BRIDGE_URL = 'http://127.0.0.1:18790'
 
+/** 对话台新引擎 → background 的工具执行消息类型（与外部 AI RPC 分开，避免互相绕过门禁） */
+export const BUTLER_EXEC_TOOL_MSG = 'BUTLER_EXEC_TOOL'
+
 export type ToolRisk = 'read' | 'write' | 'dangerous'
 
 export interface ToolDefinition {
