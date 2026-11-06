@@ -92,7 +92,7 @@ export default function Butler() {
   const [errorRecords, setErrorRecords] = useState<ErrorRecord[]>([])
   const [errorCount, setErrorCount] = useState(0)
   const [loadingErrors, setLoadingErrors] = useState(false)
-  const [errorFilter, setErrorFilter] = useState<'all' | 'boss' | 'campaign' | 'other'>('all')
+  const [errorFilter, setErrorFilter] = useState<'all' | 'boss' | 'campaign' | 'butler' | 'other'>('all')
   const [expandedErrorId, setExpandedErrorId] = useState<string | null>(null)
   const [copiedError, setCopiedError] = useState(false)
 
@@ -1198,6 +1198,17 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
             </button>
             <button
               type="button"
+              onClick={() => setErrorFilter('butler')}
+              className={`px-2.5 py-1 rounded-full cursor-pointer transition ${
+                errorFilter === 'butler'
+                  ? 'bg-indigo-600 text-white font-medium'
+                  : 'bg-black/5 text-text-muted hover:text-text-primary'
+              }`}
+            >
+              对话台 ({errorRecords.filter((r) => r.source.toLowerCase().includes('butler')).length})
+            </button>
+            <button
+              type="button"
               onClick={() => setErrorFilter('other')}
               className={`px-2.5 py-1 rounded-full cursor-pointer transition ${
                 errorFilter === 'other'
@@ -1228,10 +1239,12 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                 .filter((r) => {
                   if (errorFilter === 'boss') return r.source.toLowerCase().includes('boss')
                   if (errorFilter === 'campaign') return r.source.toLowerCase().includes('campaign')
+                  if (errorFilter === 'butler') return r.source.toLowerCase().includes('butler')
                   if (errorFilter === 'other')
                     return (
                       !r.source.toLowerCase().includes('boss') &&
-                      !r.source.toLowerCase().includes('campaign')
+                      !r.source.toLowerCase().includes('campaign') &&
+                      !r.source.toLowerCase().includes('butler')
                     )
                   return true
                 })
@@ -1246,7 +1259,9 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span
                             className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-medium ${
-                              record.source.includes('boss')
+                              record.source.includes('butler')
+                                ? 'bg-indigo-100 text-indigo-700 border border-indigo-200'
+                                : record.source.includes('boss')
                                 ? 'bg-purple-100 text-purple-700 border border-purple-200'
                                 : record.source.includes('campaign')
                                 ? 'bg-blue-100 text-blue-700 border border-blue-200'

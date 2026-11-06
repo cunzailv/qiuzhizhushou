@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-999%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1013%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -123,6 +123,7 @@
 | **降级绝不静默** | 顶部徽章明确标注当前模式：AI Agent / JSON 兼容模式 / 本地规则模式。没配 Key、原生 function calling 不可用、请求失败、今日 AI 预算用尽，都会给出黄色提示条说明原因与下一步，不会假装 AI 在工作 |
 | **三级容错链** | 原生 function calling → 结构化 JSON 工具协议（兼容不支持 tools 的模型）→ 旧规则引擎离线兜底，旧 `chat-to-action.ts` 与原有测试全部保留 |
 | **共用成本护栏** | 对话台调用同样计入每日 AI 预算（`consumeAiCall`），预算耗尽直接提示并回退本地，不绕开护栏 |
+| **异常留痕闭环** | 每次降级 / 工具执行失败 / 审批失败都写入管家「异常留痕」诊断中心（60 秒同因去重、日志脱敏），并同步 `ai_last_failure` 让 AIbot 日志也可见；主路径成功自动清除旧失败标记 |
 
 > 新增 `host_permissions` 覆盖 DeepSeek / OpenAI / DashScope / Moonshot / 智谱五个内置预设的接口域名；自定义 OpenAI 兼容服务的跨域仍取决于该服务自身是否允许扩展来源。
 
@@ -138,6 +139,18 @@
 | **一条龙脚本** | `./scripts/install.sh` 自动构建 → 生成令牌 → 写入各客户端 MCP 配置 → 启动服务 → 体检 |
 
 > 完整接入指南：[`docs/EXTERNAL_AI.md`](docs/EXTERNAL_AI.md)｜小龙虾 Skill：[`bridge/integrations/openclaw-skill.md`](bridge/integrations/openclaw-skill.md)
+
+### 🩺 异常留痕 · 跨上下文统一诊断（2026-11）
+管家「异常留痕」Tab 曾出现「页面里明明报错了，诊断中心却空白」：content script 的 IndexedDB 属于**网页域**（如 zhipin.com），与 popup / options / background 的**扩展域**不是同一个库，直接 `recordError()` 写进去的记录永远读不到。现已收敛为单一上报链路：
+
+| 层 | 说明 |
+|---|---|
+| **统一入口** | 新增 `src/shared/db/error-report.ts` 的 `reportError()`：业务代码（content / popup / options / iframe 侧栏 / background）一律调它，不再各自直接写库 |
+| **主路径** | `chrome.runtime.sendMessage({type:'RECORD_ERROR'})` → background 校验载荷与来源后写入扩展域 `db.errors`；后台路由对脏 payload 与伪造来源一律拒绝 |
+| **兜底路径** | background 休眠 / 无接收方时写入 `chrome.storage.local` 共享队列（全上下文可见）；storage 也不可用才回退本地 Dexie，绝不丢异常 |
+| **合并读取** | `listErrors / getErrorCount / clearErrors` 同时处理扩展域库与共享队列，按 id 去重、时间与主键倒序；清空两边一起清 |
+| **防丢与防刷屏** | 共享队列的 get-modify-set 用进程内串行链排队，避免同一次降级并发写互相覆盖；`dedupeWindowMs` 60 秒同因去重，AI 失败不会刷爆列表 |
+| **可见性** | 对话台异常统一以 `butler.agent` / `butler.tool` / `butler.ui` 落库，诊断中心新增「对话台」筛选与来源徽章；日志只记工具名和错误摘要，**不写 API Key、简历正文或工具参数** |
 
 ---
 
@@ -214,7 +227,7 @@ npm run build
 | 样式 | Tailwind CSS 3 + shadow DOM 注入 |
 | 数据 | Dexie (IndexedDB) + chrome.storage |
 | AI | OpenAI / DeepSeek / 自定义兼容接口 + 本地语义精筛 + AI SDK 7 tool-calling 循环 |
-| 测试 | Vitest（999 用例 / 73 文件）+ Playwright（E2E） |
+| 测试 | Vitest（1013 用例 / 74 文件）+ Playwright（E2E） |
 | UI 组件 | Lucide React + Recharts + react-markdown / remark-gfm |
 
 ## 📁 项目结构
@@ -262,8 +275,8 @@ docs/EXTERNAL_AI.md     # 外部 AI 接入完整指南
 ## 🧪 测试与验收
 
 ```bash
-npm test                                       # tsc -b + vite build + 全部 999 个测试用例
-npx vitest run                                  # 全量单测/E2E：73 文件 / 999 用例
+npm test                                       # tsc -b + vite build + 全部 1013 个测试用例
+npx vitest run                                  # 全量单测/E2E：74 文件 / 1013 用例
 npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用例（基线 110 + 新增 36）
 ```
 
@@ -276,6 +289,7 @@ npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用�
 
 | 版本 | 内容 |
 |------|------|
+| `未发布` | 🩺 异常留痕跨上下文统一：页面域异常不再丢失，对话台全链路降级留痕、日志脱敏、诊断中心新增「对话台」筛选 |
 | `未发布` | 🧠 智能中控对话台升级为 Tool-Calling Agent：多轮上下文 + 46 个内部工具自动调用 + 危险动作审批 + 执行轨迹 + 三级可见降级 |
 | `v1.1.1` | 🎛️ F 层：悬浮窗右侧收缩三态、AIbot 配置双向同步、关闭浮窗即关闭 AIbot |
 | `bd7464a` | 🦾 E 层：自愈韧性智能体架构 M1–M5（技能热修复 / 多阶降级 / 故障隔离 / 事后归因） |

@@ -18,6 +18,7 @@ import {
   type ButlerPendingApproval,
   type ButlerToolCall,
 } from '../../shared/agent/butler/chat-engine'
+import { reportErrorAsync } from '../../shared/db/error-report'
 
 const QUICK_PROMPTS = [
   { label: '📈 今天为什么投得少', prompt: '帮我看看今天为什么投递数量少，结合真实数据和错误日志分析原因' },
@@ -128,12 +129,18 @@ export default function ButlerChatView() {
     try {
       pushAssistant(await dispatchButlerAgentMessage(textToSend), now)
     } catch (err: any) {
+      reportErrorAsync({
+        source: 'butler.ui',
+        message: `对话台发送失败：${err?.message || '未知错误'}`,
+        context: JSON.stringify({ stage: 'send', inputLength: textToSend.length }),
+        dedupeWindowMs: 60_000,
+      })
       setMessages((prev) => [
         ...prev,
         {
           id: `a-${Date.now()}`,
           role: 'assistant',
-          content: `执行失败：${err?.message || '未知错误'}`,
+          content: `执行失败：${err?.message || '未知错误'}（已写入管家「异常留痕」，可复制诊断）`,
           createdAt: now,
         },
       ])
@@ -158,9 +165,15 @@ export default function ButlerChatView() {
     try {
       pushAssistant(await dispatchButlerAgentMessage('', { approved: pending }), now)
     } catch (err: any) {
+      reportErrorAsync({
+        source: 'butler.ui',
+        message: `审批执行失败：${err?.message || '未知错误'}`,
+        context: JSON.stringify({ stage: 'approve', tool: pending.tool }),
+        dedupeWindowMs: 60_000,
+      })
       setMessages((prev) => [
         ...prev,
-        { id: `a-${Date.now()}`, role: 'assistant', content: `审批执行失败：${err?.message || '未知错误'}`, createdAt: now },
+        { id: `a-${Date.now()}`, role: 'assistant', content: `审批执行失败：${err?.message || '未知错误'}（已写入「异常留痕」）`, createdAt: now },
       ])
     } finally {
       setLoading(false)

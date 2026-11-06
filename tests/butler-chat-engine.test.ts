@@ -15,6 +15,7 @@ import {
   type ButlerPendingApproval,
 } from '../src/shared/agent/butler/chat-engine'
 import { TOOL_DEFINITIONS } from '../src/shared/bridge/tools'
+import { resetErrorDedupeState, SHARED_ERROR_KEY } from '../src/shared/db/error-store'
 
 const mockStorage: Record<string, any> = {}
 const NOW = 1_780_000_000_000
@@ -42,6 +43,7 @@ function makeDeps(over: Record<string, any> = {}) {
 beforeEach(() => {
   for (const k of Object.keys(mockStorage)) delete mockStorage[k]
   resetButlerEngineState()
+  resetErrorDedupeState()
   vi.stubGlobal('chrome', {
     storage: {
       local: {
@@ -250,6 +252,58 @@ describe('历史持久化', () => {
     expect(reply.history).toHaveLength(2)
     expect(await getButlerChatHistory()).toHaveLength(2)
     expect(mockStorage[BUTLER_CHAT_HISTORY_KEY][0].content).toContain('PHP')
+  })
+})
+
+describe('异常留痕闭环', () => {
+  const errors = () => (mockStorage[SHARED_ERROR_KEY] || []) as Array<{ source: string; message: string; context?: string }>
+
+  it('AI 未配置时写入诊断中心，且日志里不出现 API Key', async () => {
+    const deps = makeDeps({
+      resolveSettings: vi.fn(async () => ({ apiKey: '', baseUrl: '', modelName: 'deepseek-flash' })),
+    })
+    await dispatchButlerAgentMessage('把薪资调成 22-28K', { deps, now: NOW })
+    // 留痕是 fire-and-forget，等共享队列写入完成再断言
+    await vi.waitFor(() => {
+      const list = errors()
+      expect(list.length).toBeGreaterThan(0)
+      expect(list[0].source).toBe('butler.agent')
+      expect(list[0].message).toContain('ai_not_configured')
+    })
+    expect(JSON.stringify(errors())).not.toContain('sk-test')
+  })
+
+  it('两层都失败时逐层留痕，并同步 AIbot 可见的失败标记', async () => {
+    const deps = makeDeps({
+      runModel: vi.fn(async () => { throw new Error('原生 tools 不可用') }),
+      runJsonFallback: vi.fn(async () => { throw new Error('JSON 兜底也失败') }),
+    })
+    const reply = await dispatchButlerAgentMessage('查一下今日战报', { deps, now: NOW })
+    await vi.waitFor(() => {
+      const kinds = errors().map((e) => e.message)
+      expect(kinds.some((m) => m.includes('agent_call_failed'))).toBe(true)
+      expect(kinds.some((m) => m.includes('json_fallback_failed'))).toBe(true)
+      expect(kinds.some((m) => m.includes('offline_fallback_used'))).toBe(true)
+    })
+    expect(reply.notice).toContain('结构化 JSON 兜底同样失败')
+    await vi.waitFor(() => expect(mockStorage['ai_last_failure']?.message).toContain('原生 tools 不可用'))
+  })
+
+  it('主路径成功时清除上一次残留的 AI 失败标记', async () => {
+    mockStorage['ai_last_failure'] = { at: Date.now(), kind: 'network', model: 'deepseek-flash', message: '旧失败' }
+    const deps = makeDeps()
+    await dispatchButlerAgentMessage('你好', {
+      deps: { ...deps, runModel: async () => ({ text: '你好，有什么可以帮你？', toolTrace: [] }) },
+      now: NOW,
+    })
+    await vi.waitFor(() => expect(mockStorage['ai_last_failure']).toBeUndefined())
+  })
+
+  it('数据快照探针失败也会留痕，且不拖垮整轮对话', async () => {
+    const execTool = vi.fn(async () => { throw new Error('探针异常') })
+    const text = await buildContextSnapshot(execTool, NOW)
+    expect(text).toBe('')
+    await vi.waitFor(() => expect(errors().some((e) => e.message.includes('snapshot_probe_failed'))).toBe(true))
   })
 })
 

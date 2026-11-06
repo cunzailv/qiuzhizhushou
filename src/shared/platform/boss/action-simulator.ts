@@ -11,7 +11,7 @@ import {
 } from '../../agent/skill-memory'
 import type { AgentSkill } from '../../agent/types'
 import { chatCompletion, checkAIConfigured } from '../../ai/api-client'
-import { recordError } from '../../db/error-store'
+import { reportError } from '../../db/error-report'
 // M4 诊断埋点：与本地同名的审计日志函数区分开，写入 auditLogs(source='self_healing')
 import { recordSelfHealingEvent as recordDiagnosticEvent } from '../../db/diagnostics-store'
 
@@ -722,23 +722,13 @@ export const WHITELIST_PRIMARY = ['立即沟通', '打招呼', '聊一聊', '投
 export const WHITELIST_SYNONYMS = ['立即投递', '发消息', '与Boss沟通', '开聊', '去开聊', 'apply', 'chat', '发起对话', '发送意向', '发起交谈']
 export const COMMUNICATIVE_KEYWORDS = ['沟通', '投递', '聊', '对话', '交谈', '意向', '申请', '开聊', '联系', '打招呼', '发信', 'apply', 'chat']
 
-/** 记录自愈审计日志到 db.errors 并通知 runtime */
+/** 记录自愈审计日志（统一走跨上下文留痕入口，避免页面域 DB 里「留了但看不见」） */
 export async function recordSelfHealingEvent(payload: {
   source: string
   message: string
   context?: string
 }): Promise<void> {
-  try {
-    if (typeof chrome !== 'undefined' && chrome.runtime?.sendMessage) {
-      chrome.runtime.sendMessage({
-        type: 'RECORD_ERROR',
-        payload,
-      }).catch?.(() => {})
-    }
-  } catch { /* 预期内异常，安全忽略 */ }
-  try {
-    await recordError(payload)
-  } catch { /* 预期内异常，安全忽略 */ }
+  await reportError(payload)
 }
 
 /** 提取可见、未禁用、非黑名单的交互候选按钮 */

@@ -19,9 +19,39 @@ import { BUTLER_EXEC_TOOL_MSG } from '../../bridge/types'
 import type { BridgeResult, ToolRisk } from '../../bridge/types'
 import { getSetting } from '../../db/settings-store'
 import { getPresetById } from '../../ai/model-presets'
-import { chatCompletion } from '../../ai/api-client'
+import { chatCompletion, markAiFailure, clearAiFailure } from '../../ai/api-client'
 import { consumeAiCall, isAiBudgetExhausted, getAiBudgetLimit, getAiUsageToday } from '../../ai/ai-budget'
+import { reportErrorAsync } from '../../db/error-report'
+import type { AiFailureMark } from '../../ai/api-client'
 import { dispatchButlerChatMessage, type ButlerChatMessage } from './chat-to-action'
+
+/** 对话台异常统一写入管家「异常留痕」诊断中心，60 秒同因去重防刷屏 */
+const BUTLER_ERROR_SOURCE = 'butler.agent'
+const BUTLER_DEDUPE_MS = 60_000
+
+/** 只记录可诊断信息：绝不把 apiKey / baseUrl / 简历正文写进日志 */
+function logButlerFailure(
+  kind: string,
+  detail: string,
+  extra: { model?: string; mode?: string; tool?: string } = {},
+): void {
+  reportErrorAsync({
+    source: BUTLER_ERROR_SOURCE,
+    message: `[${kind}] ${clip(detail || '未知原因', 240)}`,
+    context: JSON.stringify({ kind, ...extra }),
+    dedupeWindowMs: BUTLER_DEDUPE_MS,
+  })
+}
+
+/** 把对话台的 AI 失败同步到 AIbot 可见的降级标记（同一个 key，避免两套口径） */
+function syncAiFailureMark(reason: string, modelName: string): void {
+  const kind: AiFailureMark['kind'] = /HTTP\s*[4-5]\d\d|401|403|429/i.test(reason)
+    ? 'http'
+    : /tools|model|模型|function calling/i.test(reason)
+      ? 'model'
+      : 'network'
+  void markAiFailure(kind, reason, modelName)
+}
 
 /** background 侧工具执行路由，见 src/background/index.ts */
 export { BUTLER_EXEC_TOOL_MSG }
@@ -161,8 +191,8 @@ export async function persistButlerChatHistory(history: ButlerChatTurn[]): Promi
     if (typeof chrome !== 'undefined' && chrome.storage?.local) {
       await chrome.storage.local.set({ [BUTLER_CHAT_HISTORY_KEY]: history })
     }
-  } catch {
-    // 存储失败不影响本轮对话
+  } catch (err) {
+    logButlerFailure('history_write_failed', String((err as { message?: string })?.message || err))
   }
 }
 
@@ -234,21 +264,23 @@ export async function buildContextSnapshot(
   now = nowMs(),
 ): Promise<string> {
   if (snapshotCache && now - snapshotCache.at < SNAPSHOT_TTL_MS) return snapshotCache.text
-  if (!execTool) return ''
+  const run = execTool
+  if (!run) return ''
   const probes: Array<[string, Record<string, unknown>]> = [
     ['get_dashboard_stats', {}],
     ['get_campaign_stats', {}],
     ['list_errors', { limit: 3 }],
   ]
-  const parts: string[] = []
-  for (const [name, args] of probes) {
+  // 三个只读探针并发取数，避免串行把每轮对话白白拖慢 3 次 RPC
+  const parts = (await Promise.all(probes.map(async ([name, args]) => {
     try {
-      const res = await execTool(name, args)
-      if (res?.ok) parts.push(`${name}: ${clip(JSON.stringify(res.data ?? null), 500)}`)
-    } catch {
-      // 单个快照失败不影响整体
+      const res = await run(name, args)
+      return res?.ok ? `${name}: ${clip(JSON.stringify(res.data ?? null), 500)}` : ''
+    } catch (err) {
+      logButlerFailure('snapshot_probe_failed', String((err as { message?: string })?.message || err), { tool: name })
+      return ''
     }
-  }
+  }))).filter((part): part is string => !!part)
   const text = parts.length > 0 ? parts.join('\n') : ''
   snapshotCache = { at: now, text }
   return text
@@ -315,6 +347,9 @@ async function runAiSdkToolLoop(ctx: Parameters<NonNullable<ButlerEngineDeps['ru
 
         const res = await execTool(def.name, args)
         const summary = summarizeToolResult(res)
+        if (!res?.ok) {
+          logButlerFailure('tool_failed', res?.error || '执行失败', { tool: def.name, model: settings.modelName })
+        }
         toolTrace.push({ name: def.name, displayName, risk: def.risk, ok: !!res?.ok, summary })
         return res?.ok ? { ok: true, data: res.data ?? null } : { ok: false, error: res?.error || '执行失败' }
       },
@@ -402,9 +437,14 @@ async function runJsonToolLoop(ctx: Parameters<NonNullable<ButlerEngineDeps['run
 
   for (let step = 0; step < MAX_TOOL_STEPS; step++) {
     const raw = await chatCompletion(system, userMessage, 0.1)
+    // 旧实现在这里静默 return 空串，上层只能一路掉到离线固定文案，
+    // 用户完全看不出「第二层兜底为什么也失败」。改成抛可读错误，由上层合并进提示。
+    if (!raw) {
+      throw new Error('结构化 JSON 兜底调用返回空（AI 未配置 / 预算耗尽 / 请求失败）')
+    }
     const parsed = parseJsonFallbackResponse(raw)
     if (!parsed) {
-      if (!finalText) return { text: '', toolTrace, pendingApproval }
+      if (!finalText) throw new Error('结构化 JSON 兜底返回了无法解析的内容')
       break
     }
     if (typeof parsed.reply === 'string') {
@@ -431,6 +471,7 @@ async function runJsonToolLoop(ctx: Parameters<NonNullable<ButlerEngineDeps['run
       break
     }
     const res = await execTool(name, args)
+    if (!res?.ok) logButlerFailure('json_tool_failed', res?.error || '执行失败', { tool: name, mode: 'json_fallback' })
     toolTrace.push({ name, displayName, risk: def.risk, ok: !!res?.ok, summary: summarizeToolResult(res) })
     userMessage += `\n系统：工具 ${name} 的执行结果是 ${JSON.stringify(res).slice(0, 600)}。请据此给最终答复，或继续调用其它工具。`
   }
@@ -479,6 +520,9 @@ async function replayApprovedTool(
     res = await (execTool || defaultExecTool)(approved.tool, { ...approved.args, confirm: true })
   }
   const summary = summarizeToolResult(res)
+  if (!res?.ok) {
+    logButlerFailure('approval_replay_failed', res?.error || '未知错误', { tool: approved.tool })
+  }
   toolTrace.push({
     name: approved.tool,
     displayName: approved.displayName,
@@ -525,6 +569,8 @@ export async function dispatchButlerAgentMessage(
 
   // 没配 API Key：直接明确告知并走本地规则，不浪费一次必然失败的请求
   if (!settings.apiKey || !settings.baseUrl) {
+    logButlerFailure('ai_not_configured', '缺少 API Key 或接口地址', { model: settings.modelName, mode: 'offline' })
+    syncAiFailureMark('AI 未配置（缺少 API Key 或接口地址）', settings.modelName)
     const offline = await runOfflineRules(input)
     const nextHistory = buildNextHistory(history, input, offline.text, at)
     await saveHistory(nextHistory)
@@ -541,6 +587,8 @@ export async function dispatchButlerAgentMessage(
   // 预算耗尽：不要白跑一次必然被拒的请求，直接明确告知并走本地规则
   if (await isAiBudgetExhausted()) {
     const [used, limit] = await Promise.all([getAiUsageToday(), getAiBudgetLimit()])
+    logButlerFailure('ai_budget_exhausted', `今日 AI 预算 ${used}/${limit} 已用尽`, { model: settings.modelName, mode: 'offline' })
+    syncAiFailureMark(`今日 AI 预算已用尽（${used}/${limit}）`, settings.modelName)
     const offline = await runOfflineRules(input)
     const nextHistory = buildNextHistory(history, input, offline.text, at)
     await saveHistory(nextHistory)
@@ -561,6 +609,8 @@ export async function dispatchButlerAgentMessage(
     const run = deps.runModel || runAiSdkToolLoop
     const result = await run(modelCtx)
     if (result.text || result.pendingApproval) {
+      // 主路径成功：清掉 AIbot 侧可见的降级标记，避免上一次失败一直挂在日志里
+      void clearAiFailure()
       const content = result.text || result.pendingApproval?.prompt || '（本次没有生成回复）'
       const nextHistory = buildNextHistory(history, input, content, at)
       await saveHistory(nextHistory)
@@ -575,6 +625,9 @@ export async function dispatchButlerAgentMessage(
     throw new Error('模型未返回内容')
   } catch (err) {
     const reason = String((err as { message?: string })?.message || err)
+    logButlerFailure('agent_call_failed', reason, { model: settings.modelName, mode: 'agent' })
+    syncAiFailureMark(reason, settings.modelName)
+    let jsonReason = ''
 
     // 兜底路径：结构化 JSON 工具循环（模型不支持 tools / 请求失败时）
     try {
@@ -586,6 +639,7 @@ export async function dispatchButlerAgentMessage(
         execTool,
       })
       if (result.text || result.pendingApproval) {
+        logButlerFailure('json_fallback_used', reason, { model: settings.modelName, mode: 'json_fallback' })
         const content = result.text || result.pendingApproval?.prompt || '（本次没有生成回复）'
         const nextHistory = buildNextHistory(history, input, content, at)
         await saveHistory(nextHistory)
@@ -594,15 +648,19 @@ export async function dispatchButlerAgentMessage(
           mode: 'json_fallback',
           toolTrace: result.toolTrace,
           pendingApproval: result.pendingApproval,
-          notice: `原生工具调用不可用（${clip(reason, 100)}），已切换到结构化 JSON 工具模式，功能不受影响但准确率略低。`,
+          notice: `原生工具调用不可用（${clip(reason, 100)}），已切换到结构化 JSON 工具模式，功能不受影响但准确率略低。异常已写入管家「异常留痕」。`,
           history: nextHistory,
         }
       }
-    } catch {
-      // 继续往下走离线降级
+      jsonReason = '结构化 JSON 兜底未产出回复'
+      logButlerFailure('json_fallback_empty', jsonReason, { model: settings.modelName, mode: 'json_fallback' })
+    } catch (jsonErr) {
+      jsonReason = String((jsonErr as { message?: string })?.message || jsonErr)
+      logButlerFailure('json_fallback_failed', jsonReason, { model: settings.modelName, mode: 'json_fallback' })
     }
 
     // 最终降级：本地规则引擎，且明确告诉用户「现在是本地模式」
+    logButlerFailure('offline_fallback_used', jsonReason ? `${reason} | ${jsonReason}` : reason, { model: settings.modelName, mode: 'offline' })
     const offline = await runOfflineRules(input)
     const nextHistory = buildNextHistory(history, input, offline.text, at)
     await saveHistory(nextHistory)
@@ -610,7 +668,7 @@ export async function dispatchButlerAgentMessage(
       content: offline.text,
       mode: 'offline',
       toolTrace: [],
-      notice: `AI 调用失败（${clip(reason, 120)}），当前已降级为本地规则模式：只能执行固定指令。请检查设置页「测试连接」、API Key 余额与当日 AI 预算。`,
+      notice: `AI 调用失败（${clip(reason, 120)}）${jsonReason ? `；结构化 JSON 兜底同样失败（${clip(jsonReason, 100)}）` : ''}，当前已降级为本地规则模式：只能执行固定指令。请检查设置页「测试连接」、API Key 余额与当日 AI 预算。异常已写入管家「异常留痕」。`,
       pendingApproval: offline.pendingApproval,
       history: nextHistory,
     }

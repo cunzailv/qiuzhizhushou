@@ -1,7 +1,7 @@
 import { getSetting } from '../db/settings-store'
 import { getPresetById } from './model-presets'
 import { consumeAiCall, getAiBudgetLimit, getAiUsageToday } from './ai-budget'
-import { recordError } from '../db/error-store'
+import { reportError } from '../db/error-report'
 interface ChatCompletionResponse {
   choices: Array<{ message: { content: string } }>
 }
@@ -64,7 +64,7 @@ let lastFailureSig = ''
 let lastFailureAt = 0
 
 /** 记录一次 AI 失败（同一错误 5 分钟内只写一次，避免刷爆 storage） */
-async function markAiFailure(kind: AiFailureMark['kind'], message: string, modelName: string): Promise<void> {
+export async function markAiFailure(kind: AiFailureMark['kind'], message: string, modelName: string): Promise<void> {
   const now = Date.now()
   const sig = `${kind}:${modelName}:${message.slice(0, 100)}`
   if (sig === lastFailureSig && now - lastFailureAt < 5 * 60_000) return
@@ -82,7 +82,7 @@ async function markAiFailure(kind: AiFailureMark['kind'], message: string, model
 }
 
 /** 调用成功后清除失败标记 */
-async function clearAiFailure(): Promise<void> {
+export async function clearAiFailure(): Promise<void> {
   try {
     if (typeof chrome === 'undefined' || !chrome.storage?.local) return
     const res = await chrome.storage.local.get(AI_FAILURE_KEY)
@@ -144,7 +144,7 @@ export async function chatCompletion(
   const images = opts?.images?.filter((img) => img && img.data && img.data.trim())
   if (images && images.length > 0 && !isVisionCapableModel(modelName)) {
     console.warn(`[AI] 当前模型 ${modelName} 不支持图片输入，本次仅发送文本`)
-    void recordError({
+    void reportError({
       source: 'ai.api',
       message: `模型 ${modelName} 不支持图片输入，已自动降级为纯文本调用`,
     })
@@ -201,7 +201,7 @@ export async function chatCompletion(
   if (!response) {
     const msg = lastError instanceof Error ? lastError.message : String(lastError)
     console.error(`[AI] 请求失败：${msg}`)
-    void recordError({ source: 'ai.api', message: `chatCompletion 请求失败: ${msg}`, dedupeWindowMs: 60_000 })
+    void reportError({ source: 'ai.api', message: `chatCompletion 请求失败: ${msg}`, dedupeWindowMs: 60_000 })
     void markAiFailure('network', `网络请求失败：${msg}`, modelName)
     return ''
   }
@@ -209,7 +209,7 @@ export async function chatCompletion(
   if (!response.ok) {
     const errorText = await response.text()
     console.error(`AI API error: ${response.status} - ${errorText}`)
-    void recordError({ source: 'ai.api', message: `chatCompletion HTTP ${response.status}: ${errorText.slice(0, 200)}`, dedupeWindowMs: 60_000 })
+    void reportError({ source: 'ai.api', message: `chatCompletion HTTP ${response.status}: ${errorText.slice(0, 200)}`, dedupeWindowMs: 60_000 })
     // 400/404 且报错文本提到模型名 → 模型名失效，是最常见的静默降级原因
     const lookedLikeModelError =
       (response.status === 400 || response.status === 404) &&
@@ -300,7 +300,7 @@ export async function testAIConnection(): Promise<{ success: boolean; message: s
       err instanceof Error && err.name === 'AbortError'
         ? '请求超时（30 秒），请检查网络'
         : `网络请求失败：${msg}`
-    void recordError({ source: 'ai.api', message: `testAIConnection ${reason}` })
+    void reportError({ source: 'ai.api', message: `testAIConnection ${reason}` })
     return { success: false, message: reason }
   }
   clearTimeout(timeout)
@@ -322,7 +322,7 @@ export async function testAIConnection(): Promise<{ success: boolean; message: s
     } else {
       reason = `接口返回错误（HTTP ${response.status}）：${detail || '无响应内容'}`
     }
-    void recordError({ source: 'ai.api', message: `testAIConnection ${reason}` })
+    void reportError({ source: 'ai.api', message: `testAIConnection ${reason}` })
     return { success: false, message: reason }
   }
 
@@ -381,13 +381,13 @@ export async function chatCompletionStream(
 
   if (!response.ok) {
     const errorText = await response.text()
-    void recordError({ source: 'ai.api', message: `chatCompletionStream HTTP ${response.status}: ${errorText.slice(0, 200)}`, dedupeWindowMs: 60_000 })
+    void reportError({ source: 'ai.api', message: `chatCompletionStream HTTP ${response.status}: ${errorText.slice(0, 200)}`, dedupeWindowMs: 60_000 })
     throw new Error(`AI API 错误 (${response.status}): ${errorText.slice(0, 200)}`)
   }
 
   const reader = response.body?.getReader()
   if (!reader) {
-    void recordError({ source: 'ai.api', message: 'chatCompletionStream 无响应体', dedupeWindowMs: 60_000 })
+    void reportError({ source: 'ai.api', message: 'chatCompletionStream 无响应体', dedupeWindowMs: 60_000 })
     throw new Error('浏览器不支持流式响应')
   }
 

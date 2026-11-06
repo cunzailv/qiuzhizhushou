@@ -5,6 +5,7 @@
  * 不新增第二套业务逻辑：能复用现有消息背后的函数就直接复用。
  */
 import { getExternalAiConfig } from '../shared/bridge/config'
+import { recordError } from '../shared/db/error-store'
 import { getTool, validateArgs, gateTool, redactSettings, toCsv, TOOL_COUNTS } from '../shared/bridge/tools'
 import type { RpcRequest, BridgeResult } from '../shared/bridge/types'
 import { campaignService } from './campaign-service'
@@ -220,20 +221,31 @@ export async function executeToolForButler(
   args: Record<string, unknown>,
   deps: RpcDeps,
 ): Promise<BridgeResult> {
+  // 工具执行失败也要在管家「异常留痕」里看得见；只记工具名与错误，绝不写 args
+  // （args 可能含简历正文、黑名单关键词或 confirm 标记）。
+  const fail = (error: string): BridgeResult => {
+    void recordError({
+      source: 'butler.tool',
+      message: `[${toolName}] ${error.slice(0, 240)}`,
+      context: JSON.stringify({ tool: toolName, via: 'BUTLER_EXEC_TOOL' }),
+      dedupeWindowMs: 60_000,
+    })
+    return { ok: false, error }
+  }
   const tool = getTool(toolName)
-  if (!tool) return { ok: false, error: `未知工具：${toolName}` }
+  if (!tool) return fail(`未知工具：${toolName}`)
   const invalid = validateArgs(tool, args)
-  if (invalid) return { ok: false, error: invalid }
+  if (invalid) return fail(invalid)
   if (tool.risk === 'dangerous' && args.confirm !== true) {
-    return { ok: false, error: '危险动作必须经用户确认（confirm=true）后才能执行' }
+    return fail('危险动作必须经用户确认（confirm=true）后才能执行')
   }
   try {
     const handler = buildHandlers(deps)[tool.name]
-    if (!handler) return { ok: false, error: `工具 ${tool.name} 尚未实现 handler` }
+    if (!handler) return fail(`工具 ${tool.name} 尚未实现 handler`)
     const data = await handler(args)
     return { ok: true, data: data ?? null }
   } catch (err) {
-    return { ok: false, error: String((err as { message?: string })?.message || err) }
+    return fail(String((err as { message?: string })?.message || err))
   }
 }
 

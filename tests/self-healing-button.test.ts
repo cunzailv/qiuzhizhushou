@@ -2,7 +2,7 @@
 import 'fake-indexeddb/auto'
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { db } from '../src/shared/db/index'
-import { clearErrors, listErrors } from '../src/shared/db/error-store'
+import { clearErrors, listErrors, recordError } from '../src/shared/db/error-store'
 import {
   upsertSkill,
   findBestSkill,
@@ -37,7 +37,17 @@ describe('自愈韧性智能体架构 · 按钮点击多阶降级与 LLM 安全�
         },
       },
       runtime: {
-        sendMessage: vi.fn(async () => ({ success: true })),
+        // 模拟 background 的 RECORD_ERROR 路由：转发成功就等于错误已落入扩展域库。
+        // 统一留痕入口不再双写，所以 mock 必须按真实后台语义落库，否则查不到记录。
+        sendMessage: vi.fn(async (msg: { type?: string; payload?: unknown }) => {
+          if (msg?.type === 'RECORD_ERROR' && msg.payload) {
+            const p = msg.payload as { source: string; message: string; stack?: string; context?: string }
+            await recordError({
+              source: p.source, message: p.message, stack: p.stack, context: p.context,
+            })
+          }
+          return { success: true }
+        }),
         lastError: null,
       },
     })

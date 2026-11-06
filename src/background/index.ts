@@ -318,7 +318,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // ─── 智能中控对话台：AI 工具循环调用扩展内部工具 ───
   // 与外部 AI RPC 分开：只接受扩展自身上下文，且危险动作必须带 confirm=true。
   if (message.type === BUTLER_EXEC_TOOL_MSG) {
-    if (sender.id && sender.id !== chrome.runtime.id) {
+    // 严格拒绝非扩展自身上下文：sender.id 缺失也一律不放行
+    if (sender.id !== chrome.runtime.id) {
       sendResponse({ ok: false, error: '拒绝来自扩展外部的消息' })
       return false
     }
@@ -705,7 +706,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // ─── 异常与 Bug 日志留痕路由 ───
   if (message.type === 'RECORD_ERROR') {
-    recordError(message.payload || {})
+    // 统一上报入口会转发到这里；脏 payload 不能让 recordError 的 .slice 抛错，
+    // 也不能让网页域伪造来源污染诊断中心。
+    const p = (message.payload || {}) as Record<string, unknown>
+    if ((sender.id && sender.id !== chrome.runtime.id)
+      || typeof p.source !== 'string' || typeof p.message !== 'string'
+      || !p.source.trim() || !p.message.trim()) {
+      sendResponse({ success: false, error: '非法错误上报载荷' })
+      return false
+    }
+    recordError({
+      source: p.source,
+      message: p.message,
+      stack: typeof p.stack === 'string' ? p.stack : undefined,
+      context: typeof p.context === 'string' ? p.context : undefined,
+      dedupeWindowMs: typeof p.dedupeWindowMs === 'number' ? p.dedupeWindowMs : undefined,
+    })
       .then(() => sendResponse({ success: true }))
       .catch((err) => sendResponse({ success: false, error: String(err) }))
     return true
