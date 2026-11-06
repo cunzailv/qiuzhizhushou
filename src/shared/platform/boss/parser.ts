@@ -84,21 +84,13 @@ let debugLogged = false
 let debugDownloaded = false
 
 // BOSS's anti-debug refreshes the page when DevTools is open, so we can't rely
-// on the console. Instead, when the company name can't be extracted we download
-// the raw card HTML to a file the user can simply send back for inspection.
-function downloadCardDebug(cardHtml: string): void {
+// on the console. 早期做法是把卡片 HTML 下载成文件让用户回传，但每个新会话
+// 都会再下载一次（同一批卡片产生十几个文件），改为只打一条控制台样本。
+function logCardDebugSample(cardHtml: string): void {
   if (debugDownloaded) return
   debugDownloaded = true
   try {
-    const blob = new Blob([cardHtml], { type: 'text/html;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'boss-card-debug.html'
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(url)
+    console.warn('[BOSS-DEBUG] 公司名解析失败，卡片样本：', cardHtml.slice(0, 1200))
   } catch {
     /* ignore */
   }
@@ -128,11 +120,13 @@ const COMPANY_KEYWORDS =
 function looksLikeAddress(s: string): boolean {
   if (!s) return false
   if (COMPANY_KEYWORDS.test(s)) return false
-  return (
-    s.includes('·') ||
-    /(路|街道|号|栋|室|广场|大厦|园区|镇|乡)/.test(s) ||
-    /^[\u4e00-\u9fa5]{2,6}(市|区|县)$/.test(s)
-  )
+  // 含定位分隔符 / 明确的街道楼宇词 / 「数字+号」门牌号，才算地址。
+  // 注意：不能只看裸「号」字 —— 「三号宇宙」「五月花号」这类公司名会被误杀，
+  // 一旦判成地址，companyName 就会为空并触发卡片调试下载。
+  if (s.includes('·')) return true
+  if (/(路|街道|大道|胡同|巷子|栋|室|广场|大厦|园区|写字楼|镇|乡)/.test(s)) return true
+  if (/\d+\s*号/.test(s)) return true
+  return /^[\u4e00-\u9fa5]{2,6}(市|区|县)$/.test(s)
 }
 
 // BOSS sometimes glues the location onto the company name as
@@ -159,16 +153,23 @@ function extractCompanyName(root: Element | Document): string {
     return stripLocationSuffix(raw.replace(/\s+/g, ' ').trim())
   }
 
-  // 1) The company page anchor is the most reliable source.
+  // 1) 精确节点优先：`.boss-name` 里就只有公司名，不该再走「像不像地址」的启发式，
+  //    否则「三号宇宙」这类含门牌字样的公司名会被误判成地址而丢弃。
+  const bossNameEl = root.querySelector('.boss-info .boss-name, .boss-name')
+  if (bossNameEl) {
+    const t = (bossNameEl.textContent || '').replace(/\s+/g, ' ').trim()
+    if (t) return stripLocationSuffix(t)
+  }
+
+  // 2) The company page anchor is the most reliable source.
   const anchors = Array.from(root.querySelectorAll('a[href*="gongsi"]'))
   for (const a of anchors) {
     const t = pickText(a)
     if (t && !looksLikeAddress(t)) return t
   }
 
-  // 2) Known company-name containers (BOSS uses `.boss-info > .boss-name`).
+  // 3) Known company-name containers (BOSS uses `.boss-info > .boss-name`).
   const selectors = [
-    '.boss-info .boss-name',
     '.boss-info',
     '.company-name',
     '[class*="company-name"]',
@@ -539,7 +540,7 @@ export function parseJobCardsFromSearchPage(): JobCard[] {
         )
       }
       if (!companyName && !debugDownloaded) {
-        downloadCardDebug(html.outerHTML)
+        logCardDebugSample(html.outerHTML)
       }
       cards.push(sanitizeJobCard({
         id: generateJobId(url, `${companyName}:${title}`),

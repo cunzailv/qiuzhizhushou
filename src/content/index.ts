@@ -510,6 +510,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const pageCardTotal = adapter.parseJobCardsFromSearchPage().length
       const excludedOnPage = Math.max(0, pageCardTotal - rawJobs.length)
 
+      // 采集有效性校验：这批卡片里有没有与当前搜索关键词相关的岗位。
+      // 全部不相关往往意味着搜索没生效（被重定向到推荐流 / 未登录降级），
+      // 此时继续过滤只会一直空转，必须让调度层知道。
+      const searchKeyword = String(message.payload?.keyword || '').trim()
+      const keywordHits = searchKeyword
+        ? rawJobs.filter((j) => `${j.title} ${(j.tags || []).join(' ')}`.includes(searchKeyword)).length
+        : -1
+
       // 对采集到的卡片进行过滤。
       // 关键策略：只有「硬条件」（黑名单、无关行业、时间/薪资等）才直接丢弃；
       // 「职业方向不匹配」降级为软过滤 —— 先记下来，严格通过的不够时再用它补足名额。
@@ -575,6 +583,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         filteredByBlacklist,
         pageCardTotal,
         excludedOnPage,
+        keywordHits,
       })
     })().catch((err) => {
       sendResponse({ success: false, error: String(err) })

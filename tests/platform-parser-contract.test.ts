@@ -111,11 +111,58 @@ describe('Boss 搜索列表卡片解析契约', () => {
     expect(parseJobCardsFromSearchPage()).toHaveLength(0)
   })
 
+  it('公司名含「号」「路」等门牌字样时不能被误判成地址丢弃', () => {
+    // 真实 BOSS 卡片结构（来自线上导出的 debug 样本）
+    mount(`
+      <ul class="job-list-box">
+        <li class="job-card-box">
+          <div class="job-info">
+            <div class="job-title clearfix">
+              <a href="/job_detail/bc21dd424dcb718c0nx62t64ElNV.html" class="job-name">MES后端开发工程师</a>
+              <span class="job-salary">20-30K·13薪</span>
+            </div>
+            <ul class="tag-list"><li>10年以上</li><li>本科</li></ul>
+          </div>
+          <div class="job-card-footer">
+            <a href="/gongsi/fad1f22e53cb24931HB63d-4.html" class="boss-info">
+              <div class="boss-logo"><img src="https://x.test/logo.jpg"><span class="boss-online-icon"></span></div>
+              <span class="boss-name">三号宇宙</span>
+            </a>
+            <span class="company-location"> 深圳·南山区·西丽 </span>
+          </div>
+        </li>
+      </ul>`)
+
+    const cards = parseJobCardsFromSearchPage()
+    expect(cards).toHaveLength(1)
+    // 「三号宇宙」含「号」字，但它是公司名不是地址
+    expect(cards[0].companyName).toBe('三号宇宙')
+    expect(cards[0].title).toBe('MES后端开发工程师')
+    expect(cards[0].location).toContain('深圳')
+  })
+
+  it('真实结构下地址不会被当成公司名', () => {
+    mount(`
+      <ul class="job-list-box">
+        <li class="job-card-box">
+          <div class="job-title"><a href="https://www.zhipin.com/job_detail/z.html" class="job-name">全栈工程师（电商方向）</a></div>
+          <a href="/gongsi/1.html" class="boss-info"><span class="boss-name">奔强电路</span></a>
+          <span class="company-location">深圳·宝安区·西乡</span>
+        </li>
+      </ul>`)
+
+    const cards = parseJobCardsFromSearchPage()
+    expect(cards).toHaveLength(1)
+    expect(cards[0].companyName).toBe('奔强电路')
+    expect(cards[0].companyName).not.toContain('·')
+  })
+
   it('空页面返回空数组且不抛异常', () => {
     mount('<div class="nothing"></div>')
     expect(() => parseJobCardsFromSearchPage()).not.toThrow()
     expect(parseJobCardsFromSearchPage()).toEqual([])
   })
+
 })
 
 describe('Boss 页面类型识别', () => {

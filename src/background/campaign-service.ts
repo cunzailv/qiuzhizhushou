@@ -183,6 +183,8 @@ interface CollectJobsResult {
   filteredByBlacklist?: number
   pageCardTotal?: number
   excludedOnPage?: number
+  /** 与搜索关键词相关的卡片数；-1 表示未传关键词 */
+  keywordHits?: number
   error?: string
 }
 
@@ -662,6 +664,7 @@ async function autoCollectJobsForCampaign(
             existingJobIds,
             targetCareers,
             relaxCareerFilter,
+            keyword: primaryCareerKeyword,
             filters,
           },
         },
@@ -692,6 +695,7 @@ async function autoCollectJobsForCampaign(
               existingJobIds,
               targetCareers,
               relaxCareerFilter: true,
+              keyword: primaryCareerKeyword,
               filters,
             },
           },
@@ -733,6 +737,16 @@ async function autoCollectJobsForCampaign(
           await appendCampaignLog(
             `📄 【${pName}】关键词【${primaryCareerKeyword}】第 ${currentPage} 页的 ${pageCardTotal} 个岗位全部已投过，本页挖尽，下次自动${nextPage === 1 ? '回到第 1 页（关键词轮转）' : `翻到第 ${nextPage} 页`}`,
             'info',
+          )
+          continue
+        }
+
+        // 搜索关键词零命中：这批卡片与目标方向完全无关，通常意味着搜索页没生效
+        //（被重定向到推荐流 / 未登录降级）。继续按方向过滤只会无限空转，这里直接告警并跳过。
+        if (collected > 0 && (collectRes?.keywordHits ?? -1) === 0) {
+          await appendCampaignLog(
+            `⚠️ 【${pName}】关键词【${primaryCareerKeyword}】搜出来的 ${collected} 个岗位里没有一个相关，疑似页面被重定向到推荐流或未登录降级。请确认该平台已登录，或换个更通用的关键词`,
+            'warn',
           )
           continue
         }
