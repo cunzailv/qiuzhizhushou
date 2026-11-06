@@ -76,7 +76,7 @@ export interface Campaign {
   id: string
   createdAt: string
   status: 'running' | 'paused' | 'done' | 'aborted'
-  pausedReason?: 'captcha' | 'user' | 'rate' | 'blocked'
+  pausedReason?: 'captcha' | 'user' | 'rate' | 'blocked' | 'no_source'
   tasks: ApplyTask[]
   quotas: Record<PlatformId, PlatformCampaignQuota>
   windows: TimeWindow[]

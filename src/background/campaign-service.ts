@@ -154,6 +154,38 @@ const authWarnedAt: Partial<Record<PlatformId, number>> = {}
 const loginTabOpened: Partial<Record<PlatformId, boolean>> = {}
 const AUTH_RECHECK_INTERVAL = 10 * 60_000
 
+// ─────────── 关键词自愈：记住「搜不到相关岗位」的词 ───────────
+// 之前的行为是：搜索页返回一批无关岗位 → 逐个过滤掉 → 下轮再搜同一个词 → 无限循环。
+// 这里让系统自己记住「这个词无效」，24 小时内不再使用，把机会让给其他词。
+const INVALID_KEYWORDS_KEY = 'aibot_invalid_keywords'
+const INVALID_KEYWORD_TTL_MS = 24 * 60 * 60 * 1000
+
+async function loadInvalidKeywords(): Promise<Record<string, number>> {
+  try {
+    const res = await chrome.storage.local.get(INVALID_KEYWORDS_KEY)
+    const map = (res?.[INVALID_KEYWORDS_KEY] || {}) as Record<string, number>
+    const now = Date.now()
+    const alive: Record<string, number> = {}
+    for (const [k, at] of Object.entries(map)) {
+      if (now - (at || 0) < INVALID_KEYWORD_TTL_MS) alive[k] = at
+    }
+    return alive
+  } catch {
+    return {}
+  }
+}
+
+async function markKeywordInvalid(keyword: string): Promise<void> {
+  if (!keyword) return
+  try {
+    const map = await loadInvalidKeywords()
+    map[keyword] = Date.now()
+    await chrome.storage.local.set({ [INVALID_KEYWORDS_KEY]: map })
+  } catch {
+    // 持久化失败不影响本轮
+  }
+}
+
 /**
  * 各平台连续采集通信失败的次数。
  * content script 丢失 / 页面被关 / 平台改版 都会表现成 "Receiving end does not exist"，
@@ -567,7 +599,27 @@ async function autoCollectJobsForCampaign(
   const filters: ApplyFilters = await loadSharedApplyFilters()
 
   // 2. 依据简历与筛选偏好提取意向职业清单与轮转关键词 (Feature D)
-  const keywordInfo = await getNextSearchKeyword(defaultResume, undefined, filters)
+  //    自动跳过「24 小时内被判定搜不到相关岗位」的关键词
+  const invalidKeywords = await loadInvalidKeywords()
+  const keywordInfo = await getNextSearchKeyword(
+    defaultResume,
+    undefined,
+    filters,
+    Object.keys(invalidKeywords),
+  )
+  if (keywordInfo.exhausted) {
+    await appendCampaignLog(
+      `⛔ ${keywordInfo.allKeywords.length} 个关键词全部搜不到相关岗位，24 小时内已标记为无效。请检查：①平台是否已登录 ②账号是否被降权 ③到设置里换成更通用的职位词（如把「PHP开发」改成「PHP」）`,
+      'error',
+    )
+    await pauseAgentCampaign('no_source')
+    sendNotification(
+      '⚠️ 没有可用的岗位来源',
+      '所有搜索关键词都拿不到相关岗位，AIbot 已暂停。请检查平台登录状态与关键词设置。',
+      2,
+    )
+    return false
+  }
   const targetCareers = extractTargetCareers(defaultResume, filters)
   const primaryCareerKeyword =
     keywordInfo.keyword ||
@@ -742,10 +794,12 @@ async function autoCollectJobsForCampaign(
         }
 
         // 搜索关键词零命中：这批卡片与目标方向完全无关，通常意味着搜索页没生效
-        //（被重定向到推荐流 / 未登录降级）。继续按方向过滤只会无限空转，这里直接告警并跳过。
+        //（被重定向到推荐流 / 未登录降级）。继续按方向过滤只会无限空转，
+        // 因此把这个词标记为无效（24 小时），让下一轮自动换词，而不是原地打转。
         if (collected > 0 && (collectRes?.keywordHits ?? -1) === 0) {
+          await markKeywordInvalid(primaryCareerKeyword)
           await appendCampaignLog(
-            `⚠️ 【${pName}】关键词【${primaryCareerKeyword}】搜出来的 ${collected} 个岗位里没有一个相关，疑似页面被重定向到推荐流或未登录降级。请确认该平台已登录，或换个更通用的关键词`,
+            `🚫 【${pName}】关键词【${primaryCareerKeyword}】的 ${collected} 个岗位里没有一个相关，已标记为无效（24 小时内跳过），下一轮自动换词重试。若是页面被降级成推荐流，请确认该平台已登录`,
             'warn',
           )
           continue

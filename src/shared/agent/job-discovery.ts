@@ -137,27 +137,39 @@ export async function getNextSearchKeyword(
   resume?: Resume | null,
   preferences?: CandidateProfilePreferences,
   filters?: ApplyFilters,
+  excludeKeywords?: string[],
 ): Promise<{
   keyword: string
   index: number
   total: number
   allKeywords: string[]
+  /** true 表示所有关键词都已被排除（都搜不到相关岗位），需要人工介入 */
+  exhausted: boolean
 }> {
   const allKeywords = extractSearchKeywords(resume, preferences, filters)
+  const excludedSet = new Set((excludeKeywords || []).map((k) => k.trim()).filter(Boolean))
+  const candidates = allKeywords.filter((k) => !excludedSet.has(k))
+
+  if (candidates.length === 0) {
+    log(MOD, 'getNextSearchKeyword', `All ${allKeywords.length} keywords excluded`)
+    return { keyword: '', index: -1, total: allKeywords.length, allKeywords, exhausted: true }
+  }
+
   const currentIndex = await getDiscoveryKeywordRotationIndex()
-  const safeIndex = currentIndex % allKeywords.length
-  const keyword = allKeywords[safeIndex]
+  const safeIndex = currentIndex % candidates.length
+  const keyword = candidates[safeIndex]
 
   // 自动推进游标至下一个关键词，供下一次巡检使用
-  await advanceDiscoveryKeywordRotationIndex(allKeywords.length)
+  await advanceDiscoveryKeywordRotationIndex(candidates.length)
 
-  log(MOD, 'getNextSearchKeyword', `Selected keyword: "${keyword}" (${safeIndex + 1}/${allKeywords.length})`)
+  log(MOD, 'getNextSearchKeyword', `Selected keyword: "${keyword}" (${safeIndex + 1}/${candidates.length})`)
 
   return {
     keyword,
     index: safeIndex,
-    total: allKeywords.length,
+    total: candidates.length,
     allKeywords,
+    exhausted: false,
   }
 }
 

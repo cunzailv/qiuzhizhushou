@@ -9,7 +9,7 @@ import {
   isJobMatchingFreshness,
   evaluateJobCandidate,
 } from '../src/shared/agent/job-filter'
-import { extractSearchKeywords } from '../src/shared/agent/job-discovery'
+import { extractSearchKeywords, getNextSearchKeyword } from '../src/shared/agent/job-discovery'
 import { isWithinWindow, getDelayUntilNextWindow, formatTimeWindows } from '../src/shared/agent/quota'
 import { buildUserContent, isVisionCapableModel } from '../src/shared/ai/api-client'
 import { migrateDefaultModelName } from '../src/shared/db/settings-store'
@@ -323,7 +323,31 @@ describe('多模态 content 组装 buildUserContent', () => {
   })
 })
 
-// ─────────────────────────── 7. 下一窗口等待时长 ───────────────────────────
+// ─────────────────────────── 8. 关键词自愈 ───────────────────────────
+
+describe('关键词自愈 getNextSearchKeyword', () => {
+  it('能跳过已被判定无效的关键词', async () => {
+    const filters = { jobTitles: 'PHP开发,后端开发,全栈开发' } as any
+    const result = await getNextSearchKeyword(null, undefined, filters, ['PHP开发', '后端开发'])
+    expect(result.exhausted).toBe(false)
+    expect(result.keyword).toBe('全栈开发')
+  })
+
+  it('全部关键词都被排除时返回 exhausted，交由调度层暂停并提示', async () => {
+    const filters = { jobTitles: 'PHP开发' } as any
+    const result = await getNextSearchKeyword(null, undefined, filters, ['PHP开发'])
+    expect(result.exhausted).toBe(true)
+    expect(result.keyword).toBe('')
+    expect(result.allKeywords).toEqual(['PHP开发'])
+  })
+
+  it('不传排除列表时行为与原来一致', async () => {
+    const filters = { jobTitles: 'PHP开发,后端开发' } as any
+    const result = await getNextSearchKeyword(null, undefined, filters)
+    expect(result.exhausted).toBe(false)
+    expect(result.keyword.length).toBeGreaterThan(0)
+  })
+})
 
 describe('下一窗口等待时长 getDelayUntilNextWindow', () => {
   const at = (h: number, m = 0) => new Date(2026, 0, 1, h, m, 0)
