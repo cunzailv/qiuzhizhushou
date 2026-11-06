@@ -57,7 +57,7 @@ const inPageChatHistory: InPageChatMessage[] = [
   {
     id: 'welcome',
     role: 'assistant',
-    content: `👋 您好！我是您的**求职 Bot 智能管家**。\n在网页端您可以直接对我下达指令操纵系统：\n- 💰 *“把期望薪资改成 20-30K”*\n- 🕒 *“工作时间设为 09:30-18:00”*\n- 📊 *“导出今天的投递记录为 CSV”*\n- 📈 *“分析今天投递”*`,
+    content: `您好，我是求职管家。\n可以直接下达指令：\n- *“把期望薪资改成 20-30K”*\n- *“工作时间设为 09:30-18:00”*\n- *“导出今天的投递记录为 CSV”*\n- *“分析今天投递”*`,
     createdAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
   },
 ]
@@ -162,7 +162,7 @@ export function setPanelState(host: HTMLElement, state: PanelState): void {
     handle.id = 'edge-handle'
     handle.type = 'button'
     handle.title = '展开智能求职助手'
-    handle.textContent = '🤖'
+    handle.textContent = '助'
     handle.style.cssText = `
       display: none;
       width: 30px;
@@ -222,7 +222,7 @@ export function setPanelState(host: HTMLElement, state: PanelState): void {
   applySidebarLayout(host)
 }
 
-/** 置顶常驻按钮的视觉状态（📌 高亮 + aria-pressed） */
+/** 置顶常驻按钮的视觉状态（高亮 + aria-pressed） */
 export function setPinned(host: HTMLElement, pinned: boolean): void {
   const btn = host.shadowRoot?.getElementById('btn-pin') as HTMLButtonElement | null
   if (!btn) return
@@ -289,7 +289,7 @@ export function createFloatingPanel(): HTMLElement {
   panel.innerHTML = `
     <div class="panel-header">
       <div class="header-left">
-        <span class="header-icon">🤖</span>
+        <span class="header-icon">助</span>
         <div class="header-titles">
           <h3>智能求职助手</h3>
           <span class="platform-badge" id="platform-badge">${currentPlatformName}</span>
@@ -316,8 +316,8 @@ export function createFloatingPanel(): HTMLElement {
            这里仅保留容器让既有渲染函数不报错，始终隐藏 -->
       <div id="panel-legacy" style="display:none">
         <div class="panel-tabs" id="panel-tabs">
-          <button class="panel-tab active" id="tab-monitor">📊 投递监控</button>
-          <button class="panel-tab" id="tab-chat">💬 管家中控</button>
+          <button class="panel-tab active" id="tab-monitor">投递监控</button>
+          <button class="panel-tab" id="tab-chat">管家中控</button>
         </div>
         <div class="filter-bar" id="filter-bar"></div>
         <div id="panel-content"></div>
@@ -439,8 +439,8 @@ function createFloatingTrigger(host: HTMLElement): void {
     width: 46px;
     height: 46px;
     border-radius: 23px 0 0 23px;
-    background: linear-gradient(135deg, #F97316, #FB923C);
-    box-shadow: 0 4px 20px rgba(249, 115, 22, 0.4);
+    background: #C2410C;
+    box-shadow: 0 1px 2px rgba(17,24,39,0.08);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -448,9 +448,9 @@ function createFloatingTrigger(host: HTMLElement): void {
     font-size: 18px;
     color: white;
     user-select: none;
-    transition: transform 0.2s, box-shadow 0.2s;
+    transition: background-color 0.15s;
   `
-  triggerBtn.innerHTML = '🤖'
+  triggerBtn.innerHTML = '助'
   triggerBtn.title = '展开智能求职助手侧栏'
   triggerBtn.addEventListener('click', () => {
     triggerBtn?.remove()
@@ -460,11 +460,11 @@ function createFloatingTrigger(host: HTMLElement): void {
   })
   triggerBtn.addEventListener('mouseenter', () => {
     triggerBtn!.style.transform = 'translateY(-50%) translateX(-3px)'
-    triggerBtn!.style.boxShadow = '0 6px 24px rgba(249, 115, 22, 0.6)'
+    triggerBtn!.style.boxShadow = '0 8px 24px rgba(17,24,39,0.16)'
   })
   triggerBtn.addEventListener('mouseleave', () => {
     triggerBtn!.style.transform = 'translateY(-50%)'
-    triggerBtn!.style.boxShadow = '0 4px 20px rgba(249, 115, 22, 0.4)'
+    triggerBtn!.style.boxShadow = '0 1px 2px rgba(17,24,39,0.08)'
   })
   document.body.appendChild(triggerBtn)
 }
@@ -521,20 +521,20 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
   }
 
   let statusText = ''
-  let statusColor = '#10B981'
+  let statusColor = '#15803D'
   const statusIcon: Record<string, string> = {
-    idle: '○', scanning: '🔍', matching: '🧠', applying: '📨', pause: '⏸', done: '✅',
+    idle: '待', scanning: '采', matching: '配', applying: '投', pause: '停', done: '完',
   }
   switch (status) {
-    case 'idle': statusText = '就绪'; statusColor = '#F97316'; break
-    case 'scanning': statusText = '扫描岗位中...'; statusColor = '#F59E0B'; break
+    case 'idle': statusText = '就绪'; statusColor = '#C2410C'; break
+    case 'scanning': statusText = '扫描岗位中...'; statusColor = '#B45309'; break
     case 'matching':
       statusText = effectiveFilters.enableAiMatch ? 'AI匹配分析中...' : '准备直投中...'
-      statusColor = '#F59E0B'
+      statusColor = '#B45309'
       break
-    case 'applying': statusText = '沟通中...'; statusColor = '#10B981'; break
+    case 'applying': statusText = '沟通中...'; statusColor = '#15803D'; break
     case 'pause': statusText = '已暂停'; statusColor = '#EF4444'; break
-    case 'done': statusText = '完成'; statusColor = '#10B981'; break
+    case 'done': statusText = '完成'; statusColor = '#15803D'; break
   }
 
   const progress = stats && stats.total > 0 ? (stats.processed / stats.total * 100) : 0
@@ -575,52 +575,52 @@ export function updatePanelContent(host: HTMLElement, content: PanelContent): vo
     ` : ''}
     ${content.isChatPage ? '' : `
     <div class="mode-toggle">
-      <button class="mode-btn ${mode === 'batch' ? 'active' : ''}" data-mode="batch" ${lockAttr}${lockHint}>⚡ 批量沟通</button>
-      <button class="mode-btn ${mode === 'recommend' ? 'active' : ''}" data-mode="recommend" ${lockAttr}${lockHint}>🤖 AI自动确认</button>
+      <button class="mode-btn ${mode === 'batch' ? 'active' : ''}" data-mode="batch" ${lockAttr}${lockHint}>批量沟通</button>
+      <button class="mode-btn ${mode === 'recommend' ? 'active' : ''}" data-mode="recommend" ${lockAttr}${lockHint}>AI自动确认</button>
     </div>
     <div class="score-toggle">
-      <button class="score-btn ${effectiveFilters.enableAiMatch ? 'active' : ''}" id="score-filter" ${lockAttr}${lockHint}>⭐ 按分筛选</button>
-      <button class="score-btn ${effectiveFilters.enableAiMatch ? '' : 'active direct'}" id="score-direct" ${lockAttr}${lockHint}>🚀 不评分沟通</button>
+      <button class="score-btn ${effectiveFilters.enableAiMatch ? 'active' : ''}" id="score-filter" ${lockAttr}${lockHint}>按分筛选</button>
+      <button class="score-btn ${effectiveFilters.enableAiMatch ? '' : 'active direct'}" id="score-direct" ${lockAttr}${lockHint}>不评分沟通</button>
     </div>
     ${currentPlatformName === '猎聘' ? `
     <div class="resume-toggle">
-      <button class="resume-btn ${!content.resumeMode ? 'active' : ''}" id="resume-chat" ${lockAttr}${lockHint}>💬 仅沟通</button>
-      <button class="resume-btn ${content.resumeMode ? 'active' : ''}" id="resume-send" ${lockAttr}${lockHint}>📤 投简历</button>
+      <button class="resume-btn ${!content.resumeMode ? 'active' : ''}" id="resume-chat" ${lockAttr}${lockHint}>仅沟通</button>
+      <button class="resume-btn ${content.resumeMode ? 'active' : ''}" id="resume-send" ${lockAttr}${lockHint}>投简历</button>
     </div>
     ` : ''}
     `}
     <div class="btn-row">
       ${confirmRequest ? `
         <div style="width:100%;background:#FFF7ED;border:1px solid #FDBA74;border-radius:10px;padding:10px 12px;">
-          <div style="font-size:12px;font-weight:700;color:#9A3412;margin-bottom:6px;">⚠️ 需要确认</div>
+          <div style="font-size:12px;font-weight:500;color:#9A3412;margin-bottom:6px;">需要确认</div>
           <div style="font-size:12px;color:#4B5563;line-height:1.6;margin-bottom:10px;">${confirmRequest.desc}</div>
           <div style="display:flex;gap:8px;">
-            <button class="btn btn-primary" id="btn-confirm-yes" style="flex:1;">✅ 确认执行</button>
+            <button class="btn btn-primary" id="btn-confirm-yes" style="flex:1;">确认执行</button>
             <button class="btn" id="btn-confirm-no" style="flex:1;background:#ECEEF2;color:#4B5563;">✖ 取消</button>
           </div>
         </div>
       ` : `
       ${content.isChatPage ? `
-        ${status === 'idle' ? `<button class="btn btn-primary" id="btn-send-resumes">📤 批量发简历</button>` : ''}
-        ${status === 'applying' ? `<button class="btn btn-danger" id="btn-stop">⏹ 停止</button>` : ''}
-        ${status === 'done' ? `<button class="btn btn-primary" id="btn-send-resumes">🔄 重新发送</button>` : ''}
+        ${status === 'idle' ? `<button class="btn btn-primary" id="btn-send-resumes">批量发简历</button>` : ''}
+        ${status === 'applying' ? `<button class="btn btn-danger" id="btn-stop">停止</button>` : ''}
+        ${status === 'done' ? `<button class="btn btn-primary" id="btn-send-resumes">重新发送</button>` : ''}
       ` : `
-        ${status === 'idle' ? `<button class="btn btn-primary" id="btn-start">🚀 开始智能沟通</button>` : ''}
-        ${status === 'applying' ? `<button class="btn btn-danger" id="btn-stop">⏹ 停止</button>` : ''}
-        ${status === 'done' ? `<button class="btn btn-primary" id="btn-start">🔄 继续沟通</button>` : ''}
-        ${status === 'pause' ? `<button class="btn btn-primary" id="btn-resume">▶ 继续沟通</button>` : ''}
-        ${status === 'scanning' || status === 'matching' ? `<button class="btn btn-danger" id="btn-stop">⏹ 停止</button>` : ''}
+        ${status === 'idle' ? `<button class="btn btn-primary" id="btn-start">开始智能沟通</button>` : ''}
+        ${status === 'applying' ? `<button class="btn btn-danger" id="btn-stop">停止</button>` : ''}
+        ${status === 'done' ? `<button class="btn btn-primary" id="btn-start">继续沟通</button>` : ''}
+        ${status === 'pause' ? `<button class="btn btn-primary" id="btn-resume">继续沟通</button>` : ''}
+        ${status === 'scanning' || status === 'matching' ? `<button class="btn btn-danger" id="btn-stop">停止</button>` : ''}
       `}
       `}
     </div>
     ${(content.isChatPage || chatCopilot) ? buildChatCopilotCard(chatCopilot) : ''}
     <div class="debug-row">
-      <button class="debug-btn" id="btn-copy-card" title="复制首张岗位卡片HTML，用于排查公司名/职位描述提取">🐞 复制卡片HTML</button>
+      <button class="debug-btn" id="btn-copy-card" title="复制首张岗位卡片HTML，用于排查公司名/职位描述提取">复制卡片HTML</button>
     </div>
     ${matchResults && matchResults.length > 0 ? buildMatchResults(matchResults) : ''}
     ${(!matchResults || matchResults.length === 0) && (status === 'idle' || status === 'done') && !content.isChatPage ? `
     <div class="panel-empty">
-      <div class="panel-empty-icon">🗂️</div>
+      <div class="panel-empty-icon">—</div>
       <div class="panel-empty-title">还没有扫描到职位</div>
       <div class="panel-empty-hint">点上方「开始智能沟通」扫描当前页职位卡片<br/>匹配到的岗位会显示在这里</div>
     </div>
@@ -724,18 +724,18 @@ function buildFilterSummary(filters?: PanelContent['filters']): string {
   if (!filters) return ''
 
   const parts: string[] = []
-  if (filters.jobTitles) parts.push(`<span class="filter-tag filter-tag-title">📋 ${filters.jobTitles}</span>`)
-  if (filters.locations) parts.push(`<span class="filter-tag filter-tag-loc">📍 ${filters.locations}</span>`)
+  if (filters.jobTitles) parts.push(`<span class="filter-tag filter-tag-title">${filters.jobTitles}</span>`)
+  if (filters.locations) parts.push(`<span class="filter-tag filter-tag-loc">${filters.locations}</span>`)
   if (filters.salaryMin !== null || filters.salaryMax !== null) {
     const min = filters.salaryMin ?? '?'
     const max = filters.salaryMax ?? '?'
-    parts.push(`<span class="filter-tag filter-tag-salary">💰 ${min}-${max}K</span>`)
+    parts.push(`<span class="filter-tag filter-tag-salary">${min}-${max}K</span>`)
   }
-  if (filters.experience) parts.push(`<span class="filter-tag">🎓 ${filters.experience}</span>`)
-  if (filters.education) parts.push(`<span class="filter-tag">📚 ${filters.education}</span>`)
-  if (filters.excludeKeywords) parts.push(`<span class="filter-tag filter-tag-exclude">🚫 ${filters.excludeKeywords}</span>`)
-  if (!filters.enableAiMatch) parts.push(`<span class="filter-tag filter-tag-exclude">🧠 AI已关</span>`)
-  else if (filters.minMatchScore) parts.push(`<span class="filter-tag filter-tag-score">⭐ ≥${filters.minMatchScore}分</span>`)
+  if (filters.experience) parts.push(`<span class="filter-tag">${filters.experience}</span>`)
+  if (filters.education) parts.push(`<span class="filter-tag">${filters.education}</span>`)
+  if (filters.excludeKeywords) parts.push(`<span class="filter-tag filter-tag-exclude">${filters.excludeKeywords}</span>`)
+  if (!filters.enableAiMatch) parts.push(`<span class="filter-tag filter-tag-exclude">AI已关</span>`)
+  else if (filters.minMatchScore) parts.push(`<span class="filter-tag filter-tag-score">≥${filters.minMatchScore}分</span>`)
 
   if (parts.length === 0) return ''
 
@@ -786,13 +786,13 @@ function buildMatchResults(matchResults: Array<{
 
 function getIntentLabel(intent?: string): string {
   switch (intent) {
-    case 'status_and_onboard': return '🕒 到岗/求职状态'
-    case 'salary_inquiry': return '💰 期望薪资'
-    case 'bottom_line_check': return '🛡️ 底线拦截'
-    case 'architecture_and_tech': return '🏗️ 技术架构实战'
-    case 'interview_invitation': return '📅 面试邀约'
-    case 'general_chitchat': return '💬 热情互动'
-    default: return '🤖 智能应答'
+    case 'status_and_onboard': return '到岗/求职状态'
+    case 'salary_inquiry': return '期望薪资'
+    case 'bottom_line_check': return '底线拦截'
+    case 'architecture_and_tech': return '技术架构实战'
+    case 'interview_invitation': return '面试邀约'
+    case 'general_chitchat': return '热情互动'
+    default: return '智能应答'
   }
 }
 
@@ -801,7 +801,7 @@ function buildChatCopilotCard(copilot?: ChatCopilotData | null): string {
     return `
       <div class="copilot-card">
         <div class="copilot-header">
-          <span class="copilot-title">💬 HR 追问 Copilot</span>
+          <span class="copilot-title">HR 追问 Copilot</span>
           <span class="copilot-pill">实时感知中</span>
         </div>
         <div class="copilot-empty">等待聊天会话中 HR 的提问或追问…</div>
@@ -818,7 +818,7 @@ function buildChatCopilotCard(copilot?: ChatCopilotData | null): string {
   return `
     <div class="copilot-card">
       <div class="copilot-header">
-        <span class="copilot-title">💬 HR 追问 Copilot</span>
+        <span class="copilot-title">HR 追问 Copilot</span>
         ${copilot.loading ? '<span class="copilot-pill copilot-pill-loading">思考中...</span>' : `<span class="copilot-pill">${intentLabel}</span>`}
       </div>
 
@@ -839,7 +839,7 @@ function buildChatCopilotCard(copilot?: ChatCopilotData | null): string {
 
       ${factText ? `
         <div class="copilot-fact">
-          <span class="copilot-fact-tag">📌 真实简历事实依据</span>
+          <span class="copilot-fact-tag">真实简历事实依据</span>
           <div class="copilot-fact-text">${factText}</div>
         </div>
       ` : ''}
@@ -847,12 +847,12 @@ function buildChatCopilotCard(copilot?: ChatCopilotData | null): string {
       ${copilot.replyText ? `
         <div class="copilot-reply-box">
           <div class="copilot-reply-header">
-            <span class="copilot-label">💡 建议回复（可二次编辑）：</span>
+            <span class="copilot-label">建议回复（可二次编辑）：</span>
           </div>
           <textarea class="copilot-reply-input" id="copilot-reply-input">${replyText}</textarea>
           <div class="copilot-actions">
-            <button class="copilot-btn copilot-btn-fill" id="btn-copilot-fill" title="填入网页聊天框，可在发送前二次编辑">📝 填入输入框</button>
-            <button class="copilot-btn copilot-btn-send" id="btn-copilot-send" title="直接发送该建议给HR">🚀 一键发送</button>
+            <button class="copilot-btn copilot-btn-fill" id="btn-copilot-fill" title="填入网页聊天框，可在发送前二次编辑">填入输入框</button>
+            <button class="copilot-btn copilot-btn-send" id="btn-copilot-send" title="直接发送该建议给HR">一键发送</button>
           </div>
         </div>
       ` : ''}
@@ -867,8 +867,7 @@ export function showPanelToast(host: HTMLElement, message: string, type: 'succes
   const existing = shadow.getElementById('panel-toast')
   if (existing) existing.remove()
 
-  const colors = { success: '#10B981', error: '#EF4444', warning: '#F59E0B', info: '#3B82F6' }
-  const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' }
+  const colors = { success: '#15803D', error: '#DC2626', warning: '#B45309', info: '#1D4ED8' }
 
   const toast = document.createElement('div')
   toast.id = 'panel-toast'
@@ -885,10 +884,10 @@ export function showPanelToast(host: HTMLElement, message: string, type: 'succes
     font-size: 12px;
     text-align: center;
     z-index: 20;
-    backdrop-filter: blur(12px);
+
     animation: toastIn 0.3s ease;
   `
-  toast.textContent = `${icons[type]} ${message}`
+  toast.textContent = message
 
   const body = shadow.getElementById('panel-body')
   body?.appendChild(toast)
@@ -911,10 +910,10 @@ function renderChatMessages(history: InPageChatMessage[]): string {
             msg.pendingAction
               ? `
             <div class="chat-approval-box">
-              <div style="font-weight:600;color:#C2410C;margin-bottom:3px;">⚠️ 需要确认操作：</div>
+              <div style="font-weight:600;color:#C2410C;margin-bottom:3px;">需要确认操作：</div>
               <div style="color:#4B5563;margin-bottom:6px;line-height:1.4;">${msg.pendingAction.description}</div>
               <div class="chat-approval-btns">
-                <button class="chat-action-btn chat-action-approve" data-msg-id="${msg.id}">✅ 确认执行</button>
+                <button class="chat-action-btn chat-action-approve" data-msg-id="${msg.id}">确认执行</button>
                 <button class="chat-action-btn chat-action-reject" data-msg-id="${msg.id}">✖ 取消</button>
               </div>
             </div>
@@ -940,16 +939,16 @@ export function renderInPageChat(host: HTMLElement): void {
         ${renderChatMessages(inPageChatHistory)}
       </div>
       <div class="chat-chips-row">
-        <button class="chat-chip" data-prompt="导出今天的投递记录为 CSV">📊 导出报表</button>
-        <button class="chat-chip" data-prompt="把期望薪资改成 20-30K">💰 期望薪资改20-30K</button>
-        <button class="chat-chip" data-prompt="工作时间设为 09:30-18:00">🕒 工作时间09:30-18:00</button>
-        <button class="chat-chip" data-prompt="分析今天投递">📈 分析今天投递</button>
-        <button class="chat-chip" data-prompt="把中软卓越加入黑名单">🛡️ 加黑名单</button>
+        <button class="chat-chip" data-prompt="导出今天的投递记录为 CSV">导出报表</button>
+        <button class="chat-chip" data-prompt="把期望薪资改成 20-30K">期望薪资改20-30K</button>
+        <button class="chat-chip" data-prompt="工作时间设为 09:30-18:00">工作时间09:30-18:00</button>
+        <button class="chat-chip" data-prompt="分析今天投递">分析今天投递</button>
+        <button class="chat-chip" data-prompt="把中软卓越加入黑名单">加黑名单</button>
       </div>
       <div class="chat-input-bar">
         <input type="text" class="chat-input" id="chat-input-text" placeholder="对管家下指令（如：调高薪资、分析投递）..." ${isChatSending ? 'disabled' : ''} />
         <button class="chat-send-btn" id="chat-send-btn" title="发送指令" ${isChatSending ? 'disabled' : ''}>
-          ${isChatSending ? '⏳' : '🚀'}
+          ${isChatSending ? '…' : '发送'}
         </button>
       </div>
     </div>
@@ -1034,7 +1033,7 @@ function sendMessage(host: HTMLElement, text: string): void {
   inPageChatHistory.push({
     id: tempId,
     role: 'assistant',
-    content: '🤖 管家思考并执行中...',
+    content: '管家正在处理',
     createdAt: now,
   })
 
@@ -1057,7 +1056,7 @@ function sendMessage(host: HTMLElement, text: string): void {
           inPageChatHistory[index] = {
             id: Date.now().toString(),
             role: 'assistant',
-            content: `❌ ${errMsg}`,
+            content: `执行失败：${errMsg}`,
             createdAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
           }
         }
@@ -1087,7 +1086,7 @@ function sendApproval(host: HTMLElement, pendingAction: any): void {
   inPageChatHistory.push({
     id: tempId,
     role: 'assistant',
-    content: '⚡ 正在执行确认的操作...',
+    content: '正在执行确认的操作',
     createdAt: now,
   })
 
@@ -1109,7 +1108,7 @@ function sendApproval(host: HTMLElement, pendingAction: any): void {
           inPageChatHistory[index] = {
             id: Date.now().toString(),
             role: 'assistant',
-            content: `❌ ${errMsg}`,
+            content: `执行失败：${errMsg}`,
             createdAt: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
           }
         }
@@ -1119,7 +1118,7 @@ function sendApproval(host: HTMLElement, pendingAction: any): void {
           inPageChatHistory[index] = {
             id: reply?.id || Date.now().toString(),
             role: 'assistant',
-            content: reply?.content || '✅ 操作已确认并执行完成',
+            content: reply?.content || '操作已确认并执行完成',
             createdAt: reply?.createdAt || new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
           }
         }
@@ -1141,12 +1140,12 @@ function getStyles(): string {
     }
 
     .panel {
-      background: rgba(255, 255, 255, 0.97);
-      backdrop-filter: blur(24px);
-      -webkit-backdrop-filter: blur(24px);
-      border: 1px solid rgba(249, 115, 22, 0.15);
+      background: #FFFFFF;
+
+      -webkit-
+      border: 1px solid #E2E6ED;
       border-radius: 16px;
-      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.18), 0 0 60px rgba(249, 115, 22, 0.1);
+      box-shadow: 0 8px 24px rgba(17,24,39,0.12);
       overflow: hidden;
       width: 100%;
       height: 100%;
@@ -1154,11 +1153,11 @@ function getStyles(): string {
       max-height: none;
       display: flex;
       flex-direction: column;
-      transition: width 0.3s ease, border-radius 0.3s ease;
+      transition: background-color 0.15s;
     }
 
     .panel-header {
-      background: linear-gradient(135deg, #F97316 0%, #FB923C 100%);
+      background: #111827;
       padding: 6px 10px 6px 12px;
       display: flex;
       align-items: center;
@@ -1183,7 +1182,7 @@ function getStyles(): string {
     .panel-header h3 {
       color: white;
       font-size: 12px;
-      font-weight: 600;
+      font-weight: 500;
     }
     .header-actions {
       display: flex;
@@ -1208,8 +1207,8 @@ function getStyles(): string {
     .btn-header:hover { background: rgba(255,255,255,0.3); }
     .btn-header.active {
       background: rgba(255, 255, 255, 0.94);
-      color: #EA580C;
-      box-shadow: inset 0 0 0 1px rgba(249, 115, 22, 0.35);
+      color: #C2410C;
+      box-shadow: inset 0 0 0 1px rgba(17,24,39,0.08);
     }
     .btn-header-stop:hover { background: rgba(220, 38, 38, 0.85); }
 
@@ -1223,7 +1222,7 @@ function getStyles(): string {
       flex-wrap: wrap;
       gap: 4px;
       padding: 8px 14px;
-      background: rgba(249, 115, 22, 0.06);
+      background: #F4F6F9;
       border-bottom: 1px solid rgba(0,0,0,0.06);
       min-height: 0;
     }
@@ -1242,7 +1241,7 @@ function getStyles(): string {
       color: #4B5563;
       border: 1px solid rgba(0,0,0,0.08);
     }
-    .filter-tag-title { border-color: rgba(249,115,22,0.3); color: #EA580C; }
+    .filter-tag-title { border-color: rgba(17,24,39,0.3); color: #C2410C; }
     .filter-tag-loc { border-color: rgba(16,185,129,0.2); color: #059669; }
     .filter-tag-salary { border-color: rgba(245,158,11,0.3); color: #D97706; }
     .filter-tag-exclude { border-color: rgba(239,68,68,0.2); color: #DC2626; }
@@ -1281,7 +1280,7 @@ function getStyles(): string {
       text-align: center;
     }
     .panel-empty-icon { font-size: 28px; opacity: 0.5; line-height: 1; }
-    .panel-empty-title { font-size: 12px; font-weight: 600; color: #6B7280; }
+    .panel-empty-title { font-size: 12px; font-weight: 500; color: #6B7280; }
     .panel-empty-hint { font-size: 11px; line-height: 1.75; color: #9CA3AF; }
 
     .panel-body::-webkit-scrollbar { width: 4px; }
@@ -1295,7 +1294,7 @@ function getStyles(): string {
       border-bottom: 1px solid rgba(0,0,0,0.05);
     }
     .stat-label { color: #6B7280; font-size: 11px; }
-    .stat-value, .stat-value-success { font-size: 13px; font-weight: 700; }
+    .stat-value, .stat-value-success { font-size: 13px; font-weight: 500; }
     .stat-value { color: #FB923C; }
     .stat-value-success { color: #10B981; }
 
@@ -1341,8 +1340,8 @@ function getStyles(): string {
       white-space: nowrap;
     }
     .mode-btn.active {
-      background: rgba(249,115,22,0.2);
-      color: #EA580C;
+      background: rgba(17,24,39,0.2);
+      color: #C2410C;
     }
     .mode-btn:hover:not(.active) { color: #4B5563; }
 
@@ -1426,15 +1425,15 @@ function getStyles(): string {
       border: none;
       border-radius: 10px;
       font-size: 12px;
-      font-weight: 600;
+      font-weight: 500;
       cursor: pointer;
       transition: all 0.2s;
     }
     .btn-primary {
-      background: linear-gradient(135deg, #F97316, #FB923C);
+      background: #C2410C;
       color: white;
     }
-    .btn-primary:hover { box-shadow: 0 0 20px rgba(249,115,22,0.4); transform: translateY(-1px); }
+    .btn-primary:hover { background: #9A3412; }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
     .btn-danger {
       background: rgba(239,68,68,0.12);
@@ -1468,7 +1467,7 @@ function getStyles(): string {
     .match-header {
       color: #6B7280;
       font-size: 10px;
-      font-weight: 600;
+      font-weight: 500;
       margin-bottom: 6px;
       text-transform: uppercase;
       letter-spacing: 0.5px;
@@ -1504,7 +1503,7 @@ function getStyles(): string {
     }
     .match-score {
       font-size: 11px;
-      font-weight: 700;
+      font-weight: 500;
       white-space: nowrap;
     }
     .tag {
@@ -1537,7 +1536,7 @@ function getStyles(): string {
     }
     .copilot-title {
       font-size: 11px;
-      font-weight: 700;
+      font-weight: 500;
       color: #374151;
       display: flex;
       align-items: center;
@@ -1549,12 +1548,12 @@ function getStyles(): string {
       border-radius: 6px;
       background: #E0E7FF;
       color: #4338CA;
-      font-weight: 600;
+      font-weight: 500;
     }
     .copilot-pill-loading {
-      background: #FEF3C7;
-      color: #D97706;
-      animation: pulse 1.5s infinite;
+      background: #F4F6F9;
+      color: #6B7487;
+
     }
     .copilot-hr-msg {
       background: #FFFFFF;
@@ -1577,7 +1576,7 @@ function getStyles(): string {
     }
     .copilot-label {
       font-size: 10px;
-      font-weight: 600;
+      font-weight: 500;
       color: #6B7280;
       display: block;
       margin-bottom: 2px;
@@ -1603,7 +1602,7 @@ function getStyles(): string {
     }
     .copilot-fact-tag {
       font-size: 9px;
-      font-weight: 700;
+      font-weight: 500;
       color: #15803D;
       display: block;
       margin-bottom: 2px;
@@ -1637,8 +1636,8 @@ function getStyles(): string {
       box-sizing: border-box;
     }
     .copilot-reply-input:focus {
-      border-color: #F97316;
-      box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.15);
+      border-color: #C2410C;
+      box-shadow: 0 0 0 2px rgba(17,24,39,0.08);
     }
     .copilot-actions {
       display: flex;
@@ -1651,7 +1650,7 @@ function getStyles(): string {
       border: none;
       border-radius: 6px;
       font-size: 11px;
-      font-weight: 600;
+      font-weight: 500;
       cursor: pointer;
       transition: all 0.2s;
     }
@@ -1665,11 +1664,11 @@ function getStyles(): string {
       color: #111827;
     }
     .copilot-btn-send {
-      background: linear-gradient(135deg, #10B981, #059669);
+      background: #15803D;
       color: white;
     }
     .copilot-btn-send:hover {
-      box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3);
+      box-shadow: 0 1px 2px rgba(17,24,39,0.08);
     }
 
     /* Tabs */
@@ -1702,8 +1701,8 @@ function getStyles(): string {
     }
     .panel-tab.active {
       background: #FFFFFF;
-      color: #EA580C;
-      font-weight: 600;
+      color: #C2410C;
+      font-weight: 500;
       box-shadow: 0 1px 3px rgba(0,0,0,0.08);
     }
 
@@ -1745,7 +1744,7 @@ function getStyles(): string {
     }
     .chat-bubble-user {
       align-self: flex-end;
-      background: linear-gradient(135deg, #F97316 0%, #FB923C 100%);
+      background: #C2410C;
       color: #FFFFFF;
       border-bottom-right-radius: 2px;
     }
@@ -1814,16 +1813,16 @@ function getStyles(): string {
       font-size: 10px;
       white-space: nowrap;
       padding: 3px 8px;
-      background: rgba(249, 115, 22, 0.08);
-      color: #EA580C;
-      border: 1px solid rgba(249, 115, 22, 0.2);
+      background: #F4F6F9;
+      color: #C2410C;
+      border: 1px solid #E2E6ED;
       border-radius: 12px;
       cursor: pointer;
       transition: background 0.2s;
       flex-shrink: 0;
     }
     .chat-chip:hover {
-      background: rgba(249, 115, 22, 0.18);
+      background: #E4E8EF;
     }
 
     .chat-input-bar {
@@ -1844,11 +1843,11 @@ function getStyles(): string {
       font-family: inherit;
     }
     .chat-input:focus {
-      border-color: #F97316;
-      box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.15);
+      border-color: #C2410C;
+      box-shadow: 0 0 0 2px rgba(17,24,39,0.08);
     }
     .chat-send-btn {
-      background: linear-gradient(135deg, #F97316, #FB923C);
+      background: #C2410C;
       color: white;
       border: none;
       border-radius: 8px;

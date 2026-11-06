@@ -61,7 +61,7 @@ export default function Audit() {
               <span style={{ color: RESULT_META[key].color }}>{RESULT_META[key].icon}</span>
               <span className="text-xs text-text-muted">{RESULT_META[key].label}</span>
             </div>
-            <div className="text-2xl font-bold" style={{ color: RESULT_META[key].color }}>{counts[key]}</div>
+            <div className="text-2xl font-medium" style={{ color: RESULT_META[key].color }}>{counts[key]}</div>
           </Card>
         ))}
       </div>
@@ -73,7 +73,7 @@ export default function Audit() {
           <select
             value={resultFilter}
             onChange={(e) => setResultFilter(e.target.value as AuditResult | 'all')}
-            className="px-3 py-2 rounded-xl bg-surface-darkest border border-black/10 text-sm text-text-primary"
+            className="px-3 py-2 rounded-xl bg-surface-darkest border border-surface-hairline text-sm text-text-primary"
           >
             <option value="all">全部结果</option>
             {(Object.keys(RESULT_META) as AuditResult[]).map((k) => (
@@ -83,7 +83,7 @@ export default function Audit() {
           <select
             value={platformFilter}
             onChange={(e) => setPlatformFilter(e.target.value)}
-            className="px-3 py-2 rounded-xl bg-surface-darkest border border-black/10 text-sm text-text-primary"
+            className="px-3 py-2 rounded-xl bg-surface-darkest border border-surface-hairline text-sm text-text-primary"
           >
             <option value="all">全部平台</option>
             {Object.entries(PLATFORM_NAMES).map(([k, v]) => (
@@ -114,7 +114,7 @@ export default function Audit() {
                 <tr><td colSpan={11} className="px-4 py-10 text-center text-text-muted text-sm">暂无审计记录，开始使用智能沟通后会自动记录。</td></tr>
               )}
               {filtered.map((r) => (
-                <tr key={r.id} className="border-t border-black/5 hover:bg-black/[0.02]">
+                <tr key={r.id} className="border-t border-surface-hairline hover:bg-black/[0.02]">
                   <td className="px-3 py-2 text-text-muted whitespace-nowrap text-xs">{fmtTime(r.createdAt)}</td>
                   <td className="px-3 py-2 whitespace-nowrap">{r.source}</td>
                   <td className="px-3 py-2 whitespace-nowrap">{PLATFORM_NAMES[r.platform || ''] || r.platform || '-'}</td>
@@ -138,8 +138,8 @@ export default function Audit() {
                   <td className="px-3 py-2 text-right whitespace-nowrap text-xs text-text-muted">{r.durationMs ?? '-'}{r.durationMs ? 'ms' : ''}</td>
                   <td className="px-3 py-2 text-center">
                     {r.verified === undefined ? <span className="text-text-muted text-xs">-</span>
-                      : r.verified ? <span className="text-success text-sm font-bold">✓</span>
-                      : <span className="text-danger text-sm font-bold">✗</span>}
+                      : r.verified ? <span className="text-success text-sm font-medium">✓</span>
+                      : <span className="text-danger text-sm font-medium">✗</span>}
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap font-mono text-xs text-primary-light">{r.stateFrom ? `${r.stateFrom}→${r.stateTo}` : '-'}</td>
                   <td className="px-3 py-2 max-w-[180px] truncate text-text-muted text-xs" title={r.error}>{r.error || ''}</td>
@@ -153,7 +153,7 @@ export default function Audit() {
       {/* 投递状态机（E5 编排可视化） */}
       <Card>
         <div className="flex items-center gap-2 mb-4">
-          <span className="font-semibold text-text-primary">投递状态机</span>
+          <span className="font-medium text-text-primary">投递状态机</span>
           <span className="text-xs text-text-muted">E5 编排层 · 每次投递的迁移都会在审计中留下 stateFrom→stateTo</span>
         </div>
         <div className="flex flex-wrap items-center gap-1.5 text-xs">

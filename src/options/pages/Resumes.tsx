@@ -44,7 +44,7 @@ export default function Resumes() {
   return (
     <div className="max-w-4xl space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-text-primary">简历管理</h2>
+        <h2 className="text-2xl font-medium text-text-primary">简历管理</h2>
         <p className="text-sm text-text-muted mt-1">
           管理投递使用的简历：默认简历用于匹配与投递；求职画像、底线与自主授权在本页下方配置
         </p>
@@ -64,17 +64,17 @@ export default function Resumes() {
               const skills = r.structuredData?.skills?.slice(0, 6) || []
               const years = r.profile?.yearsOfExperience ?? r.structuredData?.yearsOfExperience
               return (
-                <div key={r.id} className={`rounded-2xl border p-4 ${isDefault ? 'border-primary/40 bg-primary/5' : 'border-black/10 bg-surface-darkest'}`}>
+                <div key={r.id} className={`rounded-2xl border p-4 ${isDefault ? 'border-surface-hairline bg-surface-dark' : 'border-surface-hairline bg-surface-darkest'}`}>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isDefault ? 'bg-primary/20 text-primary-light' : 'bg-black/5 text-text-muted'}`}>
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${isDefault ? 'bg-surface-dark text-primary-light' : 'bg-surface-dark text-text-muted'}`}>
                         <FileText className="w-5 h-5" />
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">
-                          <span className="font-semibold text-text-primary truncate">{r.name}</span>
+                          <span className="font-medium text-text-primary truncate">{r.name}</span>
                           {isDefault && (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-primary/15 text-primary-light text-[10px] font-medium">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-surface-dark text-primary-light text-xs font-medium">
                               <Star className="w-2.5 h-2.5" />
                               默认
                             </span>
@@ -87,18 +87,18 @@ export default function Resumes() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-[11px] text-text-muted">更新于 {formatTime(r.updatedAt)}</span>
+                      <span className="text-xs text-text-muted">更新于 {formatTime(r.updatedAt)}</span>
                       {!isDefault && (
                         <button
                           onClick={() => handleSetDefault(r)}
-                          className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-orange-400 to-orange-500 text-white text-xs font-medium hover:opacity-90 transition-opacity"
+                          className="px-3 py-1.5 rounded-lg bg-accent text-white text-xs font-medium hover:opacity-90 transition-opacity"
                         >
                           设为默认
                         </button>
                       )}
                       <button
                         onClick={() => handleDelete(r)}
-                        className="p-2 rounded-lg bg-black/5 text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        className="p-2 rounded-lg bg-surface-dark text-text-muted hover:text-red-400 hover:bg-danger/10 transition-colors"
                         title="删除简历"
                       >
                         <Trash2 className="w-4 h-4" />

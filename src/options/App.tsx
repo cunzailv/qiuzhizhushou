@@ -61,7 +61,7 @@ export default function App() {
   return (
     <div className="flex h-screen bg-surface-darkest">
       {/* Sidebar */}
-      <aside className="w-56 bg-surface-dark/80 border-r border-black/10 flex flex-col p-4 shrink-0">
+      <aside className="w-56 bg-surface-dark/80 border-r border-surface-hairline flex flex-col p-4 shrink-0">
         {/* Logo */}
         <div className="mb-5 px-2 flex items-center gap-2.5">
           <img
@@ -70,28 +70,28 @@ export default function App() {
             className="w-10 h-10 rounded-xl object-contain shrink-0"
           />
           <div className="min-w-0">
-            <h1 className="text-lg font-bold leading-tight gradient-text">求职投递助手</h1>
-            <p className="text-[10px] text-text-muted mt-0.5 leading-tight">智能求职 · 管理后台</p>
+            <h1 className="text-lg font-medium leading-tight gradient-text">求职投递助手</h1>
+            <p className="text-xs text-text-muted mt-0.5 leading-tight">智能求职 · 管理后台</p>
           </div>
         </div>
 
         {/* 返回助手：后台页无法注入网页侧栏，这里是唯一的主界面入口 */}
-        <div className="mb-5 space-y-2 rounded-xl border border-primary/20 bg-primary/5 p-2.5">
+        <div className="mb-5 space-y-2 rounded-xl border border-surface-hairline bg-surface-dark p-2.5">
           <button
             onClick={handleBackToSidebar}
-            className="w-full flex items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-primary to-primary-light px-3 py-2.5 text-xs font-semibold text-white hover:brightness-105 active:scale-[0.98] transition"
+            className="w-full flex items-center justify-center gap-2 rounded-lg bg-text-primary px-3 py-2.5 text-xs font-medium text-white hover:brightness-105 active:scale-[0.98] transition"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
             返回助手侧栏
           </button>
           <button
             onClick={handleOpenAssistantPanel}
-            className="w-full flex items-center justify-center gap-2 rounded-lg border border-black/10 bg-white px-3 py-2 text-[11px] font-medium text-text-secondary hover:bg-black/5 transition"
+            className="w-full flex items-center justify-center gap-2 rounded-lg border border-surface-hairline bg-surface-darkest px-3 py-2 text-xs font-medium text-text-secondary hover:bg-surface-dark transition"
           >
             <PanelRight className="w-3.5 h-3.5" />
             打开独立助手面板
           </button>
-          <p className="text-[10px] leading-relaxed text-text-muted px-0.5">
+          <p className="text-xs leading-relaxed text-text-muted px-0.5">
             在招聘网站页面点浏览器工具栏的插件图标，即可展开右侧整高侧栏。
           </p>
         </div>
@@ -102,10 +102,10 @@ export default function App() {
             <button
               key={item.id}
               onClick={() => setActiveNav(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors duration-200 ${
                 activeNav === item.id
-                  ? 'bg-primary/20 text-primary-light shadow-glow'
-                  : 'text-text-secondary hover:text-text-primary hover:bg-black/5'
+                  ? 'bg-surface-dark text-primary-light shadow-card'
+                  : 'text-text-secondary hover:text-text-primary hover:bg-surface-dark'
               }`}
             >
               {item.icon}
@@ -115,8 +115,8 @@ export default function App() {
         </nav>
 
         {/* Footer */}
-        <div className="border-t border-black/10 pt-3 mt-4">
-          <p className="text-[10px] text-text-muted text-center">
+        <div className="border-t border-surface-hairline pt-3 mt-4">
+          <p className="text-xs text-text-muted text-center">
             v1.0.0 · 智能求职助手
           </p>
         </div>

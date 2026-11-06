@@ -109,25 +109,25 @@ export const NotificationSettingsCard: React.FC<NotificationSettingsCardProps> =
 
   if (loading) {
     return (
-      <Card className="p-4 bg-white/80 backdrop-blur-sm border-gray-100 shadow-sm animate-pulse">
+      <Card className="p-4 bg-surface-darkest border-gray-100 shadow-sm">
         <div className="h-5 bg-gray-200 rounded w-1/3 mb-4" />
-        <div className="h-10 bg-gray-100 rounded mb-2" />
+        <div className="h-10 bg-surface-dark rounded mb-2" />
       </Card>
     )
   }
 
   return (
-    <Card className="p-4 bg-white/80 backdrop-blur-sm border-gray-100 shadow-sm space-y-4">
+    <Card className="p-4 bg-surface-darkest border-gray-100 shadow-sm space-y-4">
       {/* 头部标题与总开关 */}
       <div className="flex items-center justify-between pb-2 border-b border-gray-100">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+          <div className="w-8 h-8 rounded-lg bg-surface-dark flex items-center justify-center text-primary">
             <Smartphone className="w-4 h-4" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="font-semibold text-gray-800 text-sm">跨端实时通知推送 (Webhook)</h3>
-              <span className="text-[10px] bg-primary/10 text-primary font-medium px-1.5 py-0.5 rounded">
+              <h3 className="font-medium text-text-primary text-sm">跨端实时通知推送 (Webhook)</h3>
+              <span className="text-xs bg-surface-dark text-primary font-medium px-1.5 py-0.5 rounded">
                 手机实时通知
               </span>
             </div>
@@ -145,7 +145,7 @@ export const NotificationSettingsCard: React.FC<NotificationSettingsCardProps> =
             checked={config.enabled}
             onChange={(e) => updateConfig({ enabled: e.target.checked })}
           />
-          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary"></div>
+          <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-surface-darkest after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-colors peer-checked:bg-primary"></div>
         </label>
       </div>
 
@@ -157,7 +157,7 @@ export const NotificationSettingsCard: React.FC<NotificationSettingsCardProps> =
             <select
               value={config.channel}
               onChange={(e) => updateConfig({ channel: e.target.value as WebhookChannel })}
-              className="w-full text-xs border border-gray-200 rounded-lg p-2 bg-gray-50/50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-primary"
+              className="w-full text-xs border border-surface-hairline rounded-lg p-2 bg-surface-page/50 focus:bg-surface-darkest focus:outline-none focus:ring-1 focus:ring-primary"
             >
               {CHANNELS.map((ch) => (
                 <option key={ch.id} value={ch.id}>
@@ -165,7 +165,7 @@ export const NotificationSettingsCard: React.FC<NotificationSettingsCardProps> =
                 </option>
               ))}
             </select>
-            <p className="text-[11px] text-gray-400 mt-1">{currentChannelMeta.hint}</p>
+            <p className="text-xs text-gray-400 mt-1">{currentChannelMeta.hint}</p>
           </div>
 
           {/* Webhook URL */}
@@ -179,7 +179,7 @@ export const NotificationSettingsCard: React.FC<NotificationSettingsCardProps> =
               value={config.webhookUrl}
               onChange={(e) => updateConfig({ webhookUrl: e.target.value })}
               placeholder={currentChannelMeta.placeholder}
-              className="w-full text-xs font-mono border border-gray-200 rounded-lg p-2 bg-gray-50/50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-primary"
+              className="w-full text-xs font-mono border border-surface-hairline rounded-lg p-2 bg-surface-page/50 focus:bg-surface-darkest focus:outline-none focus:ring-1 focus:ring-primary"
             />
           </div>
 
@@ -195,7 +195,7 @@ export const NotificationSettingsCard: React.FC<NotificationSettingsCardProps> =
                 value={config.secret || ''}
                 onChange={(e) => updateConfig({ secret: e.target.value })}
                 placeholder="SEC... (若机器人设置了安全加签则必填)"
-                className="w-full text-xs font-mono border border-gray-200 rounded-lg p-2 bg-gray-50/50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-primary"
+                className="w-full text-xs font-mono border border-surface-hairline rounded-lg p-2 bg-surface-page/50 focus:bg-surface-darkest focus:outline-none focus:ring-1 focus:ring-primary"
               />
             </div>
           )}
@@ -204,7 +204,7 @@ export const NotificationSettingsCard: React.FC<NotificationSettingsCardProps> =
           <div className="pt-2 border-t border-gray-100">
             <span className="block text-gray-700 font-medium mb-2">通知触发事件</span>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <label className="flex items-center gap-2 p-2 rounded-lg border border-gray-200/60 bg-gray-50/40 cursor-pointer hover:bg-gray-50 transition-colors">
+              <label className="flex items-center gap-2 p-2 rounded-lg border border-surface-hairline/60 bg-surface-page/40 cursor-pointer hover:bg-surface-page transition-colors">
                 <input
                   type="checkbox"
                   checked={config.notifyOnInterview}
@@ -212,12 +212,12 @@ export const NotificationSettingsCard: React.FC<NotificationSettingsCardProps> =
                   className="rounded text-primary focus:ring-primary h-3.5 w-3.5"
                 />
                 <div>
-                  <div className="font-medium text-gray-800">🎉 面试邀约</div>
-                  <div className="text-[10px] text-gray-400">收到面试立即推手机</div>
+                  <div className="font-medium text-text-primary">面试邀约</div>
+                  <div className="text-xs text-gray-400">收到面试立即推手机</div>
                 </div>
               </label>
 
-              <label className="flex items-center gap-2 p-2 rounded-lg border border-gray-200/60 bg-gray-50/40 cursor-pointer hover:bg-gray-50 transition-colors">
+              <label className="flex items-center gap-2 p-2 rounded-lg border border-surface-hairline/60 bg-surface-page/40 cursor-pointer hover:bg-surface-page transition-colors">
                 <input
                   type="checkbox"
                   checked={config.notifyOnDailyReport}
@@ -225,12 +225,12 @@ export const NotificationSettingsCard: React.FC<NotificationSettingsCardProps> =
                   className="rounded text-primary focus:ring-primary h-3.5 w-3.5"
                 />
                 <div>
-                  <div className="font-medium text-gray-800">📊 每日战报</div>
-                  <div className="text-[10px] text-gray-400">投递结束与复盘推送</div>
+                  <div className="font-medium text-text-primary">每日战报</div>
+                  <div className="text-xs text-gray-400">投递结束与复盘推送</div>
                 </div>
               </label>
 
-              <label className="flex items-center gap-2 p-2 rounded-lg border border-gray-200/60 bg-gray-50/40 cursor-pointer hover:bg-gray-50 transition-colors">
+              <label className="flex items-center gap-2 p-2 rounded-lg border border-surface-hairline/60 bg-surface-page/40 cursor-pointer hover:bg-surface-page transition-colors">
                 <input
                   type="checkbox"
                   checked={config.notifyOnRiskWarning}
@@ -238,8 +238,8 @@ export const NotificationSettingsCard: React.FC<NotificationSettingsCardProps> =
                   className="rounded text-primary focus:ring-primary h-3.5 w-3.5"
                 />
                 <div>
-                  <div className="font-medium text-gray-800">🚨 风控熔断</div>
-                  <div className="text-[10px] text-gray-400">验证码/额度告警</div>
+                  <div className="font-medium text-text-primary">风控熔断</div>
+                  <div className="text-xs text-gray-400">验证码/额度告警</div>
                 </div>
               </label>
             </div>
@@ -250,7 +250,7 @@ export const NotificationSettingsCard: React.FC<NotificationSettingsCardProps> =
             <button
               onClick={handleTestSend}
               disabled={testing || !config.webhookUrl.trim()}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-primary/10 hover:bg-primary/20 text-primary font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-surface-dark hover:bg-surface-dark text-primary font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Send className="w-3.5 h-3.5" />
               {testing ? '正在发送测试通知...' : '发送测试推送'}

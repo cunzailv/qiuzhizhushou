@@ -1,8 +1,12 @@
 # Changelog
 
-## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用、智能中控对话台 Tool-Calling Agent、异常留痕跨上下文统一
+## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用、智能中控对话台 Tool-Calling Agent、异常留痕跨上下文统一、unslop 界面设计体系
 
 ### Added
+
+- **unslop 设计底座**：`tailwind.config.js` 收敛为一条冷调石墨中性 ramp + 唯一 accent `#C2410C`（旧 `primary` / `brand` 兼容别名全部指向新值，零散引用不会退化成透明文字）；`globals.css` 重写组件类，去掉毛玻璃 / 渐变 / 发光，新增 `:focus-visible` 统一焦点环、数字 `tabular-nums` 与签名刻度线 `.queue-rule` / `.queue-rule-fill`
+- **签名细节**：2px 队列进度刻度线落地在 `CampaignPanel.tsx`（AIbot 各平台配额进度）、`BatchControlCard.tsx`（批量沟通进度）与 `components/ui/progress.tsx`，颜色只在这条线与关键数字上出现
+- **回归测试**：新增 `tests/unslop-design-tokens.test.ts`（8 例：单 accent 色板 / 组件类无 slop / 界面无 emoji 图标 / 最小 12px 与字重上限 / 无渐变与毛玻璃 / 无循环动效 / 签名刻度线落地 / 注入侧栏收敛），把设计方向固化成静态契约
 
 - **侧栏正文 = 完整助手面板**：侧栏不再自绘「投递监控 / 管家中控」精简界面，改为同源 iframe 内嵌 `src/popup/index.html`，把概览 / AIbot / 管家 / 简历 / 追踪 / 设置原样搬进整高侧栏。应用检测 `window.self !== window.top` 后加 `app-embedded` 类铺满宽高；`web_accessible_resources` 放行 popup HTML 与 `assets/*`；旧内联正文移入隐藏容器 `#panel-legacy` 以保住既有消息链路
 - **概览批量沟通控制台**：新增 `src/popup/components/BatchControlCard.tsx`，替换与「追踪」页重复的「最近投递」。展示实时状态 / 进度条 / 匹配推荐 / 今日剩余额度 / 投递模式 / AI 评分 / 开始停止 / 最近 3 条匹配结果；进度由 content 在扫描、匹配、沟通各阶段经 `runtime-state` 上报
@@ -23,6 +27,12 @@
 
 ### Changed
 
+- **九道 pass 全量精修**：35 个界面文件按 Spacing → Color → Icons → Copy → Type → Layout → Details → Visuals → Motion 顺序收敛；26 个文件 830 行样式类批量替换，界面 emoji 装饰清零（日志 / 通知文本前缀保留，避免破坏既有测试断言）
+- **基础组件重写**：`button / card / badge / progress / toast / dialog / tabs` 统一为近黑主按钮、中性 hairline、方角标签与语义色文字；删除 `active:scale-95`、`hover:shadow-glow`、`transition-all`、`font-bold`、9–11px 小字
+- **页面注入侧栏同步**：`inject-ui.tsx` 的 shadow DOM 内联 CSS 去掉橙绿渐变、彩色发光、`backdrop-filter` 与 `pulse` 循环，头部改中性深色；`content/index.css` 的岗位徽章改纯色方角。旧 `glass-card` / `glass-panel` 类名重命名为 `surface-card` / `surface-panel`
+- **文案收敛**：对话台欢迎语改为事实描述，去掉问候语与感叹号；popup 副标题改为「岗位匹配 · 多平台投递 · 回复复盘」（避开与「追踪」Tab 同名）
+- **文档同步**：README 新增「UI 设计方向 · unslop」章节、测试徽章 1013 → 1021（75 文件）、技术栈与测试命令、更新日志；按 CC BY 4.0 保留 Damir Sokolovsky ([@heydamir](https://x.com/heydamir)) 与仓库链接署名
+
 - **对话台 UI 重写**：`ButlerChatView.tsx` 改为 markdown 渲染 + 工具执行轨迹（可展开）+ 模式徽章 + 降级提示 + 审批卡；审批确认 / 取消后立即移除卡片并禁用按钮，杜绝危险动作被重复点击执行
 - **后台工具执行新增独立门禁**：`external-ai-rpc.ts` 增加 `executeToolForButler()`，`background/index.ts` 新增 `BUTLER_EXEC_TOOL_MSG` 路由，仅接受扩展自身上下文；保留参数校验并对 `dangerous` 强制 `confirm=true`，与外部 AI 的 fail-closed 总开关互不绕过
 - **依赖与权限**：新增 `ai@7` / `@ai-sdk/openai-compatible@3` / `zod@4` / `react-markdown@10` / `remark-gfm@4`；`manifest.json` 的 `host_permissions` 增加 DeepSeek / OpenAI / DashScope / Moonshot / 智谱接口域名
@@ -42,6 +52,8 @@
 - **文案与文档**：概览筛选卡片与 AIbot 配置页各加「配置共用」说明；README F 层、快速开始、本 CHANGELOG、实施计划同步到最终形态；`CampaignPanel` 面板形态改为「整高侧栏 / 半圆浮球 / 停止」并修正残留的「还原成小浮窗」文案
 
 ### Fixed
+
+- **副标题与 Tab 同名导致 E2E 严格模式冲突**：精简副标题时曾写入「结果追踪」，使 `getByText('追踪')` 同时匹配副标题与 Tab；改为「回复复盘」后 `tests/extension-flow.test.ts` 12 例恢复全绿
 
 - **页面域异常「留了但看不见」**：content script 直接写 `db.errors` 时落到网页域 IndexedDB，管家诊断中心读扩展域库，永远查不到。现由统一上报入口 + 共享队列 + 合并读取彻底打通
 - **同一次降级并发上报互相覆盖**：共享队列的 get-modify-set 不是原子操作，三条并发留痕各自读到旧数组再覆盖，最终只剩一条。现用进程内串行链排队写入，一条不丢

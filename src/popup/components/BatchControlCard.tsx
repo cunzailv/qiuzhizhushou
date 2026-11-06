@@ -27,12 +27,12 @@ interface BatchControlCardProps {
 }
 
 const STATUS_META: Record<RunStatus, { label: string; dot: string; text: string; bg: string }> = {
-  idle: { label: '待机中', dot: 'bg-slate-400', text: 'text-slate-600', bg: 'bg-slate-100 border-slate-200' },
-  scanning: { label: '扫描岗位中', dot: 'bg-primary animate-pulse', text: 'text-primary', bg: 'bg-primary/10 border-primary/20' },
-  matching: { label: '匹配沟通中', dot: 'bg-primary animate-pulse', text: 'text-primary', bg: 'bg-primary/10 border-primary/20' },
-  applying: { label: '正在沟通', dot: 'bg-emerald-500 animate-pulse', text: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200' },
-  paused: { label: '已暂停', dot: 'bg-amber-500', text: 'text-amber-700', bg: 'bg-amber-50 border-amber-200' },
-  done: { label: '本轮已完成', dot: 'bg-emerald-500', text: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200' },
+  idle: { label: '待机中', dot: 'bg-slate-400', text: 'text-text-secondary', bg: 'bg-surface-dark border-surface-hairline' },
+  scanning: { label: '扫描岗位中', dot: 'bg-primary', text: 'text-primary', bg: 'bg-surface-dark border-surface-hairline' },
+  matching: { label: '匹配沟通中', dot: 'bg-primary', text: 'text-primary', bg: 'bg-surface-dark border-surface-hairline' },
+  applying: { label: '正在沟通', dot: 'bg-success', text: 'text-success', bg: 'bg-surface-dark border-surface-hairline' },
+  paused: { label: '已暂停', dot: 'bg-warning', text: 'text-warning', bg: 'bg-surface-dark border-surface-hairline' },
+  done: { label: '本轮已完成', dot: 'bg-success', text: 'text-success', bg: 'bg-surface-dark border-surface-hairline' },
 }
 
 const ACTIVE_STATUSES: RunStatus[] = ['scanning', 'matching', 'applying']
@@ -77,24 +77,24 @@ export default function BatchControlCard({
   }
 
   return (
-    <div className="rounded-xl border border-black/10 bg-white shadow-sm overflow-hidden">
+    <div className="rounded-xl border border-surface-hairline bg-surface-darkest shadow-sm overflow-hidden">
       {/* 标题 + 状态胶囊 */}
-      <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 border-b border-black/5">
+      <div className="flex items-center justify-between gap-2 px-3.5 py-2.5 border-b border-surface-hairline">
         <div className="flex items-center gap-2 min-w-0">
           <div className="w-7 h-7 rounded-lg bg-brand-orange/10 border border-brand-orange/20 flex items-center justify-center shrink-0">
             <Activity className="w-4 h-4 text-brand-orange" />
           </div>
           <div className="min-w-0">
-            <h3 className="text-[13px] font-bold text-text-primary leading-tight flex items-center gap-1.5">
+            <h3 className="text-[13px] font-medium text-text-primary leading-tight flex items-center gap-1.5">
               批量沟通控制台
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200 font-medium shrink-0">
+              <span className="text-xs px-1.5 py-0.5 rounded bg-surface-dark text-text-secondary border border-surface-hairline font-medium shrink-0">
                 半自动
               </span>
             </h3>
-            <p className="text-[10px] text-text-muted leading-tight mt-0.5">扫描当前页面 · 按门槛逐个沟通</p>
+            <p className="text-xs text-text-muted leading-tight mt-0.5">扫描当前页面 · 按门槛逐个沟通</p>
           </div>
         </div>
-        <span className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium shrink-0 ${statusMeta.bg} ${statusMeta.text}`}>
+        <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-md border font-medium shrink-0 ${statusMeta.bg} ${statusMeta.text}`}>
           <span className={`w-1.5 h-1.5 rounded-full ${statusMeta.dot}`} />
           {statusMeta.label}
         </span>
@@ -103,43 +103,40 @@ export default function BatchControlCard({
       <div className="p-3.5 space-y-3">
         {/* 互斥提示：AIbot 全自动占用运行锁 */}
         {lockedByAutopilot && (
-          <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-relaxed text-amber-700">
+          <div className="flex items-start gap-2 rounded-lg border border-surface-hairline bg-surface-dark px-2.5 py-2 text-xs leading-relaxed text-warning">
             <ShieldAlert className="w-3.5 h-3.5 shrink-0 mt-0.5" />
             <span>
-              🤖 AIbot <strong>全自动</strong>正在运行。两条流水线互斥，请先在 AIbot 页点「终止」后再开始半自动沟通。
+              AIbot <strong>全自动</strong>正在运行。两条流水线互斥，请先在 AIbot 页点「终止」后再开始半自动沟通。
             </span>
           </div>
         )}
 
         {/* 进度条 */}
         <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-[10px] text-text-muted">
+          <div className="flex items-center justify-between text-xs text-text-muted">
             <span className="truncate">{runtime.message || '尚未开始，配置好筛选条件后点「开始批量沟通」'}</span>
             <span className="font-mono shrink-0 ml-2">
               {runtime.stats.processed}/{runtime.stats.total || 0}
             </span>
           </div>
-          <div className="w-full h-1.5 rounded-full bg-black/5 overflow-hidden">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-brand-orange to-primary transition-all duration-300"
-              style={{ width: `${percent}%` }}
-            />
+          <div className="w-full queue-rule">
+            <div className="queue-rule-fill" style={{ width: `${percent}%` }} />
           </div>
         </div>
 
         {/* 三个核心数字 */}
-        <div className="grid grid-cols-3 gap-2 text-center rounded-lg border border-black/5 bg-surface-dark p-2">
+        <div className="grid grid-cols-3 gap-2 text-center rounded-lg border border-surface-hairline bg-surface-dark p-2">
           <div>
-            <div className="text-[10px] text-text-muted">本轮已处理</div>
-            <div className="text-sm font-bold text-text-primary mt-0.5">{runtime.stats.processed}</div>
+            <div className="text-xs text-text-muted">本轮已处理</div>
+            <div className="text-sm font-medium text-text-primary mt-0.5">{runtime.stats.processed}</div>
           </div>
           <div>
-            <div className="text-[10px] text-emerald-600 font-medium">匹配推荐</div>
-            <div className="text-sm font-bold text-emerald-600 mt-0.5">{runtime.stats.matched}</div>
+            <div className="text-xs text-success font-medium">匹配推荐</div>
+            <div className="text-sm font-medium text-success mt-0.5">{runtime.stats.matched}</div>
           </div>
           <div>
-            <div className="text-[10px] text-text-muted">今日剩余额度</div>
-            <div className="text-sm font-bold text-text-primary mt-0.5">
+            <div className="text-xs text-text-muted">今日剩余额度</div>
+            <div className="text-sm font-medium text-text-primary mt-0.5">
               {dailyRemaining ?? runtime.dailyRemaining ?? '—'}
             </div>
           </div>
@@ -148,14 +145,14 @@ export default function BatchControlCard({
         {/* 运行配置：投递模式 + AI 评分（与 AIbot 共用） */}
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-text-muted w-14 shrink-0">投递模式</span>
+            <span className="text-xs text-text-muted w-14 shrink-0">投递模式</span>
             <button
               type="button"
               onClick={() => handleModeChange('batch')}
-              className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${
+              className={`flex-1 py-1.5 rounded-md text-xs border transition ${
                 assistant.applyMode === 'batch'
                   ? 'bg-primary text-white border-primary'
-                  : 'bg-white text-text-secondary border-black/10 hover:bg-slate-50'
+                  : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'
               }`}
             >
               <Zap className="w-3 h-3 inline mr-0.5" />批量沟通
@@ -163,10 +160,10 @@ export default function BatchControlCard({
             <button
               type="button"
               onClick={() => handleModeChange('recommend')}
-              className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${
+              className={`flex-1 py-1.5 rounded-md text-xs border transition ${
                 assistant.applyMode === 'recommend'
                   ? 'bg-primary text-white border-primary'
-                  : 'bg-white text-text-secondary border-black/10 hover:bg-slate-50'
+                  : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'
               }`}
             >
               <Sparkles className="w-3 h-3 inline mr-0.5" />AI自动确认
@@ -174,31 +171,31 @@ export default function BatchControlCard({
           </div>
 
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-text-muted w-14 shrink-0">AI 评分</span>
+            <span className="text-xs text-text-muted w-14 shrink-0">AI 评分</span>
             <button
               type="button"
               onClick={() => onFilterChange({ enableAiMatch: true })}
-              className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${
+              className={`flex-1 py-1.5 rounded-md text-xs border transition ${
                 filters.enableAiMatch
                   ? 'bg-primary text-white border-primary'
-                  : 'bg-white text-text-secondary border-black/10 hover:bg-slate-50'
+                  : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'
               }`}
             >
-              ⭐ 按分筛选
+              按分筛选
             </button>
             <button
               type="button"
               onClick={() => onFilterChange({ enableAiMatch: false })}
-              className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${
+              className={`flex-1 py-1.5 rounded-md text-xs border transition ${
                 !filters.enableAiMatch
                   ? 'bg-primary text-white border-primary'
-                  : 'bg-white text-text-secondary border-black/10 hover:bg-slate-50'
+                  : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'
               }`}
             >
-              🚀 不评分沟通
+              不评分沟通
             </button>
           </div>
-          <p className="text-[10px] text-text-muted leading-relaxed">
+          <p className="text-xs text-text-muted leading-relaxed">
             岗位、地点、薪资等门槛在上方筛选卡片设置，<strong>半自动与 AIbot 全自动共用同一份配置</strong>。
           </p>
         </div>
@@ -208,7 +205,7 @@ export default function BatchControlCard({
           <button
             type="button"
             onClick={onStopApply}
-            className="w-full py-2.5 rounded-lg bg-surface-dark hover:bg-rose-50 text-rose-600 border border-rose-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition active:scale-[0.99]"
+            className="w-full py-2.5 rounded-lg bg-surface-dark hover:bg-rose-50 text-rose-600 border border-rose-200 text-xs font-medium flex items-center justify-center gap-1.5 transition active:scale-[0.99]"
           >
             <Square className="w-3.5 h-3.5 fill-current" />
             停止本轮批量沟通
@@ -218,7 +215,7 @@ export default function BatchControlCard({
             type="button"
             onClick={() => onStartApply(filters)}
             disabled={lockedByAutopilot}
-            className="w-full py-2.5 rounded-lg bg-gradient-to-r from-brand-orange to-primary text-white text-xs font-semibold flex items-center justify-center gap-1.5 shadow-sm hover:brightness-105 active:scale-[0.99] transition disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full py-2.5 rounded-lg bg-accent text-white text-xs font-medium flex items-center justify-center gap-1.5 shadow-sm hover:brightness-105 active:scale-[0.99] transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Send className="w-3.5 h-3.5" />
             开始批量沟通（半自动）
@@ -226,16 +223,16 @@ export default function BatchControlCard({
         )}
 
         {/* 最近匹配结果（只展示最近 3 条，完整记录在「追踪」页） */}
-        <div className="border-t border-black/5 pt-2.5">
+        <div className="border-t border-surface-hairline pt-2.5">
           <div className="flex items-center justify-between mb-2">
-            <span className="text-[11px] font-semibold text-text-secondary flex items-center gap-1">
+            <span className="text-xs font-medium text-text-secondary flex items-center gap-1">
               <ListChecks className="w-3.5 h-3.5 text-primary" />
               最近匹配结果
             </span>
-            <span className="text-[10px] text-text-muted">仅展示最近 3 条</span>
+            <span className="text-xs text-text-muted">仅展示最近 3 条</span>
           </div>
           {runtime.recentMatches.length === 0 ? (
-            <p className="text-[10px] text-text-muted text-center py-3 rounded-lg bg-surface-dark border border-dashed border-black/10">
+            <p className="text-xs text-text-muted text-center py-3 rounded-lg bg-surface-dark border border-dashed border-surface-hairline">
               本轮还没有匹配结果，开始沟通后会实时显示
             </p>
           ) : (
@@ -243,19 +240,19 @@ export default function BatchControlCard({
               {runtime.recentMatches.slice(0, 3).map((item, index) => (
                 <div
                   key={`${item.title}-${item.companyName}-${index}`}
-                  className="flex items-center gap-2 px-2.5 py-2 rounded-lg border border-black/5 bg-surface-dark/70"
+                  className="flex items-center gap-2 px-2.5 py-2 rounded-lg border border-surface-hairline bg-surface-dark/70"
                 >
                   <div className="flex-1 min-w-0">
-                    <p className="text-[11px] font-medium text-text-primary truncate">{item.title}</p>
-                    <p className="text-[10px] text-text-muted truncate">{item.companyName}</p>
+                    <p className="text-xs font-medium text-text-primary truncate">{item.title}</p>
+                    <p className="text-xs text-text-muted truncate">{item.companyName}</p>
                   </div>
                   <span
-                    className={`text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0 ${
+                    className={`text-xs font-medium px-1.5 py-0.5 rounded shrink-0 ${
                       item.scoreBypassed
-                        ? 'bg-slate-100 text-slate-500'
+                        ? 'bg-surface-dark text-text-secondary'
                         : item.recommended
-                          ? 'bg-emerald-50 text-emerald-600'
-                          : 'bg-slate-100 text-slate-500'
+                          ? 'bg-surface-dark text-success'
+                          : 'bg-surface-dark text-text-secondary'
                     }`}
                   >
                     {item.scoreBypassed ? '直投' : `${item.score}分 ${item.recommended ? '✓' : '×'}`}

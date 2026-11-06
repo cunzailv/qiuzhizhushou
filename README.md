@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1013%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1021%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -26,7 +26,7 @@
 以 **「握手」** 为核心图形语言：招聘平台与求职者、AI 与用户之间的双向连接。
 
 - **主 Logo**：商务徽章式设计 —— 暖橙（`#FF7A2F`）× 深蓝（`#1E3A8A`）双色徽章，双手握手图形 + 品牌字标
-- **浅色主题 UI**：全扩展（popup / options / 招聘页注入浮窗）统一为 **白底 · 黑字 · 橙色渐变 CTA**，与 Logo 徽章橙色形成品牌一致性
+- **界面方向（2026-11）**：全扩展（popup / options / 招聘页注入侧栏）统一为 **冷调石墨中性表面 · 近黑主按钮 · 单一压暗橙 accent**。品牌橙保留为唯一强调色但离开表面；渐变文字、彩色发光、毛玻璃、emoji 图标与循环动效已全部移除。Logo 徽章作为真实品牌资产保持不变
 
 | 资产 | 用途 |
 |------|------|
@@ -218,6 +218,35 @@ npm run build
 
 ---
 
+### 🎨 UI 设计方向 · unslop（2026-11）
+
+按 [unslop](https://github.com/heydamir/unslop) 的 Audit → Direction → 九道 pass → Check 流程做了一次全量视觉收敛。方向从产品本身推导，不套模板：
+
+| 五条方向 | 内容 |
+|---|---|
+| 产品 | 给正在求职的后端工程师用的浏览器侧栏，把「采集岗位 → 判断匹配 → 投递 → 追踪回复」变成一条可托管的流水线 |
+| 性格 | 克制、准确、像仪表盘刻度 |
+| 世界 | 招聘档案与进度刻度（工单、状态轴、刻度线），因此中性色取冷调石墨，所有表面无彩色 |
+| 亮点 | 全站只留两处有颜色的地方：AIbot 投递进度刻度、追踪页真实回复率数字 |
+| 签名 | 2px 的「队列进度刻度线」（`.queue-rule`），只在 AIbot / 批量控制卡 / 进度组件出现 |
+
+九道 pass 的落地：
+
+| Pass | 改动 |
+|---|---|
+| Spacing / Type | 4px 节奏；最小字号统一到 12px，字重只保留 400/500，去掉斜体；数字 `tabular-nums` |
+| Color | 一条冷调石墨 ramp（`#F5F7FA` → `#E2E6ED`）+ 三种文字角色 + 单一 accent `#C2410C`（白底约 5.2:1）；删除跨色相渐变、渐变文字、彩色发光与彩色滚动条 |
+| Icons | 界面 emoji 图标全部移除，统一 lucide 16px / 1.5 stroke；状态只用小圆点表达。运行日志与通知里的文本前缀保留（有测试断言，且不属于界面 chrome） |
+| Copy | 去掉感叹号、问候语与「一键」类营销词；标题改为事实描述 |
+| Layout / Details | 保留 440px popup 与侧栏形态、Tab 顺序与全部功能；药丸改方角（圆点 / 开关除外），发光 active 态改为中性 surface step + hairline，统一可见焦点环 |
+| Visuals / Motion | 删除无意义循环动效与 `hover:scale`；`transition-all` → `transition-colors`；只保留 loading 旋转、toast 淡入等解释性动效 |
+
+底座在 `tailwind.config.js` + `src/assets/styles/globals.css`，`src/content/inject-ui.tsx` 的 shadow DOM 内联样式同步收敛。`tests/unslop-design-tokens.test.ts`（8 例）把「无渐变 / 无 emoji / 无 12px 以下小字 / 无循环动效 / 签名刻度线存在」固化为静态契约，防止后续迭代把 slop 加回来。
+
+> 设计方法来自 [unslop](https://github.com/heydamir/unslop) by Damir Sokolovsky ([@heydamir](https://x.com/heydamir))，CC BY 4.0。本项目按其流程做适配与落地，保留作者署名。
+
+---
+
 ## 🏗️ 技术栈
 
 | 层 | 技术选型 |
@@ -227,7 +256,7 @@ npm run build
 | 样式 | Tailwind CSS 3 + shadow DOM 注入 |
 | 数据 | Dexie (IndexedDB) + chrome.storage |
 | AI | OpenAI / DeepSeek / 自定义兼容接口 + 本地语义精筛 + AI SDK 7 tool-calling 循环 |
-| 测试 | Vitest（1013 用例 / 74 文件）+ Playwright（E2E） |
+| 测试 | Vitest（1021 用例 / 75 文件）+ Playwright（E2E） |
 | UI 组件 | Lucide React + Recharts + react-markdown / remark-gfm |
 
 ## 📁 项目结构
@@ -275,8 +304,8 @@ docs/EXTERNAL_AI.md     # 外部 AI 接入完整指南
 ## 🧪 测试与验收
 
 ```bash
-npm test                                       # tsc -b + vite build + 全部 1013 个测试用例
-npx vitest run                                  # 全量单测/E2E：74 文件 / 1013 用例
+npm test                                       # tsc -b + vite build + 全部 1021 个测试用例
+npx vitest run                                  # 全量单测/E2E：75 文件 / 1021 用例
 npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用例（基线 110 + 新增 36）
 ```
 
@@ -289,6 +318,7 @@ npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用�
 
 | 版本 | 内容 |
 |------|------|
+| `未发布` | 🎨 按 unslop 完成全量界面收敛：石墨中性底座 + 单一压暗橙 accent、去掉渐变/发光/毛玻璃/emoji 图标/循环动效、落地队列进度刻度线签名，新增 8 例设计契约测试 |
 | `未发布` | 🩺 异常留痕跨上下文统一：页面域异常不再丢失，对话台全链路降级留痕、日志脱敏、诊断中心新增「对话台」筛选 |
 | `未发布` | 🧠 智能中控对话台升级为 Tool-Calling Agent：多轮上下文 + 46 个内部工具自动调用 + 危险动作审批 + 执行轨迹 + 三级可见降级 |
 | `v1.1.1` | 🎛️ F 层：悬浮窗右侧收缩三态、AIbot 配置双向同步、关闭浮窗即关闭 AIbot |

@@ -28,13 +28,13 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
       {/* Collapse toggle */}
       <button
         onClick={onToggleCollapse}
-        className="w-full flex items-center justify-between py-2 px-3 rounded-xl bg-black/[0.03] border border-black/10 hover:border-black/10 transition-colors"
+        className="w-full flex items-center justify-between py-2 px-3 rounded-xl bg-black/[0.03] border border-surface-hairline hover:border-surface-hairline transition-colors"
       >
         <div className="flex items-center gap-2">
           <Filter className="w-3.5 h-3.5 text-primary-light" />
           <span className="text-xs font-medium text-text-primary">沟通筛选条件</span>
           {activeCount > 0 && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-primary/15 text-primary-light">
+            <span className="text-xs px-1.5 py-0.5 rounded-md bg-surface-dark text-primary-light">
               {activeCount}
             </span>
           )}
@@ -43,9 +43,9 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
       </button>
 
       {!collapsed && (
-        <div className="space-y-2.5 p-3 bg-black/[0.02] rounded-xl border border-black/10">
-          <p className="text-[10px] leading-relaxed text-text-muted rounded-lg bg-primary/5 border border-primary/15 px-2 py-1.5">
-            🔗 此配置<strong className="text-primary-light">同时作用于概览半自动与 AIbot 全自动流水线</strong>，改一次两边同时生效。
+        <div className="space-y-2.5 p-3 bg-black/[0.02] rounded-xl border border-surface-hairline">
+          <p className="text-xs leading-relaxed text-text-muted rounded-lg bg-surface-dark border border-surface-hairline px-2 py-1.5">
+            此配置<strong className="text-primary-light">同时作用于概览半自动与 AIbot 全自动流水线</strong>，改一次两边同时生效。
           </p>
 
           {/* Job Title */}
@@ -70,7 +70,7 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
           <div>
             <div className="flex items-center gap-1.5 mb-1">
               <DollarSign className="w-3 h-3 text-primary-light" />
-              <span className="text-[11px] text-text-muted">薪资范围（K/月）</span>
+              <span className="text-xs text-text-muted">薪资范围（K/月）</span>
             </div>
             <div className="flex items-center gap-2">
               <input
@@ -92,7 +92,7 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
                 min={0}
                 max={99}
               />
-              <span className="text-[10px] text-text-muted">K</span>
+              <span className="text-xs text-text-muted">K</span>
             </div>
           </div>
 
@@ -127,7 +127,7 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
           <div>
             <div className="flex items-center gap-1.5 mb-1">
               <Clock className="w-3 h-3 text-primary-light" />
-              <span className="text-[11px] text-text-muted">活跃/发布时间（筛选近期待招岗位）</span>
+              <span className="text-xs text-text-muted">活跃/发布时间（筛选近期待招岗位）</span>
             </div>
             <select
               value={filters.publishTime || 'week'}
@@ -146,7 +146,7 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
           <div className="flex items-center justify-between py-1">
             <div className="flex items-center gap-1.5">
               <Sparkles className="w-3 h-3 text-accent" />
-              <span className="text-[11px] text-text-muted">按匹配分筛选</span>
+              <span className="text-xs text-text-muted">按匹配分筛选</span>
             </div>
             <label className="flex items-center gap-2 cursor-pointer">
               <input
@@ -155,14 +155,14 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
                 onChange={(e) => onChange({ enableAiMatch: e.target.checked })}
                 className="w-3.5 h-3.5 rounded accent-primary"
               />
-              <span className="text-[10px] text-text-muted">
+              <span className="text-xs text-text-muted">
                 {filters.enableAiMatch ? `最低 ${filters.minMatchScore} 分` : '关闭 · 直接沟通'}
               </span>
             </label>
           </div>
 
           {!filters.enableAiMatch && (
-            <p className="text-[10px] leading-4 text-warning">
+            <p className="text-xs leading-4 text-warning">
               不计算匹配门槛；通过职位、地区等基础筛选后直接沟通。
             </p>
           )}
@@ -170,7 +170,7 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
           {/* Min Match Score (only when AI enabled) */}
           {filters.enableAiMatch && (
             <div className="flex items-center gap-2">
-              <span className="text-[10px] text-text-muted whitespace-nowrap">最低匹配分</span>
+              <span className="text-xs text-text-muted whitespace-nowrap">最低匹配分</span>
               <input
                 type="range"
                 min={30}
@@ -180,7 +180,7 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
                 onChange={(e) => onChange({ minMatchScore: Number(e.target.value) })}
                 className="flex-1 accent-primary h-1"
               />
-              <span className="text-[10px] text-primary-light font-medium w-5">{filters.minMatchScore}</span>
+              <span className="text-xs text-primary-light font-medium w-5">{filters.minMatchScore}</span>
             </div>
           )}
 
@@ -189,13 +189,13 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
             onClick={onStartApply}
             disabled={startDisabled}
             title={startDisabled ? '当前已有沟通任务在运行，或 AIbot 全自动占用了运行锁' : undefined}
-            className="w-full mt-1 py-2.5 rounded-xl bg-gradient-to-r from-primary to-primary-light text-white text-sm font-semibold hover:shadow-lg hover:shadow-primary/20 transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full mt-1 py-2.5 rounded-xl bg-text-primary text-white text-sm font-medium hover:shadow-lg hover:shadow-primary/20 transition-colors active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Sparkles className="w-4 h-4" />
             开始智能沟通
           </button>
           {startDisabled && (
-            <p className="text-[10px] text-amber-700 leading-relaxed">
+            <p className="text-xs text-warning leading-relaxed">
               已有沟通任务在运行，或 AIbot 全自动占用了运行锁；如需重新开始请先点「停止」。
             </p>
           )}
@@ -222,7 +222,7 @@ function FilterField({
     <div>
       <div className="flex items-center gap-1.5 mb-1">
         {icon}
-        <span className="text-[11px] text-text-muted">{label}</span>
+        <span className="text-xs text-text-muted">{label}</span>
       </div>
       <input
         type="text"

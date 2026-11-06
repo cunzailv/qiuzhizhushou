@@ -177,7 +177,7 @@ export default function Settings() {
   return (
     <div className="max-w-3xl space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-text-primary">扩展设置</h2>
+        <h2 className="text-2xl font-medium text-text-primary">扩展设置</h2>
         <p className="text-sm text-text-muted mt-1">配置 AI 模型、沟通策略和通知偏好</p>
       </div>
 
@@ -185,14 +185,14 @@ export default function Settings() {
       <Card>
         <div className="flex items-center gap-2 mb-4">
           <Globe className="w-5 h-5 text-primary-light" />
-          <span className="font-semibold text-text-primary">平台识别</span>
+          <span className="font-medium text-text-primary">平台识别</span>
         </div>
         <div>
           <label className="text-xs text-text-muted mb-1.5 block">当前平台策略</label>
           <select
             value={platformOverride}
             onChange={(e) => handlePlatformOverrideChange(e.target.value)}
-            className="w-full px-3 py-2.5 rounded-xl bg-surface-darkest border border-black/10 text-sm text-text-primary focus:border-primary-light focus:outline-none"
+            className="w-full px-3 py-2.5 rounded-xl bg-surface-darkest border border-surface-hairline text-sm text-text-primary focus:border-primary-light focus:outline-none"
           >
             <option value="auto">自动识别（按网址）</option>
             {getPlatformsMeta().map((p) => (
@@ -207,7 +207,7 @@ export default function Settings() {
       <Card>
         <div className="flex items-center gap-2 mb-4">
           <Key className="w-5 h-5 text-primary-light" />
-          <span className="font-semibold text-text-primary">AI 模型配置</span>
+          <span className="font-medium text-text-primary">AI 模型配置</span>
         </div>
 
         <div className="space-y-4">
@@ -217,7 +217,7 @@ export default function Settings() {
             <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setShowModelDropdown(!showModelDropdown)}
-                className="w-full px-3 py-2.5 rounded-xl bg-surface-darkest border border-black/10 text-left flex items-center justify-between hover:border-black/20 transition-colors"
+                className="w-full px-3 py-2.5 rounded-xl bg-surface-darkest border border-surface-hairline text-left flex items-center justify-between hover:border-surface-hairline transition-colors"
               >
                 <div className="flex items-center gap-3">
                   <span className="text-sm font-medium">{selectedPreset?.name || '选择模型'}</span>
@@ -227,13 +227,13 @@ export default function Settings() {
               </button>
 
               {showModelDropdown && (
-                <div className="absolute top-full left-0 right-0 mt-1 p-2 rounded-xl bg-surface-dark border border-black/10 shadow-2xl z-50 max-h-[320px] overflow-y-auto">
+                <div className="absolute top-full left-0 right-0 mt-1 p-2 rounded-xl bg-surface-dark border border-surface-hairline shadow-2xl z-50 max-h-[320px] overflow-y-auto">
                   {allModels.map((model) => (
                     <button
                       key={model.id}
                       onClick={() => handleSelectPreset(model.id, model)}
-                      className={`w-full px-3 py-2.5 rounded-lg text-left transition-colors hover:bg-black/5 ${
-                        settings.modelPreset === model.id ? 'bg-primary/10 ring-1 ring-primary/30' : ''
+                      className={`w-full px-3 py-2.5 rounded-lg text-left transition-colors hover:bg-surface-dark ${
+                        settings.modelPreset === model.id ? 'bg-surface-dark ring-1 ring-accent/20' : ''
                       }`}
                     >
                       <div className="flex items-center justify-between mb-0.5">
@@ -245,7 +245,7 @@ export default function Settings() {
                           {model.isCustom && (
                             <span
                               onClick={(e) => { e.stopPropagation(); handleDeleteCustomModel(model.id) }}
-                              className="p-0.5 rounded hover:bg-red-500/20 text-text-muted hover:text-red-400 cursor-pointer"
+                              className="p-0.5 rounded hover:bg-danger/20 text-text-muted hover:text-red-400 cursor-pointer"
                               title="删除此模型"
                             >
                               <X className="w-3.5 h-3.5" />
@@ -253,7 +253,7 @@ export default function Settings() {
                           )}
                         </div>
                       </div>
-                      <div className="text-[11px] text-text-muted">
+                      <div className="text-xs text-text-muted">
                         {model.provider} · {model.description}
                       </div>
                     </button>
@@ -272,7 +272,7 @@ export default function Settings() {
                 添加自定义模型
               </button>
             ) : (
-              <div className="p-3 rounded-xl bg-black/5 border border-black/10 space-y-3">
+              <div className="p-3 rounded-xl bg-surface-dark border border-surface-hairline space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-text-muted mb-1 block">显示名称</label>
@@ -280,7 +280,7 @@ export default function Settings() {
                       type="text"
                       value={newModel.name}
                       onChange={(e) => setNewModel({ ...newModel, name: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-black/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
+                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-surface-hairline text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
                       placeholder="如 GPT-4o"
                     />
                   </div>
@@ -290,7 +290,7 @@ export default function Settings() {
                       type="text"
                       value={newModel.provider}
                       onChange={(e) => setNewModel({ ...newModel, provider: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-black/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
+                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-surface-hairline text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
                       placeholder="如 OpenAI"
                     />
                   </div>
@@ -300,7 +300,7 @@ export default function Settings() {
                       type="text"
                       value={newModel.baseUrl}
                       onChange={(e) => setNewModel({ ...newModel, baseUrl: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-black/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
+                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-surface-hairline text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
                       placeholder="https://api.openai.com/v1"
                     />
                   </div>
@@ -310,7 +310,7 @@ export default function Settings() {
                       type="text"
                       value={newModel.modelName}
                       onChange={(e) => setNewModel({ ...newModel, modelName: e.target.value })}
-                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-black/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
+                      className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-surface-hairline text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
                       placeholder="gpt-4o"
                     />
                   </div>
@@ -324,7 +324,7 @@ export default function Settings() {
                   </button>
                   <button
                     onClick={handleAddCustomModel}
-                    className="px-3 py-1.5 rounded-lg bg-primary/20 text-primary-light text-sm hover:bg-primary/30 transition-colors"
+                    className="px-3 py-1.5 rounded-lg bg-surface-dark text-primary-light text-sm hover:bg-surface-dark transition-colors"
                   >
                     保存
                   </button>
@@ -341,7 +341,7 @@ export default function Settings() {
                 type="password"
                 value={settings.apiKey}
                 onChange={(e) => handleSave({ apiKey: e.target.value })}
-                className="flex-1 px-3 py-2.5 rounded-xl bg-surface-darkest border border-black/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
+                className="flex-1 px-3 py-2.5 rounded-xl bg-surface-darkest border border-surface-hairline text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
                 placeholder={selectedPreset ? `输入 ${selectedPreset.provider} 的 API Key` : '输入 API Key'}
               />
               <Button onClick={handleTestAPI} loading={testing} variant="secondary">
@@ -361,7 +361,7 @@ export default function Settings() {
               </a>
             )}
             <div className="flex items-center justify-between mt-1.5">
-              <span className={`text-xs ${aiUsage && aiUsage.used >= aiUsage.limit ? 'text-error font-semibold' : 'text-text-muted'}`}>
+              <span className={`text-xs ${aiUsage && aiUsage.used >= aiUsage.limit ? 'text-error font-medium' : 'text-text-muted'}`}>
                 今日 AI 已用: {aiUsage ? `${aiUsage.used} / ${aiUsage.limit} 次` : '加载中…'}
                 {aiUsage && aiUsage.used >= aiUsage.limit && '（已超限，AI 已暂停）'}
               </span>
@@ -377,14 +377,14 @@ export default function Settings() {
 
           {/* Custom model fields */}
           {isCustom && (
-            <div className="grid grid-cols-2 gap-4 p-3 rounded-xl bg-black/5 border border-black/10">
+            <div className="grid grid-cols-2 gap-4 p-3 rounded-xl bg-surface-dark border border-surface-hairline">
               <div>
                 <label className="text-xs text-text-muted mb-1.5 block">API Base URL</label>
                 <input
                   type="text"
                   value={settings.apiBaseUrl}
                   onChange={(e) => handleSave({ apiBaseUrl: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-black/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
+                  className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-surface-hairline text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
                   placeholder="https://api.openai.com/v1"
                 />
               </div>
@@ -394,7 +394,7 @@ export default function Settings() {
                   type="text"
                   value={settings.modelName}
                   onChange={(e) => handleSave({ modelName: e.target.value })}
-                  className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-black/10 text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
+                  className="w-full px-3 py-2 rounded-lg bg-surface-darkest border border-surface-hairline text-sm text-text-primary placeholder-text-muted focus:border-primary-light focus:outline-none"
                   placeholder="gpt-4o-mini"
                 />
               </div>
@@ -417,9 +417,9 @@ export default function Settings() {
       </Card>
 
       {/* 求职画像与底线已迁至「简历管理」模块 */}
-      <div className="rounded-xl border border-black/10 bg-black/[0.02] p-3">
+      <div className="rounded-xl border border-surface-hairline bg-black/[0.02] p-3">
         <p className="text-xs font-medium text-text-primary">求职画像 · 底线 · 自主授权</p>
-        <p className="text-[11px] text-text-muted mt-1 leading-relaxed">
+        <p className="text-xs text-text-muted mt-1 leading-relaxed">
           这些配置与简历绑定，已统一放到「简历管理」页下方管理，此处不再重复展示。
         </p>
       </div>
@@ -431,8 +431,8 @@ export default function Settings() {
       <Card>
         <div className="flex items-center gap-2 mb-1">
           <Shield className="w-5 h-5 text-success" />
-          <span className="font-semibold text-text-primary">防封策略</span>
-          <span className="ml-auto text-[11px] px-2 py-0.5 rounded-full bg-success/10 text-success font-medium">
+          <span className="font-medium text-text-primary">防封策略</span>
+          <span className="ml-auto text-xs px-2 py-0.5 rounded-md bg-success/10 text-success font-medium">
             当前：{SAFETY_PROFILE_LABELS[(settings.safetyProfile ?? 'conservative') as SafetyProfileId]}
           </span>
         </div>
@@ -449,21 +449,21 @@ export default function Settings() {
                 key={preset.id}
                 type="button"
                 onClick={() => handleApplySafetyPreset(preset.id)}
-                className={`text-left px-3 py-2.5 rounded-xl border transition-all ${
+                className={`text-left px-3 py-2.5 rounded-xl border transition-colors ${
                   active
-                    ? 'border-primary/40 bg-primary/10 ring-1 ring-primary/20'
-                    : 'border-black/10 bg-black/[0.02] hover:bg-black/5'
+                    ? 'border-surface-hairline bg-surface-dark ring-1 ring-accent/20'
+                    : 'border-surface-hairline bg-black/[0.02] hover:bg-surface-dark'
                 }`}
               >
-                <span className={`block text-sm font-semibold ${active ? 'text-primary-light' : 'text-text-primary'}`}>
+                <span className={`block text-sm font-medium ${active ? 'text-primary-light' : 'text-text-primary'}`}>
                   {preset.label}
                 </span>
-                <span className="block text-[10px] text-text-muted mt-0.5 leading-tight">{preset.tagline}</span>
+                <span className="block text-xs text-text-muted mt-0.5 leading-tight">{preset.tagline}</span>
               </button>
             )
           })}
         </div>
-        <p className="text-[11px] text-text-muted mb-4 leading-relaxed">
+        <p className="text-xs text-text-muted mb-4 leading-relaxed">
           {(() => {
             const preset = getSafetyPreset(settings.safetyProfile)
             if (preset) return preset.description
@@ -471,7 +471,7 @@ export default function Settings() {
           })()}
         </p>
         {getSafetyPreset(settings.safetyProfile)?.warning && (
-          <p className="text-[11px] text-error bg-error/10 border border-error/20 rounded-lg px-2.5 py-1.5 mb-4">
+          <p className="text-xs text-error bg-error/10 border border-error/20 rounded-lg px-2.5 py-1.5 mb-4">
             {getSafetyPreset(settings.safetyProfile)!.warning}
           </p>
         )}
@@ -489,7 +489,7 @@ export default function Settings() {
                 onChange={(e) => handleSave(rhythmPatch({ dailyLimit: parseInt(e.target.value) }))}
                 className="w-full accent-primary"
               />
-              <div className="flex justify-between text-[10px] text-text-muted mt-0.5">
+              <div className="flex justify-between text-xs text-text-muted mt-0.5">
                 <span>10</span><span>10000</span>
               </div>
             </div>
@@ -498,7 +498,7 @@ export default function Settings() {
               <select
                 value={settings.minDelay}
                 onChange={(e) => handleSave(rhythmPatch({ minDelay: parseInt(e.target.value) }))}
-                className="w-full px-3 py-2 rounded-xl bg-surface-darkest border border-black/10 text-sm"
+                className="w-full px-3 py-2 rounded-xl bg-surface-darkest border border-surface-hairline text-sm"
               >
                 {[1000,2000,3000,5000].map(v => (
                   <option key={v} value={v}>{v/1000} 秒</option>
@@ -510,7 +510,7 @@ export default function Settings() {
               <select
                 value={settings.maxDelay}
                 onChange={(e) => handleSave(rhythmPatch({ maxDelay: parseInt(e.target.value) }))}
-                className="w-full px-3 py-2 rounded-xl bg-surface-darkest border border-black/10 text-sm"
+                className="w-full px-3 py-2 rounded-xl bg-surface-darkest border border-surface-hairline text-sm"
               >
                 {[3000,5000,8000,10000,15000].map(v => (
                   <option key={v} value={v}>{v/1000} 秒</option>
@@ -529,7 +529,7 @@ export default function Settings() {
             <select
               value={settings.maxScanCount}
               onChange={(e) => handleSave(rhythmPatch({ maxScanCount: parseInt(e.target.value) }))}
-              className="w-full px-3 py-2 rounded-xl bg-surface-darkest border border-black/10 text-sm"
+              className="w-full px-3 py-2 rounded-xl bg-surface-darkest border border-surface-hairline text-sm"
             >
               {[10, 20, 30, 50, 80, 100, 150, 200].map((v) => (
                 <option key={v} value={v}>{v} 个</option>
@@ -544,9 +544,9 @@ export default function Settings() {
             <div className="flex gap-2">
               <button
                 onClick={() => handleSave(rhythmPatch({ applyMode: 'batch' }))}
-                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
                   settings.applyMode === 'batch'
-                    ? 'bg-primary/20 text-primary-light ring-1 ring-primary/30'
+                    ? 'bg-surface-dark text-primary-light ring-1 ring-accent/20'
                     : 'bg-surface-darkest text-text-muted'
                 }`}
               >
@@ -554,9 +554,9 @@ export default function Settings() {
               </button>
               <button
                 onClick={() => handleSave(rhythmPatch({ applyMode: 'recommend' }))}
-                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
                   settings.applyMode === 'recommend'
-                    ? 'bg-primary/20 text-primary-light ring-1 ring-primary/30'
+                    ? 'bg-surface-dark text-primary-light ring-1 ring-accent/20'
                     : 'bg-surface-darkest text-text-muted'
                 }`}
               >
@@ -583,10 +583,10 @@ export default function Settings() {
       <Card>
         <div className="flex items-center gap-2 mb-1">
           <Shield className="w-5 h-5 text-primary" />
-          <span className="font-semibold text-text-primary">AI 动作权限</span>
+          <span className="font-medium text-text-primary">AI 动作权限</span>
         </div>
         <p className="text-xs text-text-muted mb-4">Harness 权限三档：自动执行 / 需确认 / 禁止。投递与发送类动作默认需确认。</p>
-        <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-4">
+        <p className="text-xs text-warning bg-surface-dark border border-surface-hairline rounded-lg px-2.5 py-1.5 mb-4">
           若在「简历管理」模块中启用了「自主授权」，此处三档将被授权契约覆盖：以简历页的画像配置为准，区间内自动执行、越界停下询问。
         </p>
 
@@ -598,9 +598,9 @@ export default function Settings() {
                 <button
                   key={level}
                   onClick={() => { setPermissionLevel('permission_apply', level) }}
-                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
                     permissionApply === level
-                      ? 'bg-primary/20 text-primary-light ring-1 ring-primary/30'
+                      ? 'bg-surface-dark text-primary-light ring-1 ring-accent/20'
                       : 'bg-surface-darkest text-text-muted'
                   }`}
                 >
@@ -618,9 +618,9 @@ export default function Settings() {
                 <button
                   key={level}
                   onClick={() => { setPermissionLevel('permission_send', level) }}
-                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
+                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${
                     permissionSend === level
-                      ? 'bg-primary/20 text-primary-light ring-1 ring-primary/30'
+                      ? 'bg-surface-dark text-primary-light ring-1 ring-accent/20'
                       : 'bg-surface-darkest text-text-muted'
                   }`}
                 >
@@ -690,14 +690,14 @@ function ErrorLogCard() {
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
           <Bug className="w-5 h-5 text-primary-light" />
-          <span className="font-semibold text-text-primary">错误日志（{errors.length}）</span>
-          <span className="text-[11px] text-text-muted">全局捕获 + AI 失败点自动记录</span>
+          <span className="font-medium text-text-primary">错误日志（{errors.length}）</span>
+          <span className="text-xs text-text-muted">全局捕获 + AI 失败点自动记录</span>
         </div>
         <div className="flex items-center gap-2">
-          <button onClick={() => setExpanded(!expanded)} className="px-2.5 py-1 rounded-lg bg-black/5 text-text-muted text-xs hover:text-text-primary transition-colors">
+          <button onClick={() => setExpanded(!expanded)} className="px-2.5 py-1 rounded-lg bg-surface-dark text-text-muted text-xs hover:text-text-primary transition-colors">
             {expanded ? '收起' : '展开'}
           </button>
-          <button onClick={handleClear} className="px-2.5 py-1 rounded-lg bg-black/5 text-text-muted text-xs hover:text-red-400 transition-colors">
+          <button onClick={handleClear} className="px-2.5 py-1 rounded-lg bg-surface-dark text-text-muted text-xs hover:text-red-400 transition-colors">
             <Trash2 className="w-3 h-3 inline mr-1" />
             清空
           </button>
@@ -708,13 +708,13 @@ function ErrorLogCard() {
       ) : (
         <div className="space-y-2 max-h-72 overflow-y-auto">
           {errors.map((e) => (
-            <div key={e.id} className="rounded-xl border border-black/10 bg-surface-darkest p-3">
+            <div key={e.id} className="rounded-xl border border-surface-hairline bg-surface-darkest p-3">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs font-medium text-text-primary">{e.source}</span>
-                <span className="text-[11px] text-text-muted shrink-0">{e.createdAt}</span>
+                <span className="text-xs text-text-muted shrink-0">{e.createdAt}</span>
               </div>
               <p className="text-xs text-text-secondary mt-1 break-all">{e.message}</p>
-              {expanded && e.stack && <pre className="text-[10px] text-text-muted mt-1 whitespace-pre-wrap break-all">{e.stack}</pre>}
+              {expanded && e.stack && <pre className="text-xs text-text-muted mt-1 whitespace-pre-wrap break-all">{e.stack}</pre>}
             </div>
           ))}
         </div>

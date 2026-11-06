@@ -115,8 +115,8 @@ export default function Dashboard({
         {statCards.map((stat) => (
           <Card key={stat.label} className="flex flex-col items-center justify-center py-3 px-2 text-center">
             <stat.icon className="w-4 h-4 mb-1" style={{ color: stat.color }} />
-            <p className="text-lg font-bold text-text-primary">{stat.value}</p>
-            <p className="text-[10px] text-text-muted">{stat.label}</p>
+            <p className="text-lg font-medium text-text-primary">{stat.value}</p>
+            <p className="text-xs text-text-muted">{stat.label}</p>
           </Card>
         ))}
       </div>

@@ -95,7 +95,7 @@ export default function Tracker() {
 
   return (
     <div className="p-4 space-y-3">
-      <h2 className="text-lg font-bold gradient-text">沟通追踪</h2>
+      <h2 className="text-lg font-medium gradient-text">沟通追踪</h2>
 
       {/* Search */}
       <div className="relative">
@@ -115,9 +115,9 @@ export default function Tracker() {
           <button
             key={f.value}
             onClick={() => setFilterStatus(f.value)}
-            className={`px-2.5 py-1 text-[11px] rounded-lg transition-colors ${
+            className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
               filterStatus === f.value
-                ? 'bg-primary/20 text-primary-light font-medium'
+                ? 'bg-surface-dark text-primary-light font-medium'
                 : 'text-text-muted hover:text-text-secondary'
             }`}
           >
@@ -138,7 +138,7 @@ export default function Tracker() {
               onClick={() => setExpandedId(expandedId === app.id ? null : app.id)}
             >
               <div className="flex items-start gap-3">
-                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                <div className="w-8 h-8 rounded-lg bg-surface-dark flex items-center justify-center shrink-0">
                   <Building2 className="w-4 h-4 text-primary-light" />
                 </div>
                 <div className="flex-1 min-w-0">
@@ -167,15 +167,15 @@ export default function Tracker() {
                         e.stopPropagation()
                         setExpandedId(expandedId === app.id ? null : app.id)
                       }}
-                      className="shrink-0 text-[11px] text-primary-light hover:underline"
+                      className="shrink-0 text-xs text-primary-light hover:underline"
                     >
                       {expandedId === app.id ? '收起' : '详情'}
                     </button>
                   </p>
                   <div className="flex items-center gap-2 mt-1">
-                    <span className="text-[11px] text-text-muted">{sanitizeJobText(app.salary)}</span>
-                    <span className="text-[11px] text-text-muted">·</span>
-                    <span className="text-[11px] text-text-muted flex items-center gap-1">
+                    <span className="text-xs text-text-muted">{sanitizeJobText(app.salary)}</span>
+                    <span className="text-xs text-text-muted">·</span>
+                    <span className="text-xs text-text-muted flex items-center gap-1">
                       <Clock className="w-2.5 h-2.5" />
                       {formatRelativeTime(app.appliedAt)}
                     </span>
@@ -185,10 +185,10 @@ export default function Tracker() {
 
               {/* Expanded Details */}
               {expandedId === app.id && (
-                <div className="mt-3 pt-3 border-t border-black/10 space-y-2">
+                <div className="mt-3 pt-3 border-t border-surface-hairline space-y-2">
                   <div className="flex items-center gap-2">
-                    <span className="text-[11px] text-text-muted">匹配分数：</span>
-                    <span className="text-sm font-bold text-primary-light">
+                    <span className="text-xs text-text-muted">匹配分数：</span>
+                    <span className="text-sm font-medium text-primary-light">
                       {app.matchScore === null ? '未评分' : `${app.matchScore}分`}
                     </span>
                   </div>
@@ -204,10 +204,10 @@ export default function Tracker() {
                           e.stopPropagation()
                           handleStatusChange(app.id, s)
                         }}
-                        className={`px-2 py-1 text-[10px] rounded-lg transition-colors ${
+                        className={`px-2 py-1 text-xs rounded-lg transition-colors ${
                           app.status === s
-                            ? 'bg-primary/20 text-primary-light'
-                            : 'bg-black/5 text-text-muted hover:text-text-secondary'
+                            ? 'bg-surface-dark text-primary-light'
+                            : 'bg-surface-dark text-text-muted hover:text-text-secondary'
                         }`}
                       >
                         {APPLICATION_STATUS_LABELS[s]}
@@ -227,18 +227,18 @@ export default function Tracker() {
           <button
             disabled={currentPage <= 1}
             onClick={() => setPage(currentPage - 1)}
-            className="flex items-center gap-0.5 px-2 py-1 text-[11px] rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-text-secondary hover:text-text-primary hover:bg-black/5"
+            className="flex items-center gap-0.5 px-2 py-1 text-xs rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-text-secondary hover:text-text-primary hover:bg-surface-dark"
           >
             <ChevronLeft className="w-3.5 h-3.5" />
             上一页
           </button>
-          <span className="text-[11px] text-text-muted">
+          <span className="text-xs text-text-muted">
             {filtered.length} 条 · 第 {currentPage} / {totalPages} 页
           </span>
           <button
             disabled={currentPage >= totalPages}
             onClick={() => setPage(currentPage + 1)}
-            className="flex items-center gap-0.5 px-2 py-1 text-[11px] rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-text-secondary hover:text-text-primary hover:bg-black/5"
+            className="flex items-center gap-0.5 px-2 py-1 text-xs rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-text-secondary hover:text-text-primary hover:bg-surface-dark"
           >
             下一页
             <ChevronRight className="w-3.5 h-3.5" />

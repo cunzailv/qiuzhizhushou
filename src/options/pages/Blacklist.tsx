@@ -83,7 +83,7 @@ export default function Blacklist() {
     <div className="space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold gradient-text">公司黑名单</h1>
+          <h1 className="text-2xl font-medium gradient-text">公司黑名单</h1>
           <p className="text-sm text-text-muted mt-1">沟通时自动跳过黑名单中的公司</p>
         </div>
       </div>
@@ -130,7 +130,7 @@ export default function Blacklist() {
           <Download className="w-3.5 h-3.5" />
           导出CSV
         </Button>
-        <label className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl bg-surface-light text-text-secondary hover:bg-surface-medium border border-black/10 transition-all duration-200 cursor-pointer">
+        <label className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl bg-surface-light text-text-secondary hover:bg-surface-medium border border-surface-hairline transition-colors duration-200 cursor-pointer">
           <Upload className="w-3.5 h-3.5" />
           导入CSV
           <input

@@ -62,12 +62,12 @@ import {
   type AssistantRuntimeState,
 } from '../../shared/runtime-state'
 
-const PLATFORM_INFOS: Array<{ id: PlatformId; name: string; icon: string }> = [
-  { id: 'boss', name: 'Boss直聘', icon: '💼' },
-  { id: 'liepin', name: '猎聘', icon: '👔' },
-  { id: 'zhaopin', name: '智联招聘', icon: '🏢' },
-  { id: '51job', name: '前程无忧', icon: '📮' },
-  { id: 'maimai', name: '脉脉', icon: '👥' },
+const PLATFORM_INFOS: Array<{ id: PlatformId; name: string }> = [
+  { id: 'boss', name: 'Boss直聘' },
+  { id: 'liepin', name: '猎聘' },
+  { id: 'zhaopin', name: '智联招聘' },
+  { id: '51job', name: '前程无忧' },
+  { id: 'maimai', name: '脉脉' },
 ]
 
 interface CampaignPanelProps {
@@ -478,7 +478,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         error?: string
       }
       if (res?.success) {
-        onNotify?.('已向各开启平台发起全自主职位探测与补仓！', 'info')
+        onNotify?.('已向各开启平台发起全自主职位探测与补仓', 'info')
         setTimeout(fetchStats, 1500)
       } else {
         onNotify?.(`探测补仓提示: ${res?.error || '请确认已登录平台'}`, 'warning')
@@ -501,7 +501,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
 
       if (res?.success) {
         const count = res.data?.cleared ?? 0
-        onNotify?.(`已清空 ${count} 个旧页面待投缓存，正在重新抓取当前最新页面岗位！`, 'success')
+        onNotify?.(`已清空 ${count} 个旧页面待投缓存，正在重新抓取当前最新页面岗位`, 'success')
         setTimeout(fetchStats, 1500)
       } else {
         onNotify?.(`清空重获提示: ${res?.error || '操作未完成'}`, 'warning')
@@ -548,7 +548,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
       (p) => enabledPlatforms[p],
     )
     if (activePlatformIds.length === 0) {
-      onNotify?.('请至少开启一个要投递的招聘平台！', 'warning')
+      onNotify?.('请至少开启一个要投递的招聘平台', 'warning')
       void chrome.runtime.sendMessage({ type: 'RUNTIME_RELEASE', payload: { mode: 'autopilot' } }).catch(() => {})
       return
     }
@@ -576,7 +576,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
       })) as { success: boolean; error?: string }
 
       if (res.success) {
-        onNotify?.(`AIbot 已启动！正在调度 [${activePlatformIds.join(', ')}]`, 'success')
+        onNotify?.(`AIbot 已启动，正在调度 [${activePlatformIds.join(', ')}]`, 'success')
         await fetchStats()
       } else {
         void chrome.runtime.sendMessage({ type: 'RUNTIME_RELEASE', payload: { mode: 'autopilot' } }).catch(() => {})
@@ -645,46 +645,46 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
   const isCaptchaPaused = isPaused && stats?.pausedReason === 'captcha'
 
   return (
-    <div className="bg-white rounded-xl border border-black/10 shadow-sm overflow-hidden text-text-primary space-y-3.5 p-3.5">
+    <div className="bg-surface-darkest rounded-xl border border-surface-hairline shadow-sm overflow-hidden text-text-primary space-y-3.5 p-3.5">
       {/* 头部：品牌与状态指示 */}
-      <div className="flex items-center justify-between pb-2 border-b border-black/5">
+      <div className="flex items-center justify-between pb-2 border-b border-surface-hairline">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
-            <Bot className="w-5 h-5 animate-pulse" />
+          <div className="w-8 h-8 rounded-lg bg-surface-dark border border-surface-hairline flex items-center justify-center text-primary">
+            <Bot className="w-5 h-5" />
           </div>
           <div>
-            <h3 className="font-bold text-[13px] flex items-center gap-1.5 text-text-primary">
+            <h3 className="font-medium text-[13px] flex items-center gap-1.5 text-text-primary">
               AIbot 全自动投递流水线
-              <span className="text-[10px] px-1.5 py-0.2 rounded bg-primary/10 text-primary border border-primary/20 font-medium">
+              <span className="text-xs px-1.5 py-0.2 rounded bg-surface-dark text-primary border border-surface-hairline font-medium">
                 无人值守
               </span>
             </h3>
-            <p className="text-[10px] text-text-muted">多平台轮转 · AI 筛岗 + 话术 · 拟人防封</p>
+            <p className="text-xs text-text-muted">多平台轮转 · AI 筛岗 + 话术 · 拟人防封</p>
           </div>
         </div>
 
         {/* 运行状态胶囊 */}
         <div>
           {isRunning && (
-            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200 font-medium">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping" />
+            <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-md bg-surface-dark text-success border border-surface-hairline font-medium">
+              <span className="w-1.5 h-1.5 rounded-full bg-success" />
               运行中
             </span>
           )}
           {isCaptchaPaused && (
-            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-600 border border-amber-200 font-medium">
+            <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-md bg-surface-dark text-warning border border-surface-hairline font-medium">
               <AlertTriangle className="w-3.5 h-3.5" />
               等验证码
             </span>
           )}
           {isPaused && !isCaptchaPaused && (
-            <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-surface-dark text-text-secondary border border-black/10 font-medium">
+            <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-md bg-surface-dark text-text-secondary border border-surface-hairline font-medium">
               <Pause className="w-3.5 h-3.5" />
               已暂停
             </span>
           )}
           {!stats && (
-            <span className="text-[11px] text-text-muted px-2 py-0.5 rounded bg-surface-dark border border-black/5 font-medium">
+            <span className="text-xs text-text-muted px-2 py-0.5 rounded bg-surface-dark border border-surface-hairline font-medium">
               待就绪
             </span>
           )}
@@ -693,11 +693,11 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
 
       {/* 验证码警报通知条 */}
       {isCaptchaPaused && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-2.5 text-xs text-amber-800 flex items-start gap-2">
-          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+        <div className="bg-surface-dark border border-surface-hairline rounded-lg p-2.5 text-xs text-amber-800 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-warning shrink-0 mt-0.5" />
           <div className="flex-1">
-            <p className="font-semibold text-amber-900">检测到安全验证码，AIbot 已安全挂起！</p>
-            <p className="text-amber-700 text-[11px] mt-0.5">
+            <p className="font-medium text-amber-900">检测到安全验证码，AIbot 已安全挂起</p>
+            <p className="text-warning text-xs mt-0.5">
               请在招聘网站标签页手动通过滑块或短信验证，完成后点击下方「已解验证码，继续」。
             </p>
           </div>
@@ -706,9 +706,9 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
 
       {/* 模拟真人休息提示条 */}
       {stats?.restUntil && stats.restUntil > Date.now() && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 text-xs text-blue-800 flex items-center gap-2">
-          <Coffee className="w-4 h-4 text-blue-600 shrink-0" />
-          <span className="text-[11px]">
+        <div className="bg-surface-dark border border-surface-hairline rounded-lg p-2 text-xs text-blue-800 flex items-center gap-2">
+          <Coffee className="w-4 h-4 text-info shrink-0" />
+          <span className="text-xs">
             模拟真人作息休息中：已连续投递多份，剩余约{' '}
             <strong className="text-blue-700">
               {Math.max(1, Math.round((stats.restUntil - Date.now()) / 60000))}
@@ -719,36 +719,36 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
       )}
 
       {/* 核心指标看板 */}
-      <div className="grid grid-cols-4 gap-2 text-center bg-surface-dark p-2 rounded-lg border border-black/5">
+      <div className="grid grid-cols-4 gap-2 text-center bg-surface-dark p-2 rounded-lg border border-surface-hairline">
         <div>
-          <div className="text-[10px] text-text-muted">待投队列</div>
-          <div className="text-sm font-bold text-text-primary mt-0.5">
+          <div className="text-xs text-text-muted">待投队列</div>
+          <div className="text-sm font-medium text-text-primary mt-0.5">
             {stats?.pending ?? 0}
             {collectingJobs ? (
-              <span className="block text-[9px] text-primary font-normal animate-pulse">探测扫描中</span>
+              <span className="block text-xs text-primary font-normal">探测扫描中</span>
             ) : isRunning && (stats?.pending ?? 0) === 0 ? (
-              <span className="block text-[9px] text-amber-500 font-normal animate-pulse">自动补仓中</span>
+              <span className="block text-xs text-warning font-normal">自动补仓中</span>
             ) : null}
           </div>
         </div>
         <div>
-          <div className="text-[10px] text-emerald-600 font-medium">已成功投递</div>
-          <div className="text-sm font-bold text-emerald-600 mt-0.5">{stats?.done ?? 0}</div>
+          <div className="text-xs text-success font-medium">已成功投递</div>
+          <div className="text-sm font-medium text-success mt-0.5">{stats?.done ?? 0}</div>
         </div>
         <div>
-          <div className="text-[10px] text-text-muted">AI筛岗跳过</div>
-          <div className="text-sm font-bold text-text-secondary mt-0.5">{stats?.skipped ?? 0}</div>
+          <div className="text-xs text-text-muted">AI筛岗跳过</div>
+          <div className="text-sm font-medium text-text-secondary mt-0.5">{stats?.skipped ?? 0}</div>
         </div>
         <div>
-          <div className="text-[10px] text-rose-500">失败重试</div>
-          <div className="text-sm font-bold text-rose-500 mt-0.5">{stats?.failed ?? 0}</div>
+          <div className="text-xs text-rose-500">失败重试</div>
+          <div className="text-sm font-medium text-rose-500 mt-0.5">{stats?.failed ?? 0}</div>
         </div>
       </div>
 
       {/* 管家事后复盘与策略进化快捷跳转 */}
       {onNavigateTab && (
-        <div className="flex items-center justify-between bg-surface-dark px-2.5 py-1.5 rounded-lg border border-black/5 text-xs">
-          <span className="text-[11px] text-text-muted flex items-center gap-1 font-medium">
+        <div className="flex items-center justify-between bg-surface-dark px-2.5 py-1.5 rounded-lg border border-surface-hairline text-xs">
+          <span className="text-xs text-text-muted flex items-center gap-1 font-medium">
             <Bot className="w-3.5 h-3.5 text-primary" />
             管家事后复盘与策略进化
           </span>
@@ -756,33 +756,33 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             <button
               type="button"
               onClick={() => onNavigateTab('butler')}
-              className="px-2 py-0.5 rounded bg-white border border-primary/20 text-primary hover:bg-primary/5 font-medium transition cursor-pointer text-[10px] flex items-center gap-0.5"
+              className="px-2 py-0.5 rounded bg-surface-darkest border border-surface-hairline text-primary hover:bg-surface-dark font-medium transition cursor-pointer text-xs flex items-center gap-0.5"
             >
-              📋 管家日报
+              管家日报
             </button>
             <button
               type="button"
               onClick={() => onNavigateTab('butler')}
-              className="px-2 py-0.5 rounded bg-white border border-brand-orange/30 text-brand-orange hover:bg-brand-orange/5 font-medium transition cursor-pointer text-[10px] flex items-center gap-0.5"
+              className="px-2 py-0.5 rounded bg-surface-darkest border border-brand-orange/30 text-brand-orange hover:bg-brand-orange/5 font-medium transition cursor-pointer text-xs flex items-center gap-0.5"
             >
-              🧬 策略进化
+              策略进化
             </button>
           </div>
         </div>
       )}
 
       {/* 全自主无人值守队列说明与补仓卡片 */}
-      <div className="bg-primary/5 border border-primary/15 rounded-lg p-2.5 flex items-center justify-between text-xs gap-2">
+      <div className="bg-surface-dark border border-surface-hairline rounded-lg p-2.5 flex items-center justify-between text-xs gap-2">
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <Sparkles className="w-4 h-4 text-primary shrink-0" />
           <div className="min-w-0">
-            <div className="text-[11px] font-semibold text-text-primary flex items-center gap-1">
+            <div className="text-xs font-medium text-text-primary flex items-center gap-1">
               全自主无人值守队列
-              <span className="text-[9px] px-1 py-0.2 rounded bg-emerald-50 text-emerald-600 border border-emerald-200 font-medium shrink-0">
+              <span className="text-xs px-1 py-0.2 rounded bg-surface-dark text-success border border-surface-hairline font-medium shrink-0">
                 免手动
               </span>
             </div>
-            <div className="text-[10px] text-text-muted mt-0.5 truncate">
+            <div className="text-xs text-text-muted mt-0.5 truncate">
               待投队列由 AIbot 自主巡检开启平台推荐流自动补仓
             </div>
           </div>
@@ -793,7 +793,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             type="button"
             onClick={handleClearPending}
             disabled={clearingPending}
-            className="px-2 py-1 rounded-md bg-white border border-rose-200 text-rose-600 hover:bg-rose-50 text-[10px] font-medium transition flex items-center gap-1 shadow-2xs disabled:opacity-50 cursor-pointer"
+            className="px-2 py-1 rounded-md bg-surface-darkest border border-rose-200 text-rose-600 hover:bg-rose-50 text-xs font-medium transition flex items-center gap-1 shadow-2xs disabled:opacity-50 cursor-pointer"
             title="清空旧页面残留的待投缓存，并立即根据当前最新网页重新获取岗位"
           >
             <Trash2 className={`w-3 h-3 ${clearingPending ? 'animate-spin' : ''}`} />
@@ -804,7 +804,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             type="button"
             onClick={handleTriggerAutoCollect}
             disabled={collectingJobs}
-            className="px-2 py-1 rounded-md bg-white border border-primary/30 text-primary hover:bg-primary/5 text-[10px] font-medium transition flex items-center gap-1 shadow-2xs disabled:opacity-50 cursor-pointer"
+            className="px-2 py-1 rounded-md bg-surface-darkest border border-surface-hairline text-primary hover:bg-surface-dark text-xs font-medium transition flex items-center gap-1 shadow-2xs disabled:opacity-50 cursor-pointer"
             title="立即探测已开启平台的职位流并补充进待投队列"
           >
             <RotateCw className={`w-3 h-3 ${collectingJobs ? 'animate-spin' : ''}`} />
@@ -816,7 +816,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
       {/* 平台开关与登录授权区 */}
       <div className="space-y-1.5">
         <div className="flex items-center justify-between">
-          <span className="text-[11px] font-semibold text-text-secondary">
+          <span className="text-xs font-medium text-text-secondary">
             平台轮转与登录授权
             <span className="ml-1 font-normal text-text-muted">· 点击右侧数量可改</span>
           </span>
@@ -824,7 +824,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             <button
               type="button"
               onClick={handleResetQuotas}
-              className="text-[10px] text-text-muted hover:text-primary transition flex items-center gap-0.5 cursor-pointer"
+              className="text-xs text-text-muted hover:text-primary transition flex items-center gap-0.5 cursor-pointer"
               title="恢复各平台推荐默认投递数量"
             >
               <RotateCw className="w-2.5 h-2.5" />
@@ -834,20 +834,20 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
               type="button"
               onClick={checkAuth}
               disabled={checkingAuth}
-              className="text-[10px] text-text-muted hover:text-primary transition flex items-center gap-0.5 cursor-pointer"
+              className="text-xs text-text-muted hover:text-primary transition flex items-center gap-0.5 cursor-pointer"
               title="重新检查各平台登录 Cookie 授权"
             >
               <RotateCw className={`w-2.5 h-2.5 ${checkingAuth ? 'animate-spin' : ''}`} />
               刷新授权
             </button>
-            <span className="text-[10px] text-text-muted">
+            <span className="text-xs text-text-muted">
               已开启 {Object.values(enabledPlatforms).filter(Boolean).length}/5
             </span>
           </div>
         </div>
 
         <div className="grid grid-cols-1 gap-1.5">
-          {PLATFORM_INFOS.map(({ id, name, icon }) => {
+          {PLATFORM_INFOS.map(({ id, name }) => {
             const isEnabled = !!enabledPlatforms[id]
             const q = stats?.platformBreakdown?.[id]
             const applied = q?.applied ?? 0
@@ -859,10 +859,10 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             return (
               <div
                 key={id}
-                className={`flex items-center justify-between p-2 rounded-lg border transition-all ${
+                className={`flex items-center justify-between p-2 rounded-lg border transition-colors ${
                   isEnabled
-                    ? 'bg-surface-dark/90 border-black/10'
-                    : 'bg-gray-50/60 border-black/5 opacity-60'
+                    ? 'bg-surface-dark border-surface-hairline'
+                    : 'bg-surface-page border-surface-hairline opacity-60'
                 }`}
               >
                 {/* 平台开关、名称与授权状态 */}
@@ -871,19 +871,18 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
                     type="button"
                     onClick={() => handleTogglePlatform(id)}
                     className={`w-7 h-4 rounded-full transition-colors relative flex items-center p-0.5 shrink-0 cursor-pointer ${
-                      isEnabled ? 'bg-primary' : 'bg-gray-300'
+                      isEnabled ? 'bg-primary' : 'bg-surface-light'
                     }`}
                     title={isEnabled ? '点击禁用该平台' : '点击启用该平台'}
                   >
                     <span
-                      className={`w-3 h-3 rounded-full bg-white shadow-sm transform transition-transform ${
+                      className={`w-3 h-3 rounded-full bg-surface-darkest shadow-sm transform transition-transform ${
                         isEnabled ? 'translate-x-3' : 'translate-x-0'
                       }`}
                     />
                   </button>
 
                   <span className="text-xs font-medium text-text-primary flex items-center gap-1 shrink-0">
-                    <span>{icon}</span>
                     <span>{name}</span>
                   </span>
 
@@ -891,10 +890,10 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
                   {auth && (
                     auth.isLoggedIn ? (
                       <span
-                        className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.2 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200 shrink-0 font-medium"
+                        className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.2 rounded-md bg-surface-dark text-success border border-surface-hairline shrink-0 font-medium"
                         title="已检测到该招聘平台的有效登录凭证"
                       >
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                        <span className="w-1.5 h-1.5 rounded-full bg-success" />
                         已授权
                       </span>
                     ) : (
@@ -909,11 +908,11 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
                             chrome.tabs.create({ url: auth.loginUrl || PLATFORM_LOGIN_URLS[id] })
                           }
                         }}
-                        className="inline-flex items-center gap-0.5 text-[9px] px-1.5 py-0.2 rounded-full bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-300 shrink-0 font-medium transition cursor-pointer"
+                        className="inline-flex items-center gap-0.5 text-xs px-1.5 py-0.2 rounded-md bg-surface-dark hover:bg-surface-medium text-warning border border-amber-300 shrink-0 font-medium transition cursor-pointer"
                         title="未检测到有效登录态，点击在新标签页打开登录"
                       >
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                        未登录 去登录 ↗
+                        <span className="w-1.5 h-1.5 rounded-full bg-warning" />
+                        未登录 去登录
                       </a>
                     )
                   )}
@@ -922,19 +921,17 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
                 {/* 进度条与可编辑的投递数量上限（5 个平台均可修改，含未开启的） */}
                 <div className="flex items-center gap-2 text-right shrink-0">
                   {isEnabled && editingQuota !== id && (
-                    <div className="w-16 bg-black/5 rounded-full h-1.5 overflow-hidden">
+                    <div className="w-16 queue-rule">
                       <div
-                        className={`h-full rounded-full transition-all duration-300 ${
-                          q?.exhausted ? 'bg-amber-500' : 'bg-primary'
-                        }`}
-                        style={{ width: `${percent}%` }}
+                        className="queue-rule-fill"
+                        style={{ width: `${percent}%`, backgroundColor: q?.exhausted ? '#B45309' : '#C2410C' }}
                       />
                     </div>
                   )}
                   {!isEnabled && editingQuota !== id && (
-                    <span className="text-[10px] text-text-muted italic">已关闭</span>
+                    <span className="text-xs text-text-muted">已关闭</span>
                   )}
-                  <span className="text-[10px] text-text-muted font-mono min-w-[3.5rem] flex items-center justify-end gap-0.5">
+                  <span className="text-xs text-text-muted font-mono min-w-[3.5rem] flex items-center justify-end gap-0.5">
                     {isEnabled && `${applied}/`}
                     {editingQuota === id ? (
                       <input
@@ -959,7 +956,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
                             e.currentTarget.blur()
                           }
                         }}
-                        className="w-10 px-0.5 py-0 text-[10px] text-center rounded border border-primary bg-white text-text-primary outline-none font-mono"
+                        className="w-10 px-0.5 py-0 text-xs text-center rounded border border-primary bg-surface-darkest text-text-primary outline-none font-mono"
                         title={`回车保存，Esc 取消（${MIN_PLATFORM_QUOTA}-${MAX_PLATFORM_QUOTA}）`}
                       />
                     ) : (
@@ -985,90 +982,90 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
       </div>
 
       {/* 悬浮窗配置：与页面浮窗双向同步 */}
-      <div className="border border-black/10 rounded-lg bg-white/70 p-2.5 space-y-2">
+      <div className="border border-surface-hairline rounded-lg bg-surface-darkest p-2.5 space-y-2">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5 text-[11px] font-medium text-slate-700">
+          <div className="flex items-center gap-1.5 text-xs font-medium text-text-secondary">
             <Sparkles className="w-3.5 h-3.5 text-primary" />
             悬浮窗配置
           </div>
-          <span className="text-[10px] text-slate-400">与页面浮窗实时同步</span>
+          <span className="text-xs text-text-muted">与页面浮窗实时同步</span>
         </div>
 
-        <p className="text-[10px] leading-relaxed text-text-muted rounded-md bg-primary/5 border border-primary/15 px-2 py-1.5">
-          🔗 岗位、地点、薪资、AI 评分等<strong className="text-primary-light">沟通筛选条件与概览共用</strong>，
+        <p className="text-xs leading-relaxed text-text-muted rounded-md bg-surface-dark border border-surface-hairline px-2 py-1.5">
+          岗位、地点、薪资、AI 评分等<strong className="text-accent">沟通筛选条件与概览共用</strong>，
           请到「概览 → 沟通筛选条件」修改；此处改评分开关也会同步回概览。
         </p>
 
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-slate-500 w-14 shrink-0">投递模式</span>
+          <span className="text-xs text-text-secondary w-14 shrink-0">投递模式</span>
           <button onClick={() => updateAssistant({ applyMode: 'batch' })}
-            className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${assistant.applyMode === 'batch' ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
-            ⚡ 批量沟通
+            className={`flex-1 py-1.5 rounded-md text-xs border transition ${assistant.applyMode === 'batch' ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
+            批量沟通
           </button>
           <button onClick={() => updateAssistant({ applyMode: 'recommend' })}
-            className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${assistant.applyMode === 'recommend' ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
-            🤖 AI自动确认
+            className={`flex-1 py-1.5 rounded-md text-xs border transition ${assistant.applyMode === 'recommend' ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
+            AI自动确认
           </button>
         </div>
 
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-slate-500 w-14 shrink-0">AI 评分</span>
+          <span className="text-xs text-text-secondary w-14 shrink-0">AI 评分</span>
           <button onClick={() => handleAiMatchChange(true)}
-            className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${assistant.enableAiMatch ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
-            ⭐ 按分筛选
+            className={`flex-1 py-1.5 rounded-md text-xs border transition ${assistant.enableAiMatch ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
+            按分筛选
           </button>
           <button onClick={() => handleAiMatchChange(false)}
-            className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${!assistant.enableAiMatch ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
-            🚀 不评分沟通
+            className={`flex-1 py-1.5 rounded-md text-xs border transition ${!assistant.enableAiMatch ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
+            不评分沟通
           </button>
         </div>
 
         <div className="flex items-center gap-1.5">
-          <span className="text-[10px] text-slate-500 w-14 shrink-0">猎聘简历</span>
+          <span className="text-xs text-text-secondary w-14 shrink-0">猎聘简历</span>
           <button onClick={() => updateAssistant({ liepinResumeMode: false })}
-            className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${!assistant.liepinResumeMode ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
-            💬 直接沟通
+            className={`flex-1 py-1.5 rounded-md text-xs border transition ${!assistant.liepinResumeMode ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
+            直接沟通
           </button>
           <button onClick={() => updateAssistant({ liepinResumeMode: true })}
-            className={`flex-1 py-1.5 rounded-md text-[11px] border transition ${assistant.liepinResumeMode ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
-            📄 投简历
+            className={`flex-1 py-1.5 rounded-md text-xs border transition ${assistant.liepinResumeMode ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
+            投简历
           </button>
         </div>
 
         <div className="space-y-1.5">
-          <span className="text-[10px] text-slate-500">面板形态</span>
+          <span className="text-xs text-text-secondary">面板形态</span>
           <div className="grid grid-cols-2 gap-1.5">
             <button onClick={() => handlePanelState('expanded')}
-              className={`py-1.5 rounded-md text-[11px] border transition ${assistant.panelState === 'expanded' ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
+              className={`py-1.5 rounded-md text-xs border transition ${assistant.panelState === 'expanded' ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
               整高侧栏
             </button>
             <button onClick={() => handlePanelState('bubble')}
-              className={`py-1.5 rounded-md text-[11px] border transition ${assistant.panelState === 'bubble' ? 'bg-primary text-white border-primary' : 'bg-white text-slate-600 border-black/10 hover:bg-slate-50'}`}>
+              className={`py-1.5 rounded-md text-xs border transition ${assistant.panelState === 'bubble' ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
               半圆浮球
             </button>
           </div>
           <button onClick={() => handlePanelState('closed')}
-            className="w-full py-1.5 rounded-md text-[11px] border border-rose-200 bg-white text-rose-600 hover:bg-rose-50 transition">
+            className="w-full py-1.5 rounded-md text-xs border border-rose-200 bg-surface-darkest text-rose-600 hover:bg-rose-50 transition">
             停止并关闭 AIbot
           </button>
         </div>
 
         <button
           onClick={() => updateAssistant({ pinned: !assistant.pinned })}
-          className={`w-full flex items-center justify-between px-2.5 py-2 rounded-md text-[11px] border transition ${
+          className={`w-full flex items-center justify-between px-2.5 py-2 rounded-md text-xs border transition ${
             assistant.pinned
-              ? 'bg-primary/10 border-primary/30 text-primary'
-              : 'bg-white border-black/10 text-slate-600 hover:bg-slate-50'
+              ? 'bg-surface-dark border-surface-hairline text-primary'
+              : 'bg-surface-darkest border-surface-hairline text-text-secondary hover:bg-surface-page'
           }`}
         >
-          <span className="flex items-center gap-1.5">📌 置顶常驻</span>
-          <span className={`w-7 h-3.5 rounded-full relative transition ${assistant.pinned ? 'bg-primary' : 'bg-slate-300'}`}>
-            <span className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-white transition-all ${assistant.pinned ? 'left-3.5' : 'left-0.5'}`} />
+          <span className="flex items-center gap-1.5">置顶常驻</span>
+          <span className={`w-7 h-3.5 rounded-full relative transition ${assistant.pinned ? 'bg-primary' : 'bg-surface-light'}`}>
+            <span className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-surface-darkest transition-colors ${assistant.pinned ? 'left-3.5' : 'left-0.5'}`} />
           </span>
         </button>
 
-        <p className="text-[10px] text-slate-400 leading-relaxed">
-          点击浏览器工具栏的插件图标 → 网页右侧展开整高侧栏（完整助手面板）；点右上角 × → 收起成半圆浮球；再点浮球 → 还原整高侧栏。📌 置顶后新页面也保持展开、不再自动收起。
+        <p className="text-xs text-text-muted leading-relaxed">
+          点击浏览器工具栏的插件图标 → 网页右侧展开整高侧栏（完整助手面板）；点右上角 × → 收起成半圆浮球；再点浮球 → 还原整高侧栏。置顶后新页面也保持展开、不再自动收起。
         </p>
       </div>
 
@@ -1076,15 +1073,15 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
       <div className="space-y-2 pt-1">
         <div className="flex items-center gap-2">
           {runtime.mode === 'manual' && (
-            <div className="w-full rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] leading-relaxed text-amber-700">
-              ✋ 概览的<strong>半自动</strong>沟通正在运行。两条流水线互斥，请先在概览页点「停止」再启动 AIbot 全自动。
+            <div className="w-full rounded-lg border border-surface-hairline bg-surface-dark px-2.5 py-2 text-xs leading-relaxed text-warning">
+              概览的<strong>半自动</strong>沟通正在运行。两条流水线互斥，请先在概览页点「停止」再启动 AIbot 全自动。
             </div>
           )}
           {!isRunning && !isPaused && (
             <button
               onClick={() => void handleStart()}
               disabled={loading || runtime.mode === 'manual'}
-              className="flex-1 py-2.5 px-3 rounded-lg bg-gradient-to-r from-brand-orange to-primary text-white font-medium text-xs flex items-center justify-center gap-1.5 shadow-sm hover:brightness-105 active:scale-[0.99] transition disabled:opacity-50 cursor-pointer"
+              className="flex-1 py-2.5 px-3 rounded-lg bg-accent text-white font-medium text-xs flex items-center justify-center gap-1.5 shadow-sm hover:brightness-105 active:scale-[0.99] transition disabled:opacity-50 cursor-pointer"
             >
               <Play className="w-3.5 h-3.5 fill-current" />
               一键开跑 AIbot
@@ -1095,7 +1092,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             <button
               onClick={handlePause}
               disabled={loading}
-              className="flex-1 py-2.5 px-3 rounded-lg bg-amber-500 hover:bg-amber-600 text-white font-medium text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-[0.99] transition disabled:opacity-50 cursor-pointer"
+              className="flex-1 py-2.5 px-3 rounded-lg bg-warning hover:bg-amber-600 text-white font-medium text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-[0.99] transition disabled:opacity-50 cursor-pointer"
             >
               <Pause className="w-3.5 h-3.5" />
               暂停 AIbot
@@ -1106,7 +1103,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             <button
               onClick={handleResume}
               disabled={loading}
-              className="flex-1 py-2.5 px-3 rounded-lg bg-gradient-to-r from-brand-orange to-primary text-white font-medium text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-[0.99] transition disabled:opacity-50 cursor-pointer"
+              className="flex-1 py-2.5 px-3 rounded-lg bg-accent text-white font-medium text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-[0.99] transition disabled:opacity-50 cursor-pointer"
             >
               <RotateCw className="w-3.5 h-3.5" />
               {isCaptchaPaused ? '已解验证码，继续' : '恢复执行'}
@@ -1117,7 +1114,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             <button
               onClick={handleAbort}
               disabled={loading}
-              className="py-2.5 px-3 rounded-lg bg-surface-dark hover:bg-rose-50 text-rose-600 border border-black/10 font-medium text-xs flex items-center justify-center gap-1 transition disabled:opacity-50 cursor-pointer"
+              className="py-2.5 px-3 rounded-lg bg-surface-dark hover:bg-rose-50 text-rose-600 border border-surface-hairline font-medium text-xs flex items-center justify-center gap-1 transition disabled:opacity-50 cursor-pointer"
             >
               <Square className="w-3 h-3 fill-current" />
               终止
@@ -1127,24 +1124,24 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
       </div>
 
       {/* 每时每刻行为日志终端 */}
-      <div className="border border-black/10 rounded-lg overflow-hidden bg-[#0F172A] text-slate-200">
+      <div className="border border-surface-hairline rounded-lg overflow-hidden bg-[#0F172A] text-slate-200">
         <div
-          className="flex items-center justify-between px-2.5 py-1.5 bg-[#1E293B] cursor-pointer select-none text-[11px]"
+          className="flex items-center justify-between px-2.5 py-1.5 bg-[#1E293B] cursor-pointer select-none text-xs"
           onClick={() => setLogExpanded(!logExpanded)}
         >
           <div className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            <span className="font-semibold text-slate-100 flex items-center gap-1">
+            <span className="w-2 h-2 rounded-full bg-emerald-400" />
+            <span className="font-medium text-slate-100 flex items-center gap-1">
               <Terminal className="w-3 h-3 text-sky-400" />
               每时每刻行为日志
             </span>
-            <span className="text-[10px] text-slate-400">
+            <span className="text-xs text-text-muted">
               ({stats?.logs?.length || 0} 条)
             </span>
           </div>
 
-          <div className="flex items-center gap-1 text-slate-400">
-            {isRunning && <span className="text-[10px] text-emerald-400 animate-pulse">实时监听中</span>}
+          <div className="flex items-center gap-1 text-text-muted">
+            {isRunning && <span className="text-xs text-emerald-400">实时监听中</span>}
             {logExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </div>
         </div>
@@ -1152,18 +1149,18 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         {logExpanded && (
           <div
             ref={logContainerRef}
-            className="p-2.5 h-36 overflow-y-auto space-y-1.5 font-mono text-[11px] leading-relaxed select-text"
+            className="p-2.5 h-36 overflow-y-auto space-y-1.5 font-mono text-xs leading-relaxed select-text"
           >
             {stats?.logs && stats.logs.length > 0 ? (
               stats.logs.map((item) => {
                 let badgeClass = 'text-sky-400'
                 if (item.level === 'success') badgeClass = 'text-emerald-400 font-medium'
                 if (item.level === 'warn') badgeClass = 'text-amber-400'
-                if (item.level === 'error') badgeClass = 'text-rose-400 font-semibold'
+                if (item.level === 'error') badgeClass = 'text-rose-400 font-medium'
 
                 return (
                   <div key={item.id} className="flex items-start gap-1.5 hover:bg-slate-800/40 rounded px-1">
-                    <span className="text-slate-500 shrink-0 select-none text-[10px]">
+                    <span className="text-text-secondary shrink-0 select-none text-xs">
                       [{item.time}]
                     </span>
                     <span className={`${badgeClass} break-all flex-1`}>
@@ -1173,7 +1170,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
                 )
               })
             ) : (
-              <div className="text-slate-500 text-center py-6 text-xs">
+              <div className="text-text-secondary text-center py-6 text-xs">
                 AIbot 就绪后，此窗口将实时流水输出每时每刻的检索、AI筛岗、话术生成与投递动作...
               </div>
             )}
@@ -1183,9 +1180,9 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
 
       {/* 拟人间歇自定义编辑卡片（满足用户：aibot 拟人间歇 45-180s 需要可配置） */}
       {showIntervalEditor && (
-        <div className="bg-surface-dark border border-black/10 rounded-lg p-3 space-y-2.5 text-xs">
-          <div className="flex items-center justify-between pb-1 border-b border-black/5">
-            <span className="font-semibold text-text-primary flex items-center gap-1">
+        <div className="bg-surface-dark border border-surface-hairline rounded-lg p-3 space-y-2.5 text-xs">
+          <div className="flex items-center justify-between pb-1 border-b border-surface-hairline">
+            <span className="font-medium text-text-primary flex items-center gap-1">
               <Sparkles className="w-3.5 h-3.5 text-brand-orange" />
               自定义 AIbot 拟人间歇
             </span>
@@ -1198,39 +1195,39 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             </button>
           </div>
 
-          <p className="text-[10px] text-text-muted leading-relaxed">
+          <p className="text-xs text-text-muted leading-relaxed">
             每次投递或与 HR 打招呼后，AIbot 将在此区间内随机休眠，模拟真人阅读与点击行为，规避平台风控。
           </p>
 
           {/* 快捷预设按钮 */}
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-text-muted">快捷预设:</span>
+            <span className="text-xs text-text-muted">快捷预设:</span>
             <button
               type="button"
               onClick={() => applyIntervalPreset('fast')}
-              className="px-1.5 py-0.5 rounded bg-white border border-black/10 text-[10px] hover:border-primary text-text-secondary cursor-pointer"
+              className="px-1.5 py-0.5 rounded bg-surface-darkest border border-surface-hairline text-xs hover:border-primary text-text-secondary cursor-pointer"
             >
-              ⚡ 敏捷 (15-45s)
+              敏捷 (15-45s)
             </button>
             <button
               type="button"
               onClick={() => applyIntervalPreset('normal')}
-              className="px-1.5 py-0.5 rounded bg-white border border-black/10 text-[10px] hover:border-primary text-text-secondary cursor-pointer"
+              className="px-1.5 py-0.5 rounded bg-surface-darkest border border-surface-hairline text-xs hover:border-primary text-text-secondary cursor-pointer"
             >
-              🎯 标准 (45-180s)
+              标准 (45-180s)
             </button>
             <button
               type="button"
               onClick={() => applyIntervalPreset('safe')}
-              className="px-1.5 py-0.5 rounded bg-white border border-black/10 text-[10px] hover:border-primary text-text-secondary cursor-pointer"
+              className="px-1.5 py-0.5 rounded bg-surface-darkest border border-surface-hairline text-xs hover:border-primary text-text-secondary cursor-pointer"
             >
-              🛡️ 防封 (90-300s)
+              防封 (90-300s)
             </button>
           </div>
 
           {/* 自定义秒数输入 */}
           <div className="flex items-center justify-between">
-            <span className="text-[11px] text-text-secondary">随机间隔区间：</span>
+            <span className="text-xs text-text-secondary">随机间隔区间：</span>
             <div className="flex items-center gap-1.5">
               <input
                 type="number"
@@ -1238,34 +1235,34 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
                 max="600"
                 value={minSecInput}
                 onChange={(e) => setMinSecInput(e.target.value)}
-                className="w-14 px-1.5 py-0.5 text-xs text-center rounded border border-black/10 bg-white outline-none focus:border-primary font-mono"
+                className="w-14 px-1.5 py-0.5 text-xs text-center rounded border border-surface-hairline bg-surface-darkest outline-none focus:border-primary font-mono"
               />
-              <span className="text-text-muted text-[11px]">至</span>
+              <span className="text-text-muted text-xs">至</span>
               <input
                 type="number"
                 min="5"
                 max="600"
                 value={maxSecInput}
                 onChange={(e) => setMaxSecInput(e.target.value)}
-                className="w-14 px-1.5 py-0.5 text-xs text-center rounded border border-black/10 bg-white outline-none focus:border-primary font-mono"
+                className="w-14 px-1.5 py-0.5 text-xs text-center rounded border border-surface-hairline bg-surface-darkest outline-none focus:border-primary font-mono"
               />
-              <span className="text-text-muted text-[11px]">秒</span>
+              <span className="text-text-muted text-xs">秒</span>
             </div>
           </div>
 
           {/* 保存按钮 */}
-          <div className="flex justify-end gap-2 pt-1 border-t border-black/5">
+          <div className="flex justify-end gap-2 pt-1 border-t border-surface-hairline">
             <button
               type="button"
               onClick={() => setShowIntervalEditor(false)}
-              className="px-2.5 py-1 text-[11px] rounded bg-white border border-black/10 hover:bg-surface-medium text-text-secondary cursor-pointer"
+              className="px-2.5 py-1 text-xs rounded bg-surface-darkest border border-surface-hairline hover:bg-surface-medium text-text-secondary cursor-pointer"
             >
               取消
             </button>
             <button
               type="button"
               onClick={handleSaveInterval}
-              className="px-3 py-1 text-[11px] rounded bg-primary text-white font-medium hover:bg-primary-light flex items-center gap-1 cursor-pointer"
+              className="px-3 py-1 text-xs rounded bg-primary text-white font-medium hover:bg-primary-light flex items-center gap-1 cursor-pointer"
             >
               <Save className="w-3 h-3" />
               保存间歇
@@ -1276,9 +1273,9 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
 
       {/* 工作时段自定义编辑卡片（满足用户：工作时段可修改） */}
       {showTimeEditor && (
-        <div className="bg-surface-dark border border-black/10 rounded-lg p-3 space-y-2.5 text-xs">
-          <div className="flex items-center justify-between pb-1 border-b border-black/5">
-            <span className="font-semibold text-text-primary flex items-center gap-1">
+        <div className="bg-surface-dark border border-surface-hairline rounded-lg p-3 space-y-2.5 text-xs">
+          <div className="flex items-center justify-between pb-1 border-b border-surface-hairline">
+            <span className="font-medium text-text-primary flex items-center gap-1">
               <Clock className="w-3.5 h-3.5 text-primary" />
               自定义投递工作时段
             </span>
@@ -1293,25 +1290,25 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
 
           {/* 快捷预设按钮 */}
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-text-muted">快捷预设:</span>
+            <span className="text-xs text-text-muted">快捷预设:</span>
             <button
               type="button"
               onClick={() => applyPreset('standard')}
-              className="px-1.5 py-0.5 rounded bg-white border border-black/10 text-[10px] hover:border-primary text-text-secondary cursor-pointer"
+              className="px-1.5 py-0.5 rounded bg-surface-darkest border border-surface-hairline text-xs hover:border-primary text-text-secondary cursor-pointer"
             >
               标准两段
             </button>
             <button
               type="button"
               onClick={() => applyPreset('relaxed')}
-              className="px-1.5 py-0.5 rounded bg-white border border-black/10 text-[10px] hover:border-primary text-text-secondary cursor-pointer"
+              className="px-1.5 py-0.5 rounded bg-surface-darkest border border-surface-hairline text-xs hover:border-primary text-text-secondary cursor-pointer"
             >
               09:00-21:00
             </button>
             <button
               type="button"
               onClick={() => applyPreset('allDay')}
-              className="px-1.5 py-0.5 rounded bg-white border border-black/10 text-[10px] hover:border-primary text-text-secondary cursor-pointer"
+              className="px-1.5 py-0.5 rounded bg-surface-darkest border border-surface-hairline text-xs hover:border-primary text-text-secondary cursor-pointer"
             >
               24小时不限
             </button>
@@ -1319,20 +1316,20 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
 
           {/* 时段1 */}
           <div className="flex items-center justify-between">
-            <span className="text-[11px] text-text-secondary">时段一：</span>
+            <span className="text-xs text-text-secondary">时段一：</span>
             <div className="flex items-center gap-1.5">
               <input
                 type="time"
                 value={start1}
                 onChange={(e) => setStart1(e.target.value)}
-                className="px-1.5 py-0.5 text-xs rounded border border-black/10 bg-white outline-none focus:border-primary"
+                className="px-1.5 py-0.5 text-xs rounded border border-surface-hairline bg-surface-darkest outline-none focus:border-primary"
               />
-              <span className="text-text-muted text-[11px]">至</span>
+              <span className="text-text-muted text-xs">至</span>
               <input
                 type="time"
                 value={end1}
                 onChange={(e) => setEnd1(e.target.value)}
-                className="px-1.5 py-0.5 text-xs rounded border border-black/10 bg-white outline-none focus:border-primary"
+                className="px-1.5 py-0.5 text-xs rounded border border-surface-hairline bg-surface-darkest outline-none focus:border-primary"
               />
             </div>
           </div>
@@ -1340,12 +1337,12 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
           {/* 时段2 */}
           <div className="space-y-1.5">
             <div className="flex items-center justify-between">
-              <label className="flex items-center gap-1 text-[11px] text-text-secondary cursor-pointer">
+              <label className="flex items-center gap-1 text-xs text-text-secondary cursor-pointer">
                 <input
                   type="checkbox"
                   checked={enableSecondWindow}
                   onChange={(e) => setEnableSecondWindow(e.target.checked)}
-                  className="rounded border-black/20 text-primary focus:ring-0 w-3 h-3"
+                  className="rounded border-surface-hairline text-primary focus:ring-0 w-3 h-3"
                 />
                 启用第二时段（如下午）
               </label>
@@ -1356,14 +1353,14 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
                     type="time"
                     value={start2}
                     onChange={(e) => setStart2(e.target.value)}
-                    className="px-1.5 py-0.5 text-xs rounded border border-black/10 bg-white outline-none focus:border-primary"
+                    className="px-1.5 py-0.5 text-xs rounded border border-surface-hairline bg-surface-darkest outline-none focus:border-primary"
                   />
-                  <span className="text-text-muted text-[11px]">至</span>
+                  <span className="text-text-muted text-xs">至</span>
                   <input
                     type="time"
                     value={end2}
                     onChange={(e) => setEnd2(e.target.value)}
-                    className="px-1.5 py-0.5 text-xs rounded border border-black/10 bg-white outline-none focus:border-primary"
+                    className="px-1.5 py-0.5 text-xs rounded border border-surface-hairline bg-surface-darkest outline-none focus:border-primary"
                   />
                 </div>
               )}
@@ -1371,18 +1368,18 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
           </div>
 
           {/* 保存按钮 */}
-          <div className="flex justify-end gap-2 pt-1 border-t border-black/5">
+          <div className="flex justify-end gap-2 pt-1 border-t border-surface-hairline">
             <button
               type="button"
               onClick={() => setShowTimeEditor(false)}
-              className="px-2.5 py-1 text-[11px] rounded bg-white border border-black/10 hover:bg-surface-medium text-text-secondary cursor-pointer"
+              className="px-2.5 py-1 text-xs rounded bg-surface-darkest border border-surface-hairline hover:bg-surface-medium text-text-secondary cursor-pointer"
             >
               取消
             </button>
             <button
               type="button"
               onClick={handleSaveTimeWindows}
-              className="px-3 py-1 text-[11px] rounded bg-primary text-white font-medium hover:bg-primary-light flex items-center gap-1 cursor-pointer"
+              className="px-3 py-1 text-xs rounded bg-primary text-white font-medium hover:bg-primary-light flex items-center gap-1 cursor-pointer"
             >
               <Save className="w-3 h-3" />
               保存时段
@@ -1393,9 +1390,9 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
 
       {/* 投递方式选择：由用户自己决定精投还是海投，系统不预设 */}
       {showStrategyPicker && (
-        <div className="bg-surface-dark border border-primary/30 rounded-lg p-3 space-y-2.5 text-xs">
-          <div className="flex items-center justify-between pb-1 border-b border-black/5">
-            <span className="font-semibold text-text-primary flex items-center gap-1">
+        <div className="bg-surface-dark border border-surface-hairline rounded-lg p-3 space-y-2.5 text-xs">
+          <div className="flex items-center justify-between pb-1 border-b border-surface-hairline">
+            <span className="font-medium text-text-primary flex items-center gap-1">
               <Zap className="w-3.5 h-3.5 text-primary" />
               选择投递方式
             </span>
@@ -1418,38 +1415,38 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
                 onClick={() => void handlePickStrategy(key)}
                 className={`w-full text-left rounded-lg border p-2.5 transition cursor-pointer ${
                   active
-                    ? 'border-primary bg-primary/5'
-                    : 'border-black/10 bg-white hover:border-primary/50'
+                    ? 'border-primary bg-surface-dark'
+                    : 'border-surface-hairline bg-surface-darkest hover:border-surface-hairline'
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-semibold text-text-primary">{profile.label}</span>
-                  <span className="text-[10px] text-text-muted">
+                  <span className="font-medium text-text-primary">{profile.label}</span>
+                  <span className="text-xs text-text-muted">
                     {profile.minSeconds}-{profile.maxSeconds}s/个 · 门槛 {profile.minMatchScore} 分
                   </span>
                 </div>
-                <p className="mt-1 text-[11px] leading-relaxed text-text-secondary">
+                <p className="mt-1 text-xs leading-relaxed text-text-secondary">
                   {profile.description}
                 </p>
               </button>
             )
           })}
 
-          <p className="text-[10px] text-text-muted leading-relaxed">
+          <p className="text-xs text-text-muted leading-relaxed">
             选定后自动应用对应配置并开始投递；两套参数成套切换，不会出现「海投的间隔配精投的门槛」这种混搭。
           </p>
         </div>
       )}
 
       {/* 底部保护机制说明与修改时段/间歇按钮 */}
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[10px] text-text-muted px-1 pt-0.5">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-text-muted px-1 pt-0.5">
         <button
           type="button"
           onClick={() => {
             setShowTimeEditor(!showTimeEditor)
             if (showIntervalEditor) setShowIntervalEditor(false)
           }}
-          className="flex items-center gap-1 text-primary hover:text-primary-light transition-colors group cursor-pointer"
+          className="flex items-center gap-1 text-primary hover:text-accent transition-colors group cursor-pointer"
           title="点击修改投递时段"
         >
           <Clock className="w-3 h-3 text-primary" />

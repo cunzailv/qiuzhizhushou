@@ -21,26 +21,24 @@ import {
 import { reportErrorAsync } from '../../shared/db/error-report'
 
 const QUICK_PROMPTS = [
-  { label: '📈 今天为什么投得少', prompt: '帮我看看今天为什么投递数量少，结合真实数据和错误日志分析原因' },
-  { label: '📊 查投递漏斗', prompt: '查一下目前的投递统计与回复率，并给出建议' },
-  { label: '💰 期望薪资 20-30K', prompt: '把期望薪资改成 20-30K' },
-  { label: '🕒 工作时间 09:30-18:00', prompt: '工作时间设为 09:30-18:00' },
-  { label: '⏱️ 拟人间歇 60-120秒', prompt: '拟人间歇设为 60-120 秒' },
-  { label: '🛠️ 简历加 Docker、K8s', prompt: '简历加上技能 Docker、K8s' },
-  { label: '📤 导出今日报表', prompt: '导出今天的投递记录为 CSV' },
+  { label: '今天为什么投得少', prompt: '帮我看看今天为什么投递数量少，结合真实数据和错误日志分析原因' },
+  { label: '查投递漏斗', prompt: '查一下目前的投递统计与回复率，并给出建议' },
+  { label: '期望薪资 20-30K', prompt: '把期望薪资改成 20-30K' },
+  { label: '工作时间 09:30-18:00', prompt: '工作时间设为 09:30-18:00' },
+  { label: '拟人间歇 60-120秒', prompt: '拟人间歇设为 60-120 秒' },
+  { label: '简历加 Docker、K8s', prompt: '简历加上技能 Docker、K8s' },
+  { label: '导出今日报表', prompt: '导出今天的投递记录为 CSV' },
 ]
 
-const WELCOME = `👋 您好！我是您的**求职中控 Agent**。
-
-现在不只是"下指令改配置"了：我可以自己查真实数据、连续调用多个工具、记住前面聊过的内容，也能回答开放问题。
+const WELCOME = `我是求职中控 Agent，可以查真实数据、连续调用工具，并记住本次会话的上下文。
 
 试试这样问我：
-- 🔍 *"今天为什么只投了几份？结合错误日志分析一下"*
-- 📊 *"帮我看看投递漏斗，问题出在哪一步"*
-- 💬 *"回复率太低了，我该怎么调？"*
-- ⚙️ *"把各平台配额调到 60"*（会先弹确认）
+- *"今天为什么只投了几份？结合错误日志分析一下"*
+- *"帮我看看投递漏斗，问题出在哪一步"*
+- *"回复率太低了，我该怎么调？"*
+- *"把各平台配额调到 60"*（会先弹确认）
 
-涉及具体数字时我会先查数据，不会瞎猜。`
+涉及具体数字时我会先查数据，不会猜测。`
 
 interface UiMessage {
   id: string
@@ -59,9 +57,9 @@ function timeLabel(at?: number): string {
 }
 
 const MODE_LABELS: Record<ButlerAgentMode, { text: string; cls: string }> = {
-  agent: { text: 'AI Agent', cls: 'bg-emerald-50 text-emerald-600 border-emerald-200' },
-  json_fallback: { text: 'JSON 兼容模式', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
-  offline: { text: '本地规则模式', cls: 'bg-slate-100 text-slate-500 border-slate-200' },
+  agent: { text: 'AI Agent', cls: 'bg-surface-dark text-success border-surface-hairline' },
+  json_fallback: { text: 'JSON 兼容模式', cls: 'bg-surface-dark text-warning border-surface-hairline' },
+  offline: { text: '本地规则模式', cls: 'bg-surface-dark text-text-secondary border-surface-hairline' },
 }
 
 export default function ButlerChatView() {
@@ -187,7 +185,7 @@ export default function ButlerChatView() {
       {
         id: `a-${Date.now()}`,
         role: 'assistant',
-        content: `✖ 已取消【${pending.displayName}】，未做任何改动。`,
+        content: `已取消【${pending.displayName}】，未做任何改动。`,
         createdAt: timeLabel(),
       },
     ])
@@ -197,33 +195,33 @@ export default function ButlerChatView() {
     void clearButlerChatHistory()
     setMode(null)
     setMessages([
-      { id: `welcome-${Date.now()}`, role: 'assistant', content: '会话已清空，上下文重新开始。您可以随时向我提问或下达指令！', createdAt: timeLabel() },
+      { id: `welcome-${Date.now()}`, role: 'assistant', content: '会话已清空，上下文重新开始。可以随时提问或下达指令', createdAt: timeLabel() },
     ])
   }
 
   const badge = mode ? MODE_LABELS[mode] : null
 
   return (
-    <div className="flex flex-col h-[520px] bg-slate-50 border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-      <div className="flex items-center justify-between px-3.5 py-3 bg-white border-b border-slate-100">
+    <div className="flex flex-col h-[520px] bg-surface-page border border-surface-hairline rounded-xl overflow-hidden shadow-sm">
+      <div className="flex items-center justify-between px-3.5 py-3 bg-surface-darkest border-b border-surface-hairline">
         <div className="flex items-center gap-2">
-          <div className="w-7 h-7 rounded-lg bg-orange-100 text-orange-600 flex items-center justify-center font-bold text-xs shadow-xs">
+          <div className="w-7 h-7 rounded-lg bg-surface-dark text-accent flex items-center justify-center font-medium text-xs shadow-xs">
             <Bot className="w-4 h-4" />
           </div>
           <div>
             <div className="flex items-center gap-1.5">
-              <h4 className="text-xs font-bold text-slate-800">智能中控对话台</h4>
-              <span className={`px-1.5 py-0.5 text-[9px] font-semibold border rounded-md ${badge?.cls || 'bg-emerald-50 text-emerald-600 border-emerald-200'}`}>
+              <h4 className="text-xs font-medium text-text-primary">智能中控对话台</h4>
+              <span className={`px-1.5 py-0.5 text-xs font-medium border rounded-md ${badge?.cls || 'bg-surface-dark text-success border-surface-hairline'}`}>
                 {badge?.text || 'Tool-Calling Agent'}
               </span>
             </div>
-            <p className="text-[10px] text-slate-400">多轮上下文 · 可调用扩展内部工具 · 危险动作需确认</p>
+            <p className="text-xs text-text-muted">多轮上下文 · 可调用扩展内部工具 · 危险动作需确认</p>
           </div>
         </div>
         <button
           onClick={clearChat}
           title="清空聊天记录与上下文"
-          className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-md transition-colors"
+          className="p-1.5 text-text-muted hover:text-text-secondary hover:bg-surface-dark rounded-md transition-colors"
         >
           <RotateCcw className="w-3.5 h-3.5" />
         </button>
@@ -235,12 +233,12 @@ export default function ButlerChatView() {
             <div
               className={`max-w-[88%] text-xs rounded-xl p-3 shadow-xs leading-relaxed whitespace-pre-wrap ${
                 m.role === 'user'
-                  ? 'bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-br-none'
-                  : 'bg-white border border-slate-200/80 text-slate-800 rounded-bl-none'
+                  ? 'bg-text-primary text-white rounded-br-none'
+                  : 'bg-surface-darkest border border-surface-hairline text-text-primary rounded-bl-none'
               }`}
             >
               {m.role === 'assistant' ? (
-                <div className="butler-md [&_p]:my-1 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_code]:bg-slate-100 [&_code]:px-1 [&_code]:rounded [&_a]:text-orange-600 [&_a]:underline">
+                <div className="butler-md [&_p]:my-1 [&_strong]:font-medium [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_code]:bg-surface-dark [&_code]:px-1 [&_code]:rounded [&_a]:text-accent [&_a]:underline">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
                 </div>
               ) : (
@@ -248,15 +246,15 @@ export default function ButlerChatView() {
               )}
 
               {m.notice && (
-                <div className="mt-2 pt-2 border-t border-amber-100 flex items-start gap-1.5 text-[10px] text-amber-700 leading-relaxed">
+                <div className="mt-2 pt-2 border-t border-surface-hairline flex items-start gap-1.5 text-xs text-warning leading-relaxed">
                   <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
                   <span>{m.notice}</span>
                 </div>
               )}
 
               {m.toolTrace && m.toolTrace.length > 0 && (
-                <details className="mt-2 pt-2 border-t border-slate-100 text-[10px] text-slate-500">
-                  <summary className="cursor-pointer flex items-center gap-1 font-medium text-slate-600">
+                <details className="mt-2 pt-2 border-t border-surface-hairline text-xs text-text-secondary">
+                  <summary className="cursor-pointer flex items-center gap-1 font-medium text-text-secondary">
                     <Wrench className="w-3 h-3" />
                     已调用 {m.toolTrace.length} 个工具 · 查看执行轨迹
                   </summary>
@@ -264,12 +262,12 @@ export default function ButlerChatView() {
                     {m.toolTrace.map((t, i) => (
                       <li key={`${t.name}-${i}`} className="flex items-start gap-1">
                         {t.ok ? (
-                          <CheckCircle2 className="w-3 h-3 shrink-0 mt-0.5 text-emerald-500" />
+                          <CheckCircle2 className="w-3 h-3 shrink-0 mt-0.5 text-success" />
                         ) : (
-                          <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5 text-amber-500" />
+                          <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5 text-warning" />
                         )}
                         <span className="break-all">
-                          <b>{t.name}</b>（{t.risk}）· {t.summary}
+                          <span className="font-medium">{t.name}</span>（{t.risk}）· {t.summary}
                         </span>
                       </li>
                     ))}
@@ -278,23 +276,23 @@ export default function ButlerChatView() {
               )}
 
               {m.pendingApproval && (
-                <div className="mt-2.5 p-2 bg-amber-50 border border-amber-200 rounded-lg">
-                  <div className="flex items-center gap-1 text-[11px] font-bold text-amber-900 mb-1.5">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                <div className="mt-2.5 p-2 bg-surface-dark border border-surface-hairline rounded-lg">
+                  <div className="flex items-center gap-1 text-xs font-medium text-text-primary mb-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 text-warning" />
                     <span>需要您的审批确认</span>
                   </div>
                   <div className="flex gap-2 mt-2">
                     <button
                       disabled={loading}
                       onClick={() => handleApprove(m.pendingApproval!)}
-                      className="flex-1 py-1 px-2 bg-red-600 hover:bg-red-700 text-white rounded text-[11px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="flex-1 py-1 px-2 bg-danger hover:bg-danger/90 text-white rounded text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       确认执行
                     </button>
                     <button
                       disabled={loading}
                       onClick={() => handleDeny(m.pendingApproval!)}
-                      className="flex-1 py-1 px-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded text-[11px] font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      className="flex-1 py-1 px-2 bg-surface-light hover:bg-surface-light text-text-secondary rounded text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       取消
                     </button>
@@ -302,32 +300,32 @@ export default function ButlerChatView() {
                 </div>
               )}
             </div>
-            <span className="text-[9px] text-slate-400 mt-1 px-1">{m.createdAt}</span>
+            <span className="text-xs text-text-muted mt-1 px-1">{m.createdAt}</span>
           </div>
         ))}
 
         {loading && (
-          <div className="flex items-center gap-1.5 text-slate-400 text-xs py-1">
-            <Sparkles className="w-3.5 h-3.5 animate-spin text-orange-500" />
+          <div className="flex items-center gap-1.5 text-text-muted text-xs py-1">
+            <Sparkles className="w-3.5 h-3.5 animate-spin text-accent" />
             <span>Agent 正在查数据 / 调度工具...</span>
           </div>
         )}
       </div>
 
-      <div className="px-3 py-2 bg-slate-100/70 border-t border-slate-200/60 overflow-x-auto flex gap-2 no-scrollbar">
+      <div className="px-3 py-2 bg-surface-dark border-t border-surface-hairline overflow-x-auto flex gap-2 no-scrollbar">
         {QUICK_PROMPTS.map((chip, idx) => (
           <button
             key={idx}
             disabled={loading}
             onClick={() => handleSend(chip.prompt)}
-            className="shrink-0 text-[11px] bg-white border border-slate-200 hover:border-orange-300 hover:text-orange-600 px-2.5 py-1.5 rounded-full text-slate-600 transition-colors shadow-xs"
+            className="shrink-0 text-xs bg-surface-darkest border border-surface-hairline hover:border-accent hover:text-accent px-2.5 py-1.5 rounded-md text-text-secondary transition-colors shadow-xs"
           >
             {chip.label}
           </button>
         ))}
       </div>
 
-      <div className="p-3 bg-white border-t border-slate-100 flex gap-2 items-center">
+      <div className="p-3 bg-surface-darkest border-t border-surface-hairline flex gap-2 items-center">
         <input
           type="text"
           value={input}
@@ -335,12 +333,12 @@ export default function ButlerChatView() {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
           placeholder="直接提问，如：今天为什么只投了 8 份？"
-          className="flex-1 text-xs border border-slate-200 rounded-lg px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-orange-500 focus:border-orange-500 bg-slate-50/50"
+          className="flex-1 text-xs border border-surface-hairline rounded-lg px-3 py-2.5 focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent bg-surface-dark"
         />
         <button
           onClick={() => handleSend()}
           disabled={loading || !input.trim()}
-          className="p-2 bg-gradient-to-r from-orange-500 to-amber-500 text-white rounded-lg hover:shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+          className="p-2 bg-text-primary text-white rounded-lg hover:shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           <Send className="w-3.5 h-3.5" />
         </button>

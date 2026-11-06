@@ -85,7 +85,7 @@ export default function InterviewCalendar() {
     <div className="space-y-8">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold gradient-text">面试日历</h1>
+          <h1 className="text-2xl font-medium gradient-text">面试日历</h1>
           <p className="text-sm text-text-muted mt-1">管理和追踪面试安排</p>
         </div>
         <Button onClick={() => setShowDialog(true)}>
@@ -100,7 +100,7 @@ export default function InterviewCalendar() {
           <Card className="p-6">
             <div className="flex items-center justify-between mb-6">
               <button onClick={prevMonth} className="text-text-muted hover:text-text-primary">&lt;</button>
-              <h2 className="text-lg font-bold">{year}年 {MONTHS[month]}</h2>
+              <h2 className="text-lg font-medium">{year}年 {MONTHS[month]}</h2>
               <button onClick={nextMonth} className="text-text-muted hover:text-text-primary">&gt;</button>
             </div>
 
@@ -118,8 +118,8 @@ export default function InterviewCalendar() {
                     key={i}
                     className={`aspect-square rounded-lg flex flex-col items-center justify-start p-1 text-sm ${
                       !day ? '' : isToday
-                        ? 'bg-primary/20 text-primary-light font-bold'
-                        : 'hover:bg-black/5 text-text-secondary'
+                        ? 'bg-surface-dark text-primary-light font-medium'
+                        : 'hover:bg-surface-dark text-text-secondary'
                     } ${dayEvents.length > 0 ? 'cursor-pointer' : ''}`}
                   >
                     {day && (
@@ -143,7 +143,7 @@ export default function InterviewCalendar() {
 
         {/* Upcoming Interviews */}
         <div>
-          <h3 className="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
+          <h3 className="text-sm font-medium text-text-primary mb-3 flex items-center gap-2">
             <Bell className="w-4 h-4 text-warning" />
             即将到来的面试
           </h3>
@@ -178,7 +178,7 @@ export default function InterviewCalendar() {
                     )}
                   </div>
                   {event.notes && (
-                    <p className="text-xs text-text-muted mt-1 border-t border-black/10 pt-1">{event.notes}</p>
+                    <p className="text-xs text-text-muted mt-1 border-t border-surface-hairline pt-1">{event.notes}</p>
                   )}
                 </Card>
               ))

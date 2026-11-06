@@ -102,26 +102,26 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
   return (
     <Card className="p-3.5 space-y-3">
       {/* 标题栏 */}
-      <div className="flex items-center justify-between pb-1 border-b border-black/5">
+      <div className="flex items-center justify-between pb-1 border-b border-surface-hairline">
         <div className="flex items-center gap-1.5">
           <MessageSquareText className="w-4 h-4 text-primary-light" />
-          <span className="text-sm font-semibold text-text-primary">
+          <span className="text-sm font-medium text-text-primary">
             求职画像 · 底线 · 自主授权
           </span>
         </div>
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary-light font-medium flex items-center gap-1">
+        <span className="text-xs px-2 py-0.5 rounded-md bg-surface-dark text-primary-light font-medium flex items-center gap-1">
           <Sparkles className="w-2.5 h-2.5" />
           事实驱动 · 拒绝虚构
         </span>
       </div>
 
-      <p className="text-[11px] text-text-muted leading-relaxed">
+      <p className="text-xs text-text-muted leading-relaxed">
         与简历配套的基础信息：HR 追问时<strong>只引用简历真实项目</strong>做真实应答；同时也是 AIbot 自主投递的事前授权依据。所有事实由你填写，AI 只读、不可改写。
       </p>
 
       {/* 1. 当前求职状态 */}
       <div>
-        <label className="text-[11px] text-text-muted mb-1.5 flex items-center gap-1">
+        <label className="text-xs text-text-muted mb-1.5 flex items-center gap-1">
           <UserCheck className="w-3 h-3 text-primary-light" />
           当前求职状态
         </label>
@@ -138,10 +138,10 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
                 key={item.id}
                 type="button"
                 onClick={() => updateField('employmentStatus', item.id as EmploymentStatus)}
-                className={`py-1.5 px-2 text-xs rounded-lg border transition-all text-left flex items-center justify-between ${
+                className={`py-1.5 px-2 text-xs rounded-lg border transition-colors text-left flex items-center justify-between ${
                   active
-                    ? 'border-primary bg-primary/10 text-primary-light font-medium'
-                    : 'border-black/10 bg-black/[0.02] text-text-muted hover:border-black/20'
+                    ? 'border-primary bg-surface-dark text-primary-light font-medium'
+                    : 'border-surface-hairline bg-black/[0.02] text-text-muted hover:border-surface-hairline'
                 }`}
               >
                 <span>{item.label}</span>
@@ -155,7 +155,7 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
       {/* 2. 到岗周期与期望薪资 */}
       <div className="grid grid-cols-2 gap-2 pt-0.5">
         <div>
-          <label className="text-[11px] text-text-muted mb-1 flex items-center gap-1">
+          <label className="text-xs text-text-muted mb-1 flex items-center gap-1">
             <Clock className="w-3 h-3 text-primary-light" />
             最快到岗周期
           </label>
@@ -177,7 +177,7 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
         </div>
 
         <div>
-          <label className="text-[11px] text-text-muted mb-1 flex items-center gap-1">
+          <label className="text-xs text-text-muted mb-1 flex items-center gap-1">
             <DollarSign className="w-3 h-3 text-primary-light" />
             期望月薪范围 (K)
           </label>
@@ -211,7 +211,7 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
               min={1}
               max={200}
             />
-            <span className="text-[10px] text-text-muted">K</span>
+            <span className="text-xs text-text-muted">K</span>
           </div>
         </div>
       </div>
@@ -219,7 +219,7 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
       {/* 3. 硬性底线标签（触发后自动生成得体婉拒话术） */}
       <div>
         <div className="flex items-center justify-between mb-1.5">
-          <label className="text-[11px] text-text-muted flex items-center gap-1">
+          <label className="text-xs text-text-muted flex items-center gap-1">
             <ShieldAlert className="w-3 h-3 text-danger" />
             硬性底线护栏（检测命中自动礼貌婉拒/澄清）
           </label>
@@ -233,10 +233,10 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
                 type="button"
                 onClick={() => toggleBottomLine(item.id)}
                 title={item.description}
-                className={`text-[11px] px-2.5 py-1 rounded-full border transition-colors flex items-center gap-1 ${
+                className={`text-xs px-2.5 py-1 rounded-md border transition-colors flex items-center gap-1 ${
                   selected
                     ? 'border-danger/30 bg-danger/10 text-danger font-medium'
-                    : 'border-black/10 bg-black/[0.02] text-text-muted hover:border-black/20'
+                    : 'border-surface-hairline bg-black/[0.02] text-text-muted hover:border-surface-hairline'
                 }`}
               >
                 <span>{item.label}</span>
@@ -256,7 +256,7 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
 
       {/* 4. 面试应约预留联系方式 */}
       <div>
-        <label className="text-[11px] text-text-muted mb-1 flex items-center gap-1">
+        <label className="text-xs text-text-muted mb-1 flex items-center gap-1">
           <Phone className="w-3 h-3 text-primary-light" />
           面试应约联系方式（当 HR 发起约聊/索要联系方式时填入）
         </label>
@@ -270,9 +270,9 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
       </div>
 
       {/* 5. 应答策略模式 */}
-      <div className="pt-1 border-t border-black/5 flex items-center justify-between">
-        <span className="text-[11px] text-text-muted">Copilot 应答策略</span>
-        <div className="flex items-center gap-1 bg-black/5 p-0.5 rounded-lg">
+      <div className="pt-1 border-t border-surface-hairline flex items-center justify-between">
+        <span className="text-xs text-text-muted">Copilot 应答策略</span>
+        <div className="flex items-center gap-1 bg-surface-dark p-0.5 rounded-lg">
           {[
             { id: 'suggest', label: '建议气泡（一键采纳）' },
             { id: 'auto_fill', label: '填入输入框待确认' },
@@ -288,9 +288,9 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
                   await updateField('copilotMode', value)
                   await updatePolicy({ reply: { ...policy.reply, mode: value } })
                 }}
-                className={`px-2 py-0.5 text-[10px] rounded-md transition-colors ${
+                className={`px-2 py-0.5 text-xs rounded-md transition-colors ${
                   active
-                    ? 'bg-white text-primary-light shadow-sm font-medium'
+                    ? 'bg-surface-darkest text-primary-light shadow-sm font-medium'
                     : 'text-text-muted hover:text-text-secondary'
                 }`}
               >
@@ -302,41 +302,41 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
       </div>
 
       {/* 6. 自主授权契约：用户事前编写，运行时查表判定 */}
-      <div className="pt-2 border-t border-black/5 space-y-2">
+      <div className="pt-2 border-t border-surface-hairline space-y-2">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             <ShieldAlert className="w-3.5 h-3.5 text-primary-light" />
-            <span className="text-[11px] font-medium text-text-primary">自主授权 · 事前写清楚</span>
+            <span className="text-xs font-medium text-text-primary">自主授权 · 事前写清楚</span>
           </div>
           <button
             type="button"
             onClick={() => updatePolicy({ enabled: !policy.enabled })}
-            className={`px-2 py-0.5 text-[10px] rounded-md border transition-colors ${
+            className={`px-2 py-0.5 text-xs rounded-md border transition-colors ${
               policy.enabled
-                ? 'bg-primary/10 text-primary-light border-primary/30'
-                : 'bg-black/[0.02] text-text-muted border-black/10'
+                ? 'bg-surface-dark text-primary-light border-surface-hairline'
+                : 'bg-black/[0.02] text-text-muted border-surface-hairline'
             }`}
           >
             {policy.enabled ? '已启用' : '未启用'}
           </button>
         </div>
-        <p className="text-[10px] text-text-muted leading-relaxed">
+        <p className="text-xs text-text-muted leading-relaxed">
           未启用时完全走原有权限三档。启用后按下方分类查表：区间内自动执行，未覆盖、超范围或超过 14 天未复核一律停下问你。
         </p>
 
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="text-[10px] text-text-muted mb-1 block">区间内投递</label>
+            <label className="text-xs text-text-muted mb-1 block">区间内投递</label>
             <div className="flex gap-1">
               {(['auto', 'confirm'] as const).map((opt) => (
                 <button
                   key={opt}
                   type="button"
                   onClick={() => updatePolicy({ strategy: { ...policy.strategy, apply: opt } })}
-                  className={`flex-1 py-1 text-[10px] rounded-md border ${
+                  className={`flex-1 py-1 text-xs rounded-md border ${
                     policy.strategy.apply === opt
-                      ? 'bg-primary/10 text-primary-light border-primary/30'
-                      : 'bg-white text-text-muted border-black/10'
+                      ? 'bg-surface-dark text-primary-light border-surface-hairline'
+                      : 'bg-surface-darkest text-text-muted border-surface-hairline'
                   }`}
                 >
                   {opt === 'auto' ? '自动执行' : '需确认'}
@@ -345,7 +345,7 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
             </div>
           </div>
           <div>
-            <label className="text-[10px] text-text-muted mb-1 block">每日自动应答上限</label>
+            <label className="text-xs text-text-muted mb-1 block">每日自动应答上限</label>
             <input
               type="number"
               min={0}
@@ -361,7 +361,7 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
 
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="text-[10px] text-text-muted mb-1 block">每日配额上限</label>
+            <label className="text-xs text-text-muted mb-1 block">每日配额上限</label>
             <input
               type="number"
               min={1}
@@ -373,7 +373,7 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
             />
           </div>
           <div>
-            <label className="text-[10px] text-text-muted mb-1 block">匹配门槛下限</label>
+            <label className="text-xs text-text-muted mb-1 block">匹配门槛下限</label>
             <input
               type="number"
               min={0}
@@ -388,7 +388,7 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
         </div>
 
         <div>
-          <label className="text-[10px] text-text-muted mb-1 block">
+          <label className="text-xs text-text-muted mb-1 block">
             主攻方向白名单（逗号分隔，留空则换方向需确认）
           </label>
           <input
@@ -405,7 +405,7 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
         </div>
 
         <div>
-          <label className="text-[10px] text-text-muted mb-1 block">允许自动调参</label>
+          <label className="text-xs text-text-muted mb-1 block">允许自动调参</label>
           <div className="flex flex-wrap gap-1">
             {TUNE_LABELS.map((item) => {
               const active = policy.strategy.mayTune.includes(item.id)
@@ -414,10 +414,10 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
                   key={item.id}
                   type="button"
                   onClick={() => toggleTune(item.id)}
-                  className={`px-2 py-1 text-[10px] rounded-md border transition-colors ${
+                  className={`px-2 py-1 text-xs rounded-md border transition-colors ${
                     active
-                      ? 'bg-primary/10 text-primary-light border-primary/30'
-                      : 'bg-white text-text-muted border-black/10'
+                      ? 'bg-surface-dark text-primary-light border-surface-hairline'
+                      : 'bg-surface-darkest text-text-muted border-surface-hairline'
                   }`}
                 >
                   {item.label}
@@ -429,7 +429,7 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
 
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="text-[10px] text-text-muted mb-1 block">自动应答话题白名单</label>
+            <label className="text-xs text-text-muted mb-1 block">自动应答话题白名单</label>
             <input
               value={policy.reply.allowedTopics.join('，')}
               onChange={(e) => updatePolicy({
@@ -442,7 +442,7 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
             />
           </div>
           <div>
-            <label className="text-[10px] text-text-muted mb-1 block">禁用话题</label>
+            <label className="text-xs text-text-muted mb-1 block">禁用话题</label>
             <input
               value={policy.reply.forbidTopics.join('，')}
               onChange={(e) => updatePolicy({
@@ -456,12 +456,12 @@ export const CandidatePreferencesCard: React.FC<CandidatePreferencesCardProps> =
           </div>
         </div>
 
-        <div className="rounded-lg bg-black/[0.02] border border-black/5 p-2 space-y-0.5">
-          <div className="text-[10px] font-medium text-text-muted">硬锁 · 不提供自动执行选项</div>
-          <div className="text-[10px] text-text-muted">改简历事实 / 突破平台风控 · 永远禁止</div>
-          <div className="text-[10px] text-text-muted">代谈 offer / 薪资谈判 · 永远需你确认</div>
+        <div className="rounded-lg bg-black/[0.02] border border-surface-hairline p-2 space-y-0.5">
+          <div className="text-xs font-medium text-text-muted">硬锁 · 不提供自动执行选项</div>
+          <div className="text-xs text-text-muted">改简历事实 / 突破平台风控 · 永远禁止</div>
+          <div className="text-xs text-text-muted">代谈 offer / 薪资谈判 · 永远需你确认</div>
         </div>
-        <p className="text-[10px] text-text-muted">
+        <p className="text-xs text-text-muted">
           {policy.updatedAt
             ? `最后确认：${new Date(policy.updatedAt).toLocaleString('zh-CN')}`
             : '尚未确认 · 启用后请定期复核'}

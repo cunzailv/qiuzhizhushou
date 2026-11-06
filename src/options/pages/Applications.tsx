@@ -70,7 +70,7 @@ export default function Applications() {
   return (
     <div className="max-w-5xl space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-text-primary">投递记录</h2>
+        <h2 className="text-2xl font-medium text-text-primary">投递记录</h2>
         <p className="text-sm text-text-muted mt-1">全部投递的完整台账：状态流转与匹配分</p>
       </div>
 
@@ -82,9 +82,9 @@ export default function Applications() {
             { label: '面试/Offer', value: stats.interview },
             { label: '已读', value: stats.read },
           ].map((s) => (
-            <div key={s.label} className="rounded-2xl border border-black/10 bg-surface-darkest p-4">
+            <div key={s.label} className="rounded-2xl border border-surface-hairline bg-surface-darkest p-4">
               <div className="text-xs text-text-muted">{s.label}</div>
-              <div className="mt-1.5 text-2xl font-bold text-text-primary">{s.value}</div>
+              <div className="mt-1.5 text-2xl font-medium text-text-primary">{s.value}</div>
             </div>
           ))}
         </div>
@@ -95,7 +95,7 @@ export default function Applications() {
           <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={() => setFilter('all')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filter === 'all' ? 'bg-primary/20 text-primary-light ring-1 ring-primary/30' : 'bg-black/5 text-text-muted hover:text-text-primary'}`}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filter === 'all' ? 'bg-surface-dark text-primary-light ring-1 ring-accent/20' : 'bg-surface-dark text-text-muted hover:text-text-primary'}`}
             >
               全部（{rows.length}）
             </button>
@@ -103,7 +103,7 @@ export default function Applications() {
               <button
                 key={k}
                 onClick={() => setFilter(k)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filter === k ? 'bg-primary/20 text-primary-light ring-1 ring-primary/30' : 'bg-black/5 text-text-muted hover:text-text-primary'}`}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${filter === k ? 'bg-surface-dark text-primary-light ring-1 ring-accent/20' : 'bg-surface-dark text-text-muted hover:text-text-primary'}`}
               >
                 {label}
               </button>
@@ -111,7 +111,7 @@ export default function Applications() {
           </div>
           <button
             onClick={exportCsv}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-orange-400 to-orange-500 text-white text-sm font-medium hover:opacity-90 transition-opacity"
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-accent text-white text-sm font-medium hover:opacity-90 transition-opacity"
           >
             <Download className="w-4 h-4" />
             导出 CSV
@@ -127,7 +127,7 @@ export default function Applications() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead><tr className="text-left text-xs text-text-muted border-b border-black/10">
+              <thead><tr className="text-left text-xs text-text-muted border-b border-surface-hairline">
                 <th className="py-2 px-2 font-medium">公司 / 岗位</th>
                 <th className="py-2 px-2 font-medium">平台</th>
                 <th className="py-2 px-2 font-medium">薪资</th>
@@ -138,7 +138,7 @@ export default function Applications() {
               </tr></thead>
               <tbody>
                 {filtered.map((r) => (
-                  <tr key={r.id} className="border-b border-black/5 text-text-primary">
+                  <tr key={r.id} className="border-b border-surface-hairline text-text-primary">
                     <td className="py-2.5 px-2">
                       <div className="font-medium">{r.companyName}</div>
                       <div className="text-xs text-text-muted">{r.jobTitle}</div>
@@ -147,16 +147,16 @@ export default function Applications() {
                     <td className="py-2.5 px-2 text-xs">{r.salary || '-'}</td>
                     <td className="py-2.5 px-2 text-right">
                       {r.matchScore != null ? (
-                        <span className={`font-semibold ${r.matchScore >= 70 ? 'text-success' : r.matchScore >= 50 ? 'text-primary-light' : 'text-warning'}`}>
+                        <span className={`font-medium ${r.matchScore >= 70 ? 'text-success' : r.matchScore >= 50 ? 'text-primary-light' : 'text-warning'}`}>
                           {r.matchScore}
                         </span>
                       ) : '-'}
                     </td>
                     <td className="py-2.5 px-2">
-                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-medium ${
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium ${
                         ['interview', 'hired'].includes(r.status) ? 'bg-success/10 text-success'
                         : ['rejected', 'withdrawn'].includes(r.status) ? 'bg-warning/10 text-warning'
-                        : 'bg-primary/10 text-primary-light'
+                        : 'bg-surface-dark text-primary-light'
                       }`}>
                         <CircleDot className="w-2.5 h-2.5" />
                         {STATUS_LABELS[r.status] || r.status}

@@ -172,18 +172,18 @@ export default function Settings() {
 
   return (
     <div className="p-4 space-y-4">
-      <h2 className="text-lg font-bold gradient-text">设置</h2>
+      <h2 className="text-lg font-medium gradient-text">设置</h2>
 
       {/* AI Model Selection */}
       <Card>
         <div className="flex items-center gap-2 mb-3">
           <Key className="w-4 h-4 text-primary-light" />
-          <span className="text-sm font-semibold text-text-primary">AI 模型配置</span>
+          <span className="text-sm font-medium text-text-primary">AI 模型配置</span>
         </div>
         <div className="space-y-2">
           {/* Model Preset Dropdown */}
           <div>
-            <label className="text-[11px] text-text-muted mb-1 block">选择模型</label>
+            <label className="text-xs text-text-muted mb-1 block">选择模型</label>
             <div className="relative" ref={dropdownRef}>
               <button
                 onClick={() => setShowModelDropdown(!showModelDropdown)}
@@ -193,7 +193,7 @@ export default function Settings() {
                   <span className="text-xs font-medium truncate">
                     {selectedPreset ? `${selectedPreset.name}` : '选择模型'}
                   </span>
-                  <span className="text-[10px] text-text-muted truncate">
+                  <span className="text-xs text-text-muted truncate">
                     {selectedPreset?.provider}
                   </span>
                 </div>
@@ -201,19 +201,19 @@ export default function Settings() {
               </button>
 
               {showModelDropdown && (
-                <div className="absolute top-full left-0 right-0 mt-1 p-1 rounded-xl bg-surface-dark border border-black/10 shadow-xl z-50 max-h-[260px] overflow-y-auto">
+                <div className="absolute top-full left-0 right-0 mt-1 p-1 rounded-xl bg-surface-dark border border-surface-hairline shadow-xl z-50 max-h-[260px] overflow-y-auto">
                   {allModels.map((model) => (
                     <button
                       key={model.id}
                       onClick={() => handleSelectPreset(model.id, model)}
-                      className={`w-full px-3 py-2 rounded-lg text-left transition-colors hover:bg-black/5 ${
-                        settings.modelPreset === model.id ? 'bg-primary/10' : ''
+                      className={`w-full px-3 py-2 rounded-lg text-left transition-colors hover:bg-surface-dark ${
+                        settings.modelPreset === model.id ? 'bg-surface-dark' : ''
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
                         <div className="min-w-0 flex-1">
                           <div className="text-xs font-medium text-text-primary truncate">{model.name}</div>
-                          <div className="text-[10px] text-text-muted">{model.provider} · {model.description.substring(0, 20)}</div>
+                          <div className="text-xs text-text-muted">{model.provider} · {model.description.substring(0, 20)}</div>
                         </div>
                         <div className="flex items-center gap-1 shrink-0">
                           {settings.modelPreset === model.id && (
@@ -222,7 +222,7 @@ export default function Settings() {
                           {model.isCustom && (
                             <span
                               onClick={(e) => { e.stopPropagation(); handleDeleteCustomModel(model.id) }}
-                              className="p-0.5 rounded hover:bg-red-500/20 text-text-muted hover:text-red-400"
+                              className="p-0.5 rounded hover:bg-danger/20 text-text-muted hover:text-red-400"
                               title="删除此模型"
                             >
                               <X className="w-3 h-3" />
@@ -240,13 +240,13 @@ export default function Settings() {
             {!showAddForm ? (
               <button
                 onClick={() => setShowAddForm(true)}
-                className="flex items-center gap-1 text-[10px] text-text-muted hover:text-primary-light transition-colors mt-1"
+                className="flex items-center gap-1 text-xs text-text-muted hover:text-primary-light transition-colors mt-1"
               >
                 <Plus className="w-3 h-3" />
                 添加自定义模型
               </button>
             ) : (
-              <div className="mt-2 p-2 rounded-lg bg-black/5 border border-black/10 space-y-1.5">
+              <div className="mt-2 p-2 rounded-lg bg-surface-dark border border-surface-hairline space-y-1.5">
                 <input
                   type="text"
                   value={newModel.name}
@@ -278,7 +278,7 @@ export default function Settings() {
                 <div className="flex gap-2">
                   <button
                     onClick={handleAddCustomModel}
-                    className="flex-1 px-2 py-1 rounded bg-primary/20 text-primary-light text-xs hover:bg-primary/30 transition-colors"
+                    className="flex-1 px-2 py-1 rounded bg-surface-dark text-primary-light text-xs hover:bg-surface-dark transition-colors"
                   >
                     保存
                   </button>
@@ -295,7 +295,7 @@ export default function Settings() {
 
           {/* API Key Input */}
           <div>
-            <label className="text-[11px] text-text-muted mb-1 block">API Key</label>
+            <label className="text-xs text-text-muted mb-1 block">API Key</label>
             <input
               type="password"
               value={settings.apiKey}
@@ -312,7 +312,7 @@ export default function Settings() {
                 href={selectedPreset.docsUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 mt-1 text-[10px] text-primary-light hover:underline"
+                className="inline-flex items-center gap-1 mt-1 text-xs text-primary-light hover:underline"
               >
                 获取 {selectedPreset.provider} API Key
                 <ExternalLink className="w-2.5 h-2.5" />
@@ -324,7 +324,7 @@ export default function Settings() {
           {isCustom && (
             <>
               <div>
-                <label className="text-[11px] text-text-muted mb-1 block">API Base URL</label>
+                <label className="text-xs text-text-muted mb-1 block">API Base URL</label>
                 <input
                   type="text"
                   value={settings.apiBaseUrl}
@@ -334,7 +334,7 @@ export default function Settings() {
                 />
               </div>
               <div>
-                <label className="text-[11px] text-text-muted mb-1 block">模型名称</label>
+                <label className="text-xs text-text-muted mb-1 block">模型名称</label>
                 <input
                   type="text"
                   value={settings.modelName}
@@ -365,7 +365,7 @@ export default function Settings() {
 
           {/* C4: AI 每日预算护栏 */}
           <div>
-            <label className="text-[11px] text-text-muted mb-1 block">
+            <label className="text-xs text-text-muted mb-1 block">
               每日 AI 调用预算上限: {settings.aiDailyBudget ?? 50} 次（超限自动回退本地）
             </label>
             <input
@@ -378,13 +378,13 @@ export default function Settings() {
               className="w-full accent-primary"
             />
             <div className="flex items-center justify-between mt-1.5">
-              <span className={`text-[11px] ${aiUsage && aiUsage.used >= aiUsage.limit ? 'text-error font-semibold' : 'text-text-muted'}`}>
+              <span className={`text-xs ${aiUsage && aiUsage.used >= aiUsage.limit ? 'text-error font-medium' : 'text-text-muted'}`}>
                 今日已用: {aiUsage ? `${aiUsage.used} / ${aiUsage.limit} 次` : '加载中…'}
                 {aiUsage && aiUsage.used >= aiUsage.limit && '（已超限，AI 已暂停）'}
               </span>
               <button
                 onClick={handleResetAiBudget}
-                className="text-[11px] text-primary-light hover:underline"
+                className="text-xs text-primary-light hover:underline"
                 type="button"
               >
                 重置今日计数
@@ -395,9 +395,9 @@ export default function Settings() {
       </Card>
 
       {/* 求职画像与底线已迁至「简历」模块 */}
-      <div className="rounded-xl border border-black/10 bg-black/[0.02] p-3">
+      <div className="rounded-xl border border-surface-hairline bg-black/[0.02] p-3">
         <p className="text-xs font-medium text-text-primary">求职画像 · 底线 · 自主授权</p>
-        <p className="text-[11px] text-text-muted mt-1 leading-relaxed">
+        <p className="text-xs text-text-muted mt-1 leading-relaxed">
           这些配置与简历绑定，已统一放到「简历」页下方管理，此处不再重复展示。
         </p>
       </div>
@@ -409,8 +409,8 @@ export default function Settings() {
       <Card>
         <div className="flex items-center gap-2 mb-2">
           <Shield className="w-4 h-4 text-success" />
-          <span className="text-sm font-semibold text-text-primary">防封策略</span>
-          <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded-full bg-success/10 text-success">
+          <span className="text-sm font-medium text-text-primary">防封策略</span>
+          <span className="ml-auto text-xs px-1.5 py-0.5 rounded-md bg-success/10 text-success">
             {SAFETY_PROFILE_LABELS[(settings.safetyProfile ?? 'conservative') as SafetyProfileId]}
           </span>
         </div>
@@ -423,10 +423,10 @@ export default function Settings() {
                 type="button"
                 onClick={() => handleApplySafetyPreset(preset.id)}
                 title={`${preset.tagline}｜${preset.description}`}
-                className={`py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                className={`py-1.5 rounded-lg text-xs font-medium border transition-colors ${
                   active
-                    ? 'border-primary/40 bg-primary/10 text-primary-light'
-                    : 'border-black/10 bg-black/[0.02] text-text-muted'
+                    ? 'border-surface-hairline bg-surface-dark text-primary-light'
+                    : 'border-surface-hairline bg-black/[0.02] text-text-muted'
                 }`}
               >
                 {preset.label}
@@ -434,13 +434,13 @@ export default function Settings() {
             )
           })}
         </div>
-        <p className="text-[10px] text-text-muted mb-2 leading-relaxed">
+        <p className="text-xs text-text-muted mb-2 leading-relaxed">
           {getSafetyPreset(settings.safetyProfile)?.description
             ?? '自定义：你手动调过下面的参数，点上方档位可恢复到推荐节奏。'}
         </p>
         <div className="space-y-2">
           <div>
-            <label className="text-[11px] text-text-muted mb-1 block">
+            <label className="text-xs text-text-muted mb-1 block">
               每日沟通上限: {settings.dailyLimit} 次
             </label>
             <input
@@ -454,7 +454,7 @@ export default function Settings() {
             />
           </div>
           <div>
-            <label className="text-[11px] text-text-muted mb-1 block">
+            <label className="text-xs text-text-muted mb-1 block">
               操作延迟范围: {settings.minDelay / 1000}s - {settings.maxDelay / 1000}s
             </label>
             <div className="flex gap-2">
@@ -480,7 +480,7 @@ export default function Settings() {
             </div>
           </div>
           <div>
-            <label className="text-[11px] text-text-muted mb-1 block">
+            <label className="text-xs text-text-muted mb-1 block">
               单次扫描数量: {settings.maxScanCount > 0 ? `${settings.maxScanCount} 个` : '不限制'}
             </label>
             <select
@@ -495,13 +495,13 @@ export default function Settings() {
             </select>
           </div>
           <div>
-            <label className="text-[11px] text-text-muted mb-1 block">沟通模式</label>
+            <label className="text-xs text-text-muted mb-1 block">沟通模式</label>
             <div className="flex gap-2">
               <button
                 onClick={() => handleSave(rhythmPatch({ applyMode: 'batch' }))}
                 className={`flex-1 px-3 py-2 text-xs rounded-lg transition-colors ${
                   settings.applyMode === 'batch'
-                    ? 'bg-primary/20 text-primary-light'
+                    ? 'bg-surface-dark text-primary-light'
                     : 'bg-surface-darkest text-text-muted'
                 }`}
               >
@@ -511,7 +511,7 @@ export default function Settings() {
                 onClick={() => handleSave(rhythmPatch({ applyMode: 'recommend' }))}
                 className={`flex-1 px-3 py-2 text-xs rounded-lg transition-colors ${
                   settings.applyMode === 'recommend'
-                    ? 'bg-primary/20 text-primary-light'
+                    ? 'bg-surface-dark text-primary-light'
                     : 'bg-surface-darkest text-text-muted'
                 }`}
               >
@@ -526,7 +526,7 @@ export default function Settings() {
       <Card>
         <div className="flex items-center gap-2 mb-3">
           <Download className="w-4 h-4 text-info" />
-          <span className="text-sm font-semibold text-text-primary">数据管理</span>
+          <span className="text-sm font-medium text-text-primary">数据管理</span>
         </div>
         <div className="space-y-2">
           <Button variant="secondary" size="sm" className="w-full" onClick={handleExport}>
@@ -541,9 +541,9 @@ export default function Settings() {
       </Card>
 
       {/* 配置顺序提示：必配 3 项 + 安全阀，其余后置 */}
-      <div className="rounded-xl border border-black/10 bg-black/[0.02] p-3">
+      <div className="rounded-xl border border-surface-hairline bg-black/[0.02] p-3">
         <p className="text-xs font-medium text-text-primary">配置顺序</p>
-        <p className="text-[11px] text-text-muted mt-1 leading-relaxed">
+        <p className="text-xs text-text-muted mt-1 leading-relaxed">
           必配：① 简历与求职信息 ② 大模型 API Key ③ 招聘平台登录 ④ 安全阀档位（已默认「保守」）。
           <br />
           可后置：AI 自主权限、通知推送、公司黑名单、数据导出——都在管理后台里，用到再开。

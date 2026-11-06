@@ -91,15 +91,15 @@ export default function Agent() {
   return (
     <div className="max-w-4xl space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-text-primary">智能体配置</h2>
+        <h2 className="text-2xl font-medium text-text-primary">智能体配置</h2>
         <p className="text-sm text-text-muted mt-1">角色预设 · 提示词编辑 · 自动化技能管理</p>
       </div>
 
-      {/* ─── 角色预设（F2） ─── */}
+      {/* 角色预设（F2） */}
       <Card>
         <div className="flex items-center gap-2 mb-1">
           <Bot className="w-5 h-5 text-primary-light" />
-          <span className="font-semibold text-text-primary">智能体角色</span>
+          <span className="font-medium text-text-primary">智能体角色</span>
         </div>
         <p className="text-xs text-text-muted mb-4">角色决定匹配门槛与投递策略；安全护栏（AI 动作权限）不受角色影响，始终以设置页为准。</p>
         <div className="grid grid-cols-3 gap-3">
@@ -107,20 +107,20 @@ export default function Agent() {
             <button
               key={r.id}
               onClick={() => handleSetRole(r.id)}
-              className={`text-left p-4 rounded-2xl border transition-all ${
+              className={`text-left p-4 rounded-2xl border transition-colors ${
                 role === r.id
-                  ? 'border-primary/40 bg-primary/10 shadow-glow'
-                  : 'border-black/10 bg-surface-darkest hover:border-black/20'
+                  ? 'border-surface-hairline bg-surface-dark shadow-card'
+                  : 'border-surface-hairline bg-surface-darkest hover:border-surface-hairline'
               }`}
             >
               <div className="flex items-center justify-between mb-1.5">
-                <span className="font-semibold text-text-primary">{r.name}</span>
+                <span className="font-medium text-text-primary">{r.name}</span>
                 {role === r.id && <span className="w-2 h-2 rounded-full bg-primary-light" />}
               </div>
               <p className="text-xs text-text-muted leading-relaxed">{r.description}</p>
               <div className="mt-3 flex gap-1.5">
                 {Object.entries(r.params ?? {}).map(([k, v]) => (
-                  <span key={k} className="px-1.5 py-0.5 rounded-md bg-black/5 text-[10px] text-text-muted">
+                  <span key={k} className="px-1.5 py-0.5 rounded-md bg-surface-dark text-xs text-text-muted">
                     {k === 'applyMode' ? (v === 'batch' ? '批量沟通' : 'AI推荐') : k === 'enableAiMatch' ? (v ? 'AI评分' : '不评分') : `${k}:${v}`}
                   </span>
                 ))}
@@ -130,12 +130,12 @@ export default function Agent() {
         </div>
       </Card>
 
-      {/* ─── 提示词编辑（F1） ─── */}
+      {/* 提示词编辑（F1） */}
       <Card>
         <div className="flex items-center justify-between mb-1">
           <div className="flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-primary-light" />
-            <span className="font-semibold text-text-primary">提示词编辑</span>
+            <span className="font-medium text-text-primary">提示词编辑</span>
           </div>
           {changedCount > 0 && (
             <span className="text-xs text-primary-light font-medium">{changedCount} 处未保存</span>
@@ -151,33 +151,33 @@ export default function Agent() {
               <div className="flex items-center gap-2 mb-1">
                 {meta.icon}
                 <span className="text-sm font-medium text-text-primary">{meta.label}</span>
-                <span className="text-[11px] text-text-muted">{meta.desc}</span>
+                <span className="text-xs text-text-muted">{meta.desc}</span>
               </div>
               <div className="space-y-3">
                 {items.map((def) => {
                   const isDirty = dirty.has(def.key)
                   const value = prompts[def.key] ?? def.default
                   return (
-                    <div key={def.key} className="rounded-xl border border-black/10 bg-surface-darkest overflow-hidden">
+                    <div key={def.key} className="rounded-xl border border-surface-hairline bg-surface-darkest overflow-hidden">
                       <div className="flex items-center justify-between px-3 py-2 bg-black/[0.03]">
                         <div>
                           <span className="text-sm font-medium text-text-primary">{def.label}</span>
-                          <span className="ml-2 text-[11px] text-text-muted">{def.description}</span>
+                          <span className="ml-2 text-xs text-text-muted">{def.description}</span>
                         </div>
                         <div className="flex items-center gap-1.5">
                           {isDirty && (
-                            <span className="text-[10px] text-primary-light font-medium">未保存</span>
+                            <span className="text-xs text-primary-light font-medium">未保存</span>
                           )}
                           <button
                             onClick={() => handleSavePrompt(def.key)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-gradient-to-r from-orange-400 to-orange-500 text-white text-xs font-medium hover:opacity-90 transition-opacity"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-accent text-white text-xs font-medium hover:opacity-90 transition-opacity"
                           >
                             <Save className="w-3 h-3" />
                             保存
                           </button>
                           <button
                             onClick={() => handleResetPrompt(def.key)}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-black/5 text-text-muted text-xs hover:text-text-primary transition-colors"
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-surface-dark text-text-muted text-xs hover:text-text-primary transition-colors"
                             title="恢复默认"
                           >
                             <RotateCcw className="w-3 h-3" />
@@ -200,16 +200,16 @@ export default function Agent() {
         })}
       </Card>
 
-      {/* ─── 技能管理（F3） ─── */}
+      {/* 技能管理（F3） */}
       <Card>
         <div className="flex items-center gap-2 mb-1">
           <Cog className="w-5 h-5 text-primary-light" />
-          <span className="font-semibold text-text-primary">自动化技能</span>
+          <span className="font-medium text-text-primary">自动化技能</span>
         </div>
         <p className="text-xs text-text-muted mb-4">Harness 自动沉淀的投递动作序列；停用后自动化不再命中该技能。</p>
 
         {skills.length === 0 ? (
-          <div className="p-8 text-center rounded-xl bg-black/[0.02] border border-dashed border-black/10">
+          <div className="p-8 text-center rounded-xl bg-black/[0.02] border border-dashed border-surface-hairline">
             <Cog className="w-8 h-8 mx-auto mb-2 text-text-muted/50" />
             <p className="text-sm text-text-muted">暂无已沉淀技能</p>
             <p className="text-xs text-text-muted/60 mt-1">在招聘页使用 AI 自动化投递成功后，动作序列会自动记录在这里</p>
@@ -218,7 +218,7 @@ export default function Agent() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-left text-xs text-text-muted border-b border-black/10">
+                <tr className="text-left text-xs text-text-muted border-b border-surface-hairline">
                   <th className="py-2 px-2 font-medium">平台 / 页面</th>
                   <th className="py-2 px-2 font-medium">目标</th>
                   <th className="py-2 px-2 font-medium text-right">步骤</th>
@@ -233,7 +233,7 @@ export default function Agent() {
                 {skills.map((s) => {
                   const enabled = s.enabled !== false
                   return (
-                    <tr key={s.id} className="border-b border-black/5 text-text-primary">
+                    <tr key={s.id} className="border-b border-surface-hairline text-text-primary">
                       <td className="py-2.5 px-2">
                         <span className="font-medium">{s.platform}</span>
                         <span className="text-text-muted text-xs ml-1.5">{s.pageType}</span>
@@ -246,7 +246,7 @@ export default function Agent() {
                       <td className="py-2.5 px-2 text-center">
                         <button
                           onClick={() => handleToggleSkill(s)}
-                          className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition-colors ${
+                          className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors ${
                             enabled
                               ? 'bg-success/10 text-success hover:bg-success/20'
                               : 'bg-warning/10 text-warning hover:bg-warning/20'
@@ -259,7 +259,7 @@ export default function Agent() {
                       <td className="py-2.5 px-2 text-right">
                         <button
                           onClick={() => handleDeleteSkill(s)}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-black/5 text-text-muted text-[11px] hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-surface-dark text-text-muted text-xs hover:text-red-400 hover:bg-danger/10 transition-colors"
                           title="删除技能"
                         >
                           <Trash2 className="w-3 h-3" />

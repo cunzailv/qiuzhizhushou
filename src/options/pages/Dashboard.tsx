@@ -74,7 +74,7 @@ export default function Dashboard({ onNavigate }: DashboardProps = {}) {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold gradient-text">求职数据看板</h1>
+        <h1 className="text-2xl font-medium gradient-text">求职数据看板</h1>
         <p className="text-sm text-text-muted mt-1">全面了解你的求职进度</p>
       </div>
 
@@ -89,7 +89,7 @@ export default function Dashboard({ onNavigate }: DashboardProps = {}) {
               <stat.icon className="w-6 h-6" style={{ color: stat.color }} />
             </div>
             <div>
-              <p className="text-2xl font-bold text-text-primary">{stat.value}</p>
+              <p className="text-2xl font-medium text-text-primary">{stat.value}</p>
               <p className="text-xs text-text-muted">{stat.label}</p>
             </div>
           </Card>
@@ -100,11 +100,11 @@ export default function Dashboard({ onNavigate }: DashboardProps = {}) {
       <Card className="p-5">
         <div className="flex items-center gap-2 mb-4">
           <Compass className="w-5 h-5 text-primary" />
-          <h3 className="text-sm font-semibold text-text-primary">职业状态</h3>
+          <h3 className="text-sm font-medium text-text-primary">职业状态</h3>
           <span className="text-xs text-text-muted">AI 长期记忆 · 自动沉淀于每次匹配与投递</span>
           <div className="flex-1" />
           {career && (
-            <span className="px-2.5 py-1 rounded-lg text-xs font-semibold"
+            <span className="px-2.5 py-1 rounded-lg text-xs font-medium"
               style={{ color: STATUS_LABELS[career.status].color, background: STATUS_LABELS[career.status].bg }}>
               {STATUS_LABELS[career.status].label}
             </span>
@@ -118,7 +118,7 @@ export default function Dashboard({ onNavigate }: DashboardProps = {}) {
             {/* 画像 */}
             <div>
               <p className="text-xs text-text-muted mb-2">画像快照</p>
-              {career?.currentRole && <p className="text-sm font-semibold text-text-primary">{career.currentRole}</p>}
+              {career?.currentRole && <p className="text-sm font-medium text-text-primary">{career.currentRole}</p>}
               <p className="text-xs text-text-muted mt-0.5">
                 {[career?.yearsOfExperience ? `${career.yearsOfExperience} 年经验` : '', career?.education || '', career?.targetDirection || ''].filter(Boolean).join(' · ') || '待完善'}
               </p>
@@ -167,16 +167,16 @@ export default function Dashboard({ onNavigate }: DashboardProps = {}) {
             <div>
               <p className="text-xs text-text-muted mb-2">最近匹配</p>
               {career?.lastMatch ? (
-                <div className="rounded-xl bg-surface-darkest p-3 border border-black/5">
+                <div className="rounded-xl bg-surface-darkest p-3 border border-surface-hairline">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-semibold text-text-primary truncate">{career.lastMatch.jobTitle}</span>
-                    <span className="text-sm font-bold" style={{ color: career.lastMatch.overallScore >= 70 ? '#10B981' : career.lastMatch.overallScore >= 50 ? '#F59E0B' : '#EF4444' }}>
+                    <span className="text-sm font-medium text-text-primary truncate">{career.lastMatch.jobTitle}</span>
+                    <span className="text-sm font-medium" style={{ color: career.lastMatch.overallScore >= 70 ? '#10B981' : career.lastMatch.overallScore >= 50 ? '#F59E0B' : '#EF4444' }}>
                       {Math.round(career.lastMatch.overallScore)}分
                     </span>
                   </div>
                   <p className="text-xs text-text-muted truncate mt-0.5">{career.lastMatch.jobCompany}</p>
                   <p className="text-xs text-text-secondary mt-1.5 leading-relaxed">{career.lastMatch.recommendation}</p>
-                  <p className="text-[10px] text-text-muted mt-1.5">{formatRelativeTime(career.lastMatch.matchedAt)}</p>
+                  <p className="text-xs text-text-muted mt-1.5">{formatRelativeTime(career.lastMatch.matchedAt)}</p>
                 </div>
               ) : <p className="text-xs text-text-muted">暂无匹配记录</p>}
             </div>
@@ -194,14 +194,14 @@ export default function Dashboard({ onNavigate }: DashboardProps = {}) {
       <div className="grid grid-cols-2 gap-4">
         {/* Status Distribution */}
         <Card className="p-5">
-          <h3 className="text-sm font-semibold text-text-primary mb-4">状态分布</h3>
+          <h3 className="text-sm font-medium text-text-primary mb-4">状态分布</h3>
           <div className="space-y-3">
             {(Object.entries(APPLICATION_STATUS_LABELS) as [Application['status'], string][]).map(([status, label]) => (
               <div key={status} className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Badge variant={getStatusVariant(status)}>{label}</Badge>
                 </div>
-                <span className="text-sm font-semibold text-text-primary">{statusDist[status] || 0}</span>
+                <span className="text-sm font-medium text-text-primary">{statusDist[status] || 0}</span>
               </div>
             ))}
           </div>
@@ -209,7 +209,7 @@ export default function Dashboard({ onNavigate }: DashboardProps = {}) {
 
         {/* Recent Activity */}
         <Card className="p-5">
-          <h3 className="text-sm font-semibold text-text-primary mb-4">最近动态</h3>
+          <h3 className="text-sm font-medium text-text-primary mb-4">最近动态</h3>
           <div className="space-y-3">
             {recentApps.slice(0, 8).map((app) => (
               <div key={app.id} className="flex items-center justify-between">
@@ -218,7 +218,7 @@ export default function Dashboard({ onNavigate }: DashboardProps = {}) {
                   <p className="text-xs text-text-muted">{app.companyName}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-text-muted">{formatRelativeTime(app.appliedAt)}</span>
+                  <span className="text-xs text-text-muted">{formatRelativeTime(app.appliedAt)}</span>
                   <Badge variant={getStatusVariant(app.status)}>
                     {APPLICATION_STATUS_LABELS[app.status]}
                   </Badge>

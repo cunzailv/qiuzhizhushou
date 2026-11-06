@@ -180,7 +180,7 @@ export default function Resumes() {
       await setSharedResumeSummary(resume)
       log(MOD, 'upload', `Synced to chrome.storage.local: ${resume.name}`)
 
-      showToast('简历上传成功！', 'success')
+      showToast('简历上传成功', 'success')
       await loadResumes()
       setSelectedResume(resume)
 
@@ -192,7 +192,7 @@ export default function Resumes() {
           const { updateResume } = await import('../../shared/db/resume-store')
           await updateResume(resume.id, { aiAnalysis: analysis })
           await loadResumes()
-          showToast('简历解析并 AI 分析完成！', 'success')
+          showToast('简历解析并 AI 分析完成', 'success')
           log(MOD, 'upload', `AI analysis complete: score=${analysis.overallScore}`)
         }
       } catch {
@@ -405,7 +405,7 @@ export default function Resumes() {
         result,
       })
       await loadHistory()
-      showToast('分析完成！', 'success')
+      showToast('分析完成', 'success')
     } catch (err: any) {
       if (err?.name === 'AbortError') {
         setStreamText(prev => prev + '\n\n[已取消]')
@@ -435,8 +435,8 @@ export default function Resumes() {
     <div className="p-4 space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold gradient-text">简历管理</h2>
-          <a href="#candidate-preferences" className="text-[10px] text-primary-light hover:underline">
+          <h2 className="text-lg font-medium gradient-text">简历管理</h2>
+          <a href="#candidate-preferences" className="text-xs text-primary-light hover:underline">
             求职画像 · 底线 · 自主授权 → 本页下方配置
           </a>
         </div>
@@ -448,7 +448,7 @@ export default function Resumes() {
           className="hidden"
           id="resume-upload"
         />
-        <label htmlFor="resume-upload" className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl bg-gradient-to-r from-primary to-primary-light text-white hover:shadow-glow active:scale-95 transition-all duration-200 cursor-pointer">
+        <label htmlFor="resume-upload" className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-xl bg-text-primary text-white hover:shadow-card transition-colors duration-200 cursor-pointer">
           <Upload className="w-3.5 h-3.5" />
           上传简历
         </label>
@@ -458,7 +458,7 @@ export default function Resumes() {
         <Card className="py-8 text-center">
           <FileText className="w-10 h-10 mx-auto text-text-muted mb-3" />
           <p className="text-sm text-text-muted mb-4">还没有简历，上传你的第一份简历吧</p>
-          <label htmlFor="resume-upload" className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-xl bg-gradient-to-r from-primary to-primary-light text-white hover:shadow-glow active:scale-95 transition-all duration-200 cursor-pointer">
+          <label htmlFor="resume-upload" className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-xl bg-text-primary text-white hover:shadow-card transition-colors duration-200 cursor-pointer">
             上传 PDF / Word 简历
           </label>
         </Card>
@@ -467,11 +467,11 @@ export default function Resumes() {
           {resumes.map((resume) => (
             <Card
               key={resume.id}
-              className="flex items-start gap-3 p-3 cursor-pointer hover:bg-black/5"
+              className="flex items-start gap-3 p-3 cursor-pointer hover:bg-surface-dark"
               onClick={() => setSelectedResume(resume)}
             >
               <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
-                resume.isDefault ? 'bg-primary/20' : 'bg-surface-light'
+                resume.isDefault ? 'bg-surface-dark' : 'bg-surface-light'
               }`}>
                 <FileText className={`w-5 h-5 ${resume.isDefault ? 'text-primary-light' : 'text-text-muted'}`} />
               </div>
@@ -482,7 +482,7 @@ export default function Resumes() {
                     <Star className="w-3 h-3 text-warning" />
                   )}
                 </div>
-                <p className="text-[10px] text-text-muted mt-0.5">
+                <p className="text-xs text-text-muted mt-0.5">
                   {resume.structuredData.skills.length}个技能 · {formatDate(resume.createdAt)}
                 </p>
                 {resume.aiAnalysis && (
@@ -492,7 +492,7 @@ export default function Resumes() {
                       color={getScoreColor(resume.aiAnalysis.overallScore)}
                       className="flex-1"
                     />
-                    <span className="text-xs font-bold" style={{ color: getScoreColor(resume.aiAnalysis.overallScore) }}>
+                    <span className="text-xs font-medium" style={{ color: getScoreColor(resume.aiAnalysis.overallScore) }}>
                       {resume.aiAnalysis.overallScore}分
                     </span>
                   </div>
@@ -522,12 +522,12 @@ export default function Resumes() {
       )}
 
       {/* ====== 岗位匹配分析 ====== */}
-      <div className="border-t border-black/10 pt-4 space-y-3">
-        <h2 className="text-lg font-bold gradient-text flex items-center gap-2">
+      <div className="border-t border-surface-hairline pt-4 space-y-3">
+        <h2 className="text-lg font-medium gradient-text flex items-center gap-2">
           <Search className="w-4 h-4" />
           岗位匹配分析
         </h2>
-        <p className="text-[11px] text-text-muted">
+        <p className="text-xs text-text-muted">
           填写职位描述，选择简历，AI 将分析匹配度并给出改进建议
         </p>
 
@@ -537,7 +537,7 @@ export default function Resumes() {
             <select
               value={matchResumeId}
               onChange={(e) => setMatchResumeId(e.target.value)}
-              className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary appearance-none cursor-pointer focus:outline-none focus:border-primary/30"
+              className="w-full rounded-xl bg-surface-dark border border-surface-hairline px-3 py-2 text-sm text-text-primary appearance-none cursor-pointer focus:outline-none focus:border-surface-hairline"
             >
               <option value="">选择要匹配的简历...</option>
               {resumes.map(r => (
@@ -558,7 +558,7 @@ export default function Resumes() {
           value={jdText}
           onChange={(e) => setJdText(e.target.value)}
           rows={5}
-          className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-primary/30"
+          className="w-full rounded-xl bg-surface-dark border border-surface-hairline px-3 py-2 text-sm text-text-primary placeholder:text-text-muted resize-none focus:outline-none focus:border-surface-hairline"
         />
 
         {/* Buttons */}
@@ -596,7 +596,7 @@ export default function Resumes() {
           <Card className="p-3 max-h-[250px] overflow-y-auto">
             <p className="text-xs text-text-secondary whitespace-pre-wrap leading-relaxed">
               {streamText}
-              <span className="inline-block w-1.5 h-4 bg-primary-light animate-pulse ml-0.5 align-middle" />
+              <span className="inline-block w-1.5 h-4 bg-primary-light ml-0.5 align-middle" />
             </p>
             <div ref={streamEndRef} />
           </Card>
@@ -607,8 +607,8 @@ export default function Resumes() {
           <Card className="p-4 space-y-4">
             {/* Score */}
             <div className="flex items-center justify-between">
-              <span className="text-sm font-semibold text-text-primary">匹配评分</span>
-              <span className="text-2xl font-bold" style={{ color: getScoreColor(matchResult.overallScore) }}>
+              <span className="text-sm font-medium text-text-primary">匹配评分</span>
+              <span className="text-2xl font-medium" style={{ color: getScoreColor(matchResult.overallScore) }}>
                 {matchResult.overallScore}
                 <span className="text-sm font-normal text-text-muted ml-1">分</span>
               </span>
@@ -625,7 +625,7 @@ export default function Resumes() {
             {/* Skill Match */}
             {matchResult.skillMatch.length > 0 && (
               <div>
-                <p className="text-xs font-semibold text-success mb-1.5 flex items-center gap-1">
+                <p className="text-xs font-medium text-success mb-1.5 flex items-center gap-1">
                   <CheckCircle className="w-3 h-3" /> 匹配技能
                 </p>
                 <div className="flex flex-wrap gap-1">
@@ -639,7 +639,7 @@ export default function Resumes() {
             {/* Skill Gap */}
             {matchResult.skillGap.length > 0 && (
               <div>
-                <p className="text-xs font-semibold text-warning mb-1.5 flex items-center gap-1">
+                <p className="text-xs font-medium text-warning mb-1.5 flex items-center gap-1">
                   <AlertCircle className="w-3 h-3" /> 技能差距
                 </p>
                 <div className="flex flex-wrap gap-1">
@@ -653,7 +653,7 @@ export default function Resumes() {
             {/* Strengths */}
             {matchResult.strengths.length > 0 && (
               <div>
-                <p className="text-xs font-semibold text-success mb-1.5">优势</p>
+                <p className="text-xs font-medium text-success mb-1.5">优势</p>
                 {matchResult.strengths.map((s, i) => (
                   <p key={i} className="text-xs text-text-secondary flex items-start gap-1 mb-0.5">
                     <CheckCircle className="w-3 h-3 text-success mt-0.5 shrink-0" /> {s}
@@ -665,7 +665,7 @@ export default function Resumes() {
             {/* Weaknesses */}
             {matchResult.weaknesses.length > 0 && (
               <div>
-                <p className="text-xs font-semibold text-danger mb-1.5">劣势</p>
+                <p className="text-xs font-medium text-danger mb-1.5">劣势</p>
                 {matchResult.weaknesses.map((s, i) => (
                   <p key={i} className="text-xs text-text-secondary flex items-start gap-1 mb-0.5">
                     <AlertCircle className="w-3 h-3 text-danger mt-0.5 shrink-0" /> {s}
@@ -677,10 +677,10 @@ export default function Resumes() {
             {/* Improvement suggestions */}
             {matchResult.improvementSuggestions.length > 0 && (
               <div>
-                <p className="text-xs font-semibold text-primary-light mb-1.5">改进建议</p>
+                <p className="text-xs font-medium text-primary-light mb-1.5">改进建议</p>
                 {matchResult.improvementSuggestions.map((s, i) => (
                   <p key={i} className="text-xs text-text-secondary flex items-start gap-1 mb-0.5">
-                    <span className="w-4 h-4 rounded-full bg-primary/10 text-primary-light flex items-center justify-center text-[10px] shrink-0 mt-0.5">{i + 1}</span>
+                    <span className="w-4 h-4 rounded-full bg-surface-dark text-primary-light flex items-center justify-center text-xs shrink-0 mt-0.5">{i + 1}</span>
                     {s}
                   </p>
                 ))}
@@ -692,8 +692,8 @@ export default function Resumes() {
 
       {/* ====== 分析历史 ====== */}
       {history.length > 0 && (
-        <div className="border-t border-black/10 pt-4 space-y-2">
-          <h2 className="text-sm font-bold gradient-text flex items-center gap-2">
+        <div className="border-t border-surface-hairline pt-4 space-y-2">
+          <h2 className="text-sm font-medium gradient-text flex items-center gap-2">
             <Clock className="w-3.5 h-3.5" />
             分析历史
           </h2>
@@ -707,7 +707,7 @@ export default function Resumes() {
                   </span>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-xs font-bold" style={{ color: getScoreColor(record.result.overallScore) }}>
+                  <span className="text-xs font-medium" style={{ color: getScoreColor(record.result.overallScore) }}>
                     {record.result.overallScore}分
                   </span>
                   <button
@@ -719,17 +719,17 @@ export default function Resumes() {
                   </button>
                 </div>
               </div>
-              <div className="flex items-center gap-2 text-[10px] text-text-muted">
+              <div className="flex items-center gap-2 text-xs text-text-muted">
                 <span>{record.resumeName}</span>
                 <span>·</span>
                 <span>{formatDate(record.createdAt)}</span>
               </div>
               {/* 点击展开详情 */}
               <details className="group">
-                <summary className="text-[10px] text-primary-light cursor-pointer hover:text-primary-lighter">
+                <summary className="text-xs text-primary-light cursor-pointer hover:text-primary-lighter">
                   查看详情
                 </summary>
-                <div className="mt-2 space-y-2 text-[10px]">
+                <div className="mt-2 space-y-2 text-xs">
                   <p className="text-text-secondary line-clamp-3 whitespace-pre-wrap">
                     {record.jobDescription.slice(0, 300)}
                   </p>
@@ -765,7 +765,7 @@ export default function Resumes() {
           <div className="space-y-4">
             {/* 操作栏：查看/编辑切换 */}
             <div className="flex items-center justify-between">
-              <span className="text-[11px] text-text-muted">
+              <span className="text-xs text-text-muted">
                 {editing ? '编辑模式：修改后点击「保存修改」，评分将立即使用新数据' : '查看模式'}
               </span>
               {!editing ? (
@@ -792,45 +792,45 @@ export default function Resumes() {
               <div className="space-y-4">
                 {/* 基本信息 */}
                 <div>
-                  <p className="text-xs font-semibold text-text-secondary mb-2">基本信息</p>
+                  <p className="text-xs font-medium text-text-secondary mb-2">基本信息</p>
                   <div className="grid grid-cols-2 gap-2">
                     <label className="block">
-                      <span className="text-[10px] text-text-muted">姓名</span>
+                      <span className="text-xs text-text-muted">姓名</span>
                       <input
-                        className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                        className="w-full rounded-xl bg-surface-dark border border-surface-hairline px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-surface-hairline"
                         value={editForm.name}
                         onChange={(e) => updateEditField('name', e.target.value)}
                       />
                     </label>
                     <label className="block">
-                      <span className="text-[10px] text-text-muted">工作年限（年）</span>
+                      <span className="text-xs text-text-muted">工作年限（年）</span>
                       <input
                         type="number" min="0" step="0.5"
-                        className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                        className="w-full rounded-xl bg-surface-dark border border-surface-hairline px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-surface-hairline"
                         value={editForm.yearsOfExperience || 0}
                         onChange={(e) => updateEditField('yearsOfExperience', Math.max(0, Number(e.target.value) || 0))}
                       />
                     </label>
                     <label className="block">
-                      <span className="text-[10px] text-text-muted">电话</span>
+                      <span className="text-xs text-text-muted">电话</span>
                       <input
-                        className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                        className="w-full rounded-xl bg-surface-dark border border-surface-hairline px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-surface-hairline"
                         value={editForm.phone}
                         onChange={(e) => updateEditField('phone', e.target.value)}
                       />
                     </label>
                     <label className="block">
-                      <span className="text-[10px] text-text-muted">邮箱</span>
+                      <span className="text-xs text-text-muted">邮箱</span>
                       <input
-                        className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                        className="w-full rounded-xl bg-surface-dark border border-surface-hairline px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-surface-hairline"
                         value={editForm.email}
                         onChange={(e) => updateEditField('email', e.target.value)}
                       />
                     </label>
                     <label className="block col-span-2">
-                      <span className="text-[10px] text-text-muted">城市</span>
+                      <span className="text-xs text-text-muted">城市</span>
                       <input
-                        className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                        className="w-full rounded-xl bg-surface-dark border border-surface-hairline px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-surface-hairline"
                         value={editForm.city}
                         onChange={(e) => updateEditField('city', e.target.value)}
                       />
@@ -840,10 +840,10 @@ export default function Resumes() {
 
                 {/* 技能标签 */}
                 <div>
-                  <p className="text-xs font-semibold text-text-secondary mb-1.5">技能标签（直接参与岗位匹配）</p>
+                  <p className="text-xs font-medium text-text-secondary mb-1.5">技能标签（直接参与岗位匹配）</p>
                   <div className="flex flex-wrap gap-1.5 mb-2">
                     {editForm.skills.map((s) => (
-                      <span key={s} className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg bg-primary/10 text-primary-light">
+                      <span key={s} className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg bg-surface-dark text-primary-light">
                         {s}
                         <button onClick={() => removeSkill(s)} className="text-text-muted hover:text-danger" title="删除技能">
                           <X className="w-3 h-3" />
@@ -856,7 +856,7 @@ export default function Resumes() {
                   </div>
                   <div className="flex gap-2">
                     <input
-                      className="flex-1 rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                      className="flex-1 rounded-xl bg-surface-dark border border-surface-hairline px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-surface-hairline"
                       placeholder="输入技能后回车添加，如：Vue、Java"
                       value={newSkill}
                       onChange={(e) => setNewSkill(e.target.value)}
@@ -872,28 +872,28 @@ export default function Resumes() {
                 {/* 学历 */}
                 {editForm.education.map((edu, i) => (
                   <div key={i}>
-                    <p className="text-xs font-semibold text-text-secondary mb-2">学历 {i + 1}</p>
+                    <p className="text-xs font-medium text-text-secondary mb-2">学历 {i + 1}</p>
                     <div className="grid grid-cols-3 gap-2">
                       <label className="block">
-                        <span className="text-[10px] text-text-muted">学校</span>
+                        <span className="text-xs text-text-muted">学校</span>
                         <input
-                          className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                          className="w-full rounded-xl bg-surface-dark border border-surface-hairline px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-surface-hairline"
                           value={edu.school}
                           onChange={(e) => updateEducation(i, 'school', e.target.value)}
                         />
                       </label>
                       <label className="block">
-                        <span className="text-[10px] text-text-muted">学历</span>
+                        <span className="text-xs text-text-muted">学历</span>
                         <input
-                          className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                          className="w-full rounded-xl bg-surface-dark border border-surface-hairline px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-surface-hairline"
                           value={edu.degree}
                           onChange={(e) => updateEducation(i, 'degree', e.target.value)}
                         />
                       </label>
                       <label className="block">
-                        <span className="text-[10px] text-text-muted">专业</span>
+                        <span className="text-xs text-text-muted">专业</span>
                         <input
-                          className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                          className="w-full rounded-xl bg-surface-dark border border-surface-hairline px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-surface-hairline"
                           value={edu.major}
                           onChange={(e) => updateEducation(i, 'major', e.target.value)}
                         />
@@ -905,30 +905,30 @@ export default function Resumes() {
                 {/* 工作经历 */}
                 {editForm.workExperience.map((work, i) => (
                   <div key={i}>
-                    <p className="text-xs font-semibold text-text-secondary mb-2">工作经历 {i + 1}</p>
+                    <p className="text-xs font-medium text-text-secondary mb-2">工作经历 {i + 1}</p>
                     <div className="grid grid-cols-2 gap-2">
                       <label className="block">
-                        <span className="text-[10px] text-text-muted">公司</span>
+                        <span className="text-xs text-text-muted">公司</span>
                         <input
-                          className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                          className="w-full rounded-xl bg-surface-dark border border-surface-hairline px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-surface-hairline"
                           value={work.company}
                           onChange={(e) => updateWork(i, 'company', e.target.value)}
                         />
                       </label>
                       <label className="block">
-                        <span className="text-[10px] text-text-muted">职位</span>
+                        <span className="text-xs text-text-muted">职位</span>
                         <input
-                          className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30"
+                          className="w-full rounded-xl bg-surface-dark border border-surface-hairline px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-surface-hairline"
                           value={work.position}
                           onChange={(e) => updateWork(i, 'position', e.target.value)}
                         />
                       </label>
                     </div>
                     <label className="block mt-2">
-                      <span className="text-[10px] text-text-muted">工作内容 / 职责</span>
+                      <span className="text-xs text-text-muted">工作内容 / 职责</span>
                       <textarea
                         rows={2}
-                        className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30 resize-none"
+                        className="w-full rounded-xl bg-surface-dark border border-surface-hairline px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-surface-hairline resize-none"
                         value={work.description}
                         onChange={(e) => updateWork(i, 'description', e.target.value)}
                       />
@@ -938,10 +938,10 @@ export default function Resumes() {
 
                 {/* 个人简介 */}
                 <label className="block">
-                  <span className="text-[10px] text-text-muted">个人简介 / Summary</span>
+                  <span className="text-xs text-text-muted">个人简介 / Summary</span>
                   <textarea
                     rows={2}
-                    className="w-full rounded-xl bg-surface-dark border border-black/10 px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-primary/30 resize-none"
+                    className="w-full rounded-xl bg-surface-dark border border-surface-hairline px-3 py-2 text-sm text-text-primary focus:outline-none focus:border-surface-hairline resize-none"
                     value={editForm.summary}
                     onChange={(e) => updateEditField('summary', e.target.value)}
                   />
@@ -953,26 +953,26 @@ export default function Resumes() {
                 {/* Basic info */}
                 <div className="grid grid-cols-2 gap-2">
                   {selectedResume.structuredData.name && (
-                    <div className="glass-card p-2">
-                      <p className="text-[10px] text-text-muted">姓名</p>
+                    <div className="surface-card p-2">
+                      <p className="text-xs text-text-muted">姓名</p>
                       <p className="text-sm font-medium">{selectedResume.structuredData.name}</p>
                     </div>
                   )}
                   {selectedResume.structuredData.email && (
-                    <div className="glass-card p-2">
-                      <p className="text-[10px] text-text-muted">邮箱</p>
+                    <div className="surface-card p-2">
+                      <p className="text-xs text-text-muted">邮箱</p>
                       <p className="text-xs truncate">{selectedResume.structuredData.email}</p>
                     </div>
                   )}
                   {selectedResume.structuredData.phone && (
-                    <div className="glass-card p-2">
-                      <p className="text-[10px] text-text-muted">电话</p>
+                    <div className="surface-card p-2">
+                      <p className="text-xs text-text-muted">电话</p>
                       <p className="text-sm font-medium">{selectedResume.structuredData.phone}</p>
                     </div>
                   )}
                   {selectedResume.structuredData.city && (
-                    <div className="glass-card p-2">
-                      <p className="text-[10px] text-text-muted">城市</p>
+                    <div className="surface-card p-2">
+                      <p className="text-xs text-text-muted">城市</p>
                       <p className="text-sm font-medium">{selectedResume.structuredData.city}</p>
                     </div>
                   )}
@@ -981,7 +981,7 @@ export default function Resumes() {
                 {/* Skills */}
                 {selectedResume.structuredData.skills.length > 0 && (
                   <div>
-                    <p className="text-xs font-semibold text-text-secondary mb-1.5 flex items-center gap-1">
+                    <p className="text-xs font-medium text-text-secondary mb-1.5 flex items-center gap-1">
                       <Code className="w-3 h-3" /> 技能标签
                     </p>
                     <div className="flex flex-wrap gap-1">
@@ -1001,14 +1001,14 @@ export default function Resumes() {
                         color={getScoreColor(selectedResume.aiAnalysis.overallScore)}
                         className="flex-1"
                       />
-                      <span className="text-lg font-bold" style={{ color: getScoreColor(selectedResume.aiAnalysis.overallScore) }}>
+                      <span className="text-lg font-medium" style={{ color: getScoreColor(selectedResume.aiAnalysis.overallScore) }}>
                         {selectedResume.aiAnalysis.overallScore}
                       </span>
                     </div>
 
                     {selectedResume.aiAnalysis.strengths.length > 0 && (
                       <div>
-                        <p className="text-xs font-semibold text-success mb-1">优势</p>
+                        <p className="text-xs font-medium text-success mb-1">优势</p>
                         {selectedResume.aiAnalysis.strengths.map((s, i) => (
                           <p key={i} className="text-xs text-text-secondary flex items-start gap-1">
                             <CheckCircle className="w-3 h-3 text-success mt-0.5 shrink-0" /> {s}
@@ -1019,7 +1019,7 @@ export default function Resumes() {
 
                     {selectedResume.aiAnalysis.weaknesses.length > 0 && (
                       <div>
-                        <p className="text-xs font-semibold text-danger mb-1">不足</p>
+                        <p className="text-xs font-medium text-danger mb-1">不足</p>
                         {selectedResume.aiAnalysis.weaknesses.map((s, i) => (
                           <p key={i} className="text-xs text-text-secondary flex items-start gap-1">
                             <AlertCircle className="w-3 h-3 text-danger mt-0.5 shrink-0" /> {s}
@@ -1043,7 +1043,7 @@ export default function Resumes() {
         )}
       </Dialog>
 
-      <div id="candidate-preferences" className="pt-2 border-t border-black/5">
+      <div id="candidate-preferences" className="pt-2 border-t border-surface-hairline">
         <CandidatePreferencesCard onNotify={showToast} />
       </div>
 

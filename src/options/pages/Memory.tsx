@@ -115,20 +115,20 @@ export default function Memory() {
   return (
     <div className="max-w-5xl space-y-6">
       <div>
-        <h2 className="text-2xl font-bold text-text-primary">记忆中心</h2>
+        <h2 className="text-2xl font-medium text-text-primary">记忆中心</h2>
         <p className="text-sm text-text-muted mt-1">AI 记住了你什么：职业画像 · 公司记忆 · 决策留痕 · 跟进建议 · 匹配分析</p>
       </div>
 
       {/* 总览 */}
       <div className="grid grid-cols-5 gap-3">
         {summary.map((s) => (
-          <div key={s.label} className="rounded-2xl border border-black/10 bg-surface-darkest p-4">
+          <div key={s.label} className="rounded-2xl border border-surface-hairline bg-surface-darkest p-4">
             <div className="flex items-center gap-2 text-text-muted">
               {s.icon}
               <span className="text-xs">{s.label}</span>
             </div>
-            <div className="mt-2 text-2xl font-bold text-text-primary">{s.count}</div>
-            <div className="text-[10px] text-text-muted mt-1">最近写入 {s.updated}</div>
+            <div className="mt-2 text-2xl font-medium text-text-primary">{s.count}</div>
+            <div className="text-xs text-text-muted mt-1">最近写入 {s.updated}</div>
           </div>
         ))}
       </div>
@@ -141,7 +141,7 @@ export default function Memory() {
             }, null, 2))
             showToast('已导出记忆总览 JSON')
           }}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-orange-400 to-orange-500 text-white text-sm font-medium hover:opacity-90 transition-opacity"
+          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-accent text-white text-sm font-medium hover:opacity-90 transition-opacity"
         >
           <Download className="w-4 h-4" />
           导出记忆总览
@@ -153,11 +153,11 @@ export default function Memory() {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Building2 className="w-5 h-5 text-primary-light" />
-            <span className="font-semibold text-text-primary">公司记忆（{companies.length}）</span>
+            <span className="font-medium text-text-primary">公司记忆（{companies.length}）</span>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => exportCsv('companies', companies)} className="px-2.5 py-1 rounded-lg bg-black/5 text-text-muted text-xs hover:text-text-primary transition-colors">导出 CSV</button>
-            <button onClick={() => handleClear('companies')} className="px-2.5 py-1 rounded-lg bg-black/5 text-text-muted text-xs hover:text-red-400 transition-colors">清空</button>
+            <button onClick={() => exportCsv('companies', companies)} className="px-2.5 py-1 rounded-lg bg-surface-dark text-text-muted text-xs hover:text-text-primary transition-colors">导出 CSV</button>
+            <button onClick={() => handleClear('companies')} className="px-2.5 py-1 rounded-lg bg-surface-dark text-text-muted text-xs hover:text-red-400 transition-colors">清空</button>
           </div>
         </div>
         {companies.length === 0 ? (
@@ -165,7 +165,7 @@ export default function Memory() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead><tr className="text-left text-xs text-text-muted border-b border-black/10">
+              <thead><tr className="text-left text-xs text-text-muted border-b border-surface-hairline">
                 <th className="py-2 px-2 font-medium">公司</th><th className="py-2 px-2 font-medium">岗位</th>
                 <th className="py-2 px-2 font-medium text-right">接触</th><th className="py-2 px-2 font-medium text-right">回复</th>
                 <th className="py-2 px-2 font-medium">最近结果</th><th className="py-2 px-2 font-medium">更新时间</th>
@@ -173,7 +173,7 @@ export default function Memory() {
               </tr></thead>
               <tbody>
                 {companies.map((c) => (
-                  <tr key={c.id} className="border-b border-black/5 text-text-primary">
+                  <tr key={c.id} className="border-b border-surface-hairline text-text-primary">
                     <td className="py-2 px-2 font-medium">{c.companyName}</td>
                     <td className="py-2 px-2 text-xs text-text-muted">{c.jobTitle || '-'}</td>
                     <td className="py-2 px-2 text-right">{c.touchCount}</td>
@@ -182,7 +182,7 @@ export default function Memory() {
                     <td className="py-2 px-2 text-xs text-text-muted">{formatTime(c.updatedAt)}</td>
                     <td className="py-2 px-2 text-right">
                       <button onClick={async () => { await deleteCompanyMemory(c.id); await loadAll(); showToast('已删除', 'info') }}
-                        className="p-1.5 rounded-lg hover:bg-red-500/10 text-text-muted hover:text-red-400 transition-colors" title="删除">
+                        className="p-1.5 rounded-lg hover:bg-danger/10 text-text-muted hover:text-red-400 transition-colors" title="删除">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </td>
@@ -199,11 +199,11 @@ export default function Memory() {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <GitBranch className="w-5 h-5 text-primary-light" />
-            <span className="font-semibold text-text-primary">决策留痕（{decisions.length}）</span>
+            <span className="font-medium text-text-primary">决策留痕（{decisions.length}）</span>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => exportJson('decisions', decisions)} className="px-2.5 py-1 rounded-lg bg-black/5 text-text-muted text-xs hover:text-text-primary transition-colors">导出 JSON</button>
-            <button onClick={() => handleClear('decisions')} className="px-2.5 py-1 rounded-lg bg-black/5 text-text-muted text-xs hover:text-red-400 transition-colors">清空</button>
+            <button onClick={() => exportJson('decisions', decisions)} className="px-2.5 py-1 rounded-lg bg-surface-dark text-text-muted text-xs hover:text-text-primary transition-colors">导出 JSON</button>
+            <button onClick={() => handleClear('decisions')} className="px-2.5 py-1 rounded-lg bg-surface-dark text-text-muted text-xs hover:text-red-400 transition-colors">清空</button>
           </div>
         </div>
         {decisions.length === 0 ? (
@@ -211,13 +211,13 @@ export default function Memory() {
         ) : (
           <div className="space-y-2 max-h-[320px] overflow-y-auto">
             {decisions.slice(0, 50).map((d) => (
-              <div key={d.id} className="rounded-xl border border-black/10 bg-surface-darkest p-3">
+              <div key={d.id} className="rounded-xl border border-surface-hairline bg-surface-darkest p-3">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-text-primary">[{d.source}] {d.subject}</span>
-                  <span className="text-[11px] text-text-muted">{formatTime(d.createdAt)}</span>
+                  <span className="text-xs text-text-muted">{formatTime(d.createdAt)}</span>
                 </div>
                 <p className="text-xs text-text-muted mt-1.5 line-clamp-2">{d.thinking}</p>
-                <p className="text-[11px] text-text-muted/70 mt-0.5 line-clamp-1">{d.decision}</p>
+                <p className="text-xs text-text-muted/70 mt-0.5 line-clamp-1">{d.decision}</p>
               </div>
             ))}
           </div>
@@ -229,11 +229,11 @@ export default function Memory() {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <BellRing className="w-5 h-5 text-primary-light" />
-            <span className="font-semibold text-text-primary">跟进建议（{followUps.length}）</span>
+            <span className="font-medium text-text-primary">跟进建议（{followUps.length}）</span>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => exportJson('followups', followUps)} className="px-2.5 py-1 rounded-lg bg-black/5 text-text-muted text-xs hover:text-text-primary transition-colors">导出 JSON</button>
-            <button onClick={() => handleClear('followUps')} className="px-2.5 py-1 rounded-lg bg-black/5 text-text-muted text-xs hover:text-red-400 transition-colors">清空</button>
+            <button onClick={() => exportJson('followups', followUps)} className="px-2.5 py-1 rounded-lg bg-surface-dark text-text-muted text-xs hover:text-text-primary transition-colors">导出 JSON</button>
+            <button onClick={() => handleClear('followUps')} className="px-2.5 py-1 rounded-lg bg-surface-dark text-text-muted text-xs hover:text-red-400 transition-colors">清空</button>
           </div>
         </div>
         {followUps.length === 0 ? (
@@ -241,15 +241,15 @@ export default function Memory() {
         ) : (
           <div className="space-y-2 max-h-[320px] overflow-y-auto">
             {followUps.slice(0, 50).map((f) => (
-              <div key={f.id} className="rounded-xl border border-black/10 bg-surface-darkest p-3">
+              <div key={f.id} className="rounded-xl border border-surface-hairline bg-surface-darkest p-3">
                 <div className="flex items-center justify-between">
                   <span className="text-sm font-medium text-text-primary">{f.companyName} · {f.jobTitle}</span>
-                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-medium ${f.dismissed ? 'bg-warning/10 text-warning' : 'bg-success/10 text-success'}`}>
+                  <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${f.dismissed ? 'bg-warning/10 text-warning' : 'bg-success/10 text-success'}`}>
                     {f.dismissed ? '已处理' : '待跟进'}
                   </span>
                 </div>
                 <p className="text-xs text-text-muted mt-1.5 line-clamp-2">{f.draftMessage}</p>
-                <p className="text-[11px] text-text-muted/70 mt-0.5">投递 {f.daysSince} 天 · {formatTime(f.createdAt)}</p>
+                <p className="text-xs text-text-muted/70 mt-0.5">投递 {f.daysSince} 天 · {formatTime(f.createdAt)}</p>
               </div>
             ))}
           </div>
@@ -261,11 +261,11 @@ export default function Memory() {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Target className="w-5 h-5 text-primary-light" />
-            <span className="font-semibold text-text-primary">匹配分析（{analyses.length}）</span>
+            <span className="font-medium text-text-primary">匹配分析（{analyses.length}）</span>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => exportCsv('analyses', analyses.map((a) => ({ jobTitle: a.jobTitle, score: a.result.overallScore, recommendation: a.result.recommendation, createdAt: a.createdAt })))} className="px-2.5 py-1 rounded-lg bg-black/5 text-text-muted text-xs hover:text-text-primary transition-colors">导出 CSV</button>
-            <button onClick={() => handleClear('analyses')} className="px-2.5 py-1 rounded-lg bg-black/5 text-text-muted text-xs hover:text-red-400 transition-colors">清空</button>
+            <button onClick={() => exportCsv('analyses', analyses.map((a) => ({ jobTitle: a.jobTitle, score: a.result.overallScore, recommendation: a.result.recommendation, createdAt: a.createdAt })))} className="px-2.5 py-1 rounded-lg bg-surface-dark text-text-muted text-xs hover:text-text-primary transition-colors">导出 CSV</button>
+            <button onClick={() => handleClear('analyses')} className="px-2.5 py-1 rounded-lg bg-surface-dark text-text-muted text-xs hover:text-red-400 transition-colors">清空</button>
           </div>
         </div>
         {analyses.length === 0 ? (
@@ -273,17 +273,17 @@ export default function Memory() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead><tr className="text-left text-xs text-text-muted border-b border-black/10">
+              <thead><tr className="text-left text-xs text-text-muted border-b border-surface-hairline">
                 <th className="py-2 px-2 font-medium">岗位</th><th className="py-2 px-2 font-medium text-right">匹配分</th>
                 <th className="py-2 px-2 font-medium">推荐语</th><th className="py-2 px-2 font-medium">时间</th>
                 <th className="py-2 px-2 font-medium text-right">操作</th>
               </tr></thead>
               <tbody>
                 {analyses.map((a) => (
-                  <tr key={a.id} className="border-b border-black/5 text-text-primary">
+                  <tr key={a.id} className="border-b border-surface-hairline text-text-primary">
                     <td className="py-2 px-2 font-medium">{a.jobTitle || '未命名岗位'}</td>
                     <td className="py-2 px-2 text-right">
-                      <span className={`font-semibold ${a.result.overallScore >= 70 ? 'text-success' : a.result.overallScore >= 50 ? 'text-primary-light' : 'text-warning'}`}>
+                      <span className={`font-medium ${a.result.overallScore >= 70 ? 'text-success' : a.result.overallScore >= 50 ? 'text-primary-light' : 'text-warning'}`}>
                         {a.result.overallScore}
                       </span>
                     </td>
@@ -291,7 +291,7 @@ export default function Memory() {
                     <td className="py-2 px-2 text-xs text-text-muted">{formatTime(a.createdAt)}</td>
                     <td className="py-2 px-2 text-right">
                       <button onClick={async () => { await deleteMatchAnalysis(a.id); await loadAll(); showToast('已删除', 'info') }}
-                        className="p-1.5 rounded-lg hover:bg-red-500/10 text-text-muted hover:text-red-400 transition-colors" title="删除">
+                        className="p-1.5 rounded-lg hover:bg-danger/10 text-text-muted hover:text-red-400 transition-colors" title="删除">
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </td>
@@ -308,10 +308,10 @@ export default function Memory() {
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
             <Brain className="w-5 h-5 text-primary-light" />
-            <span className="font-semibold text-text-primary">职业画像</span>
+            <span className="font-medium text-text-primary">职业画像</span>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => handleClear('career')} className="px-2.5 py-1 rounded-lg bg-black/5 text-text-muted text-xs hover:text-red-400 transition-colors">清除画像</button>
+            <button onClick={() => handleClear('career')} className="px-2.5 py-1 rounded-lg bg-surface-dark text-text-muted text-xs hover:text-red-400 transition-colors">清除画像</button>
           </div>
         </div>
         <p className="text-sm text-text-muted py-3">职业画像由简历画像与投递/差距报告自动沉淀，展示于仪表盘「职业状态」看板；清除后恢复空画像，下次匹配重新沉淀。</p>

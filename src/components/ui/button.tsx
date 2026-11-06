@@ -15,19 +15,20 @@ export function Button({
   className = '',
   ...props
 }: ButtonProps) {
-  const baseStyles = 'inline-flex items-center justify-center font-medium rounded-xl transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed'
+  // 只过渡颜色；主按钮用中性深色填充，accent 留给选中态与关键数字
+  const baseStyles = 'inline-flex items-center justify-center font-medium rounded-lg transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed'
 
   const variants = {
-    primary: 'bg-gradient-to-r from-brand-orange to-primary-light text-white hover:shadow-glow active:scale-95',
-    secondary: 'bg-surface-light text-text-secondary hover:bg-surface-medium border border-black/10',
-    danger: 'bg-danger/20 text-danger hover:bg-danger/30 border border-danger/30',
-    ghost: 'text-text-secondary hover:bg-black/5 hover:text-text-primary',
+    primary: 'bg-text-primary text-white hover:bg-[#1F2937]',
+    secondary: 'bg-surface-darkest text-text-secondary border border-surface-hairline hover:bg-surface-dark',
+    danger: 'bg-danger/10 text-danger border border-danger/20 hover:bg-danger/15',
+    ghost: 'text-text-secondary hover:bg-surface-dark hover:text-text-primary',
   }
 
   const sizes = {
     sm: 'px-3 py-1.5 text-xs gap-1.5',
     md: 'px-4 py-2 text-sm gap-2',
-    lg: 'px-6 py-3 text-base gap-2.5',
+    lg: 'px-4 py-2.5 text-sm gap-2',
   }
 
   return (

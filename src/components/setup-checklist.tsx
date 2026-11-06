@@ -136,7 +136,7 @@ export function SetupChecklist({ onNavigate }: SetupChecklistProps) {
         className="w-full flex items-center gap-2 text-left"
       >
         <Sparkles className="w-5 h-5 text-primary" />
-        <span className="font-semibold text-text-primary">配置引导</span>
+        <span className="font-medium text-text-primary">配置引导</span>
         <span className="text-xs text-text-muted">
           {doneCount}/{steps.length} 已完成
         </span>
@@ -159,13 +159,13 @@ export function SetupChecklist({ onNavigate }: SetupChecklistProps) {
                   : <Circle className="w-4 h-4 text-text-muted shrink-0 mt-0.5" />}
                 <div className="min-w-0 flex-1">
                   <p className="text-sm text-text-primary leading-tight">{step.title}</p>
-                  <p className="text-[11px] text-text-muted mt-0.5 leading-tight">{step.state.detail}</p>
+                  <p className="text-xs text-text-muted mt-0.5 leading-tight">{step.state.detail}</p>
                 </div>
                 {!step.state.done && onNavigate && (
                   <button
                     type="button"
                     onClick={() => onNavigate(step.navId)}
-                    className="flex items-center gap-0.5 text-[11px] text-primary-light hover:underline shrink-0 mt-0.5"
+                    className="flex items-center gap-0.5 text-xs text-primary-light hover:underline shrink-0 mt-0.5"
                   >
                     去配置<ArrowRight className="w-3 h-3" />
                   </button>
@@ -174,7 +174,7 @@ export function SetupChecklist({ onNavigate }: SetupChecklistProps) {
             ))}
           </div>
 
-          <div className="mt-4 pt-3 border-t border-black/10">
+          <div className="mt-4 pt-3 border-t border-surface-hairline">
             <p className="text-xs font-medium text-text-secondary flex items-center gap-1.5">
               <Info className="w-3.5 h-3.5 text-text-muted" />
               后续可配置（不配也能用）
@@ -185,13 +185,13 @@ export function SetupChecklist({ onNavigate }: SetupChecklistProps) {
                   <span className="w-1 h-1 rounded-full bg-text-muted mt-1.5 shrink-0" />
                   <div className="min-w-0 flex-1">
                     <p className="text-[12px] text-text-secondary leading-tight">{item.label}</p>
-                    <p className="text-[11px] text-text-muted leading-tight mt-0.5">{item.hint}</p>
+                    <p className="text-xs text-text-muted leading-tight mt-0.5">{item.hint}</p>
                   </div>
                   {onNavigate && (
                     <button
                       type="button"
                       onClick={() => onNavigate(item.navId)}
-                      className="text-[11px] text-primary-light hover:underline shrink-0"
+                      className="text-xs text-primary-light hover:underline shrink-0"
                     >
                       去看看
                     </button>
@@ -199,7 +199,7 @@ export function SetupChecklist({ onNavigate }: SetupChecklistProps) {
                 </div>
               ))}
             </div>
-            <p className="text-[10px] text-text-muted mt-2.5 leading-relaxed">
+            <p className="text-xs text-text-muted mt-2.5 leading-relaxed">
               详细说明见项目文档 docs/CONFIG_GUIDE.md（配置项）与 docs/FEATURES.md（功能说明）。
             </p>
           </div>

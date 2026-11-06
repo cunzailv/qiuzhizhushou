@@ -16,7 +16,7 @@ type Notify = (message: string, type: 'success' | 'error' | 'warning' | 'info') 
 
 const RISK_STYLE: Record<ToolRisk, string> = {
   read: 'bg-info/10 text-info border-info/20',
-  write: 'bg-warning/10 text-amber-700 border-warning/20',
+  write: 'bg-warning/10 text-warning border-warning/20',
   dangerous: 'bg-danger/10 text-danger border-danger/20',
 }
 const RISK_LABEL: Record<ToolRisk, string> = { read: '只读', write: '写入', dangerous: '危险·需授权' }
@@ -34,7 +34,7 @@ function Toggle({ checked, onChange, label, hint, danger }: {
       />
       <span>
         <span className={`block text-sm ${danger ? 'text-danger font-medium' : 'text-text-secondary'}`}>{label}</span>
-        {hint && <span className="block text-[11px] text-text-muted mt-0.5 leading-relaxed">{hint}</span>}
+        {hint && <span className="block text-xs text-text-muted mt-0.5 leading-relaxed">{hint}</span>}
       </span>
     </label>
   )
@@ -116,15 +116,15 @@ export function ExternalAiCard({ onNotify }: { onNotify: Notify }) {
   const connected = !!status?.connected && !!config?.enabled
   const stateLabel = !config?.enabled ? '未开启' : connected ? '已连接' : '连接中 / 未配对'
   const stateClass = !config?.enabled
-    ? 'bg-black/5 text-text-muted border-black/10'
-    : connected ? 'bg-success/10 text-success border-success/20' : 'bg-warning/10 text-amber-700 border-warning/20'
+    ? 'bg-surface-dark text-text-muted border-surface-hairline'
+    : connected ? 'bg-success/10 text-success border-success/20' : 'bg-warning/10 text-warning border-warning/20'
 
   return (
     <Card>
       <div className="flex items-center gap-2 mb-1">
         <Bot className="w-5 h-5 text-primary-light" />
-        <span className="font-semibold text-text-primary">外部 AI 接入</span>
-        <span className={`ml-auto text-[11px] px-2 py-0.5 rounded-full border font-medium flex items-center gap-1 ${stateClass}`}>
+        <span className="font-medium text-text-primary">外部 AI 接入</span>
+        <span className={`ml-auto text-xs px-2 py-0.5 rounded-md border font-medium flex items-center gap-1 ${stateClass}`}>
           {connected ? <CircleCheck className="w-3 h-3" /> : busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <CircleX className="w-3 h-3" />}
           {stateLabel}
         </span>
@@ -150,15 +150,15 @@ export function ExternalAiCard({ onNotify }: { onNotify: Notify }) {
               value={urlDraft}
               onChange={(e) => setUrlDraft(e.target.value)}
               onBlur={() => { if (urlDraft.trim() && urlDraft.trim() !== config?.bridgeUrl) void patch({ bridgeUrl: urlDraft.trim() }, '桥接地址已保存') }}
-              className="flex-1 px-3 py-2 rounded-lg bg-surface-darkest border border-black/10 text-sm text-text-primary font-mono focus:border-primary-light focus:outline-none"
+              className="flex-1 px-3 py-2 rounded-lg bg-surface-darkest border border-surface-hairline text-sm text-text-primary font-mono focus:border-primary-light focus:outline-none"
               placeholder={DEFAULT_BRIDGE_URL}
             />
             <Button variant="secondary" size="sm" onClick={() => void handleTest()}>测试</Button>
           </div>
-          {health && <p className="text-[11px] text-text-muted mt-1.5 font-mono break-all">{health}</p>}
+          {health && <p className="text-xs text-text-muted mt-1.5 font-mono break-all">{health}</p>}
         </div>
 
-        <div className="rounded-xl border border-black/10 bg-black/[0.02] p-3 space-y-1">
+        <div className="rounded-xl border border-surface-hairline bg-black/[0.02] p-3 space-y-1">
           <Toggle
             checked={config?.allowWrite !== false}
             onChange={(v) => { void patch({ allowWrite: v }) }}
@@ -189,22 +189,22 @@ export function ExternalAiCard({ onNotify }: { onNotify: Notify }) {
           </Button>
         </div>
 
-        <div className="rounded-xl border border-black/10 bg-surface-darkest p-3">
+        <div className="rounded-xl border border-surface-hairline bg-surface-darkest p-3">
           <button
             type="button"
             onClick={() => setShowTools(!showTools)}
             className="w-full flex items-center gap-2 text-xs font-medium text-text-primary cursor-pointer"
           >
             <span>可调用工具：共 {TOOL_COUNTS.total} 个</span>
-            <span className="text-[10px] text-info">只读 {TOOL_COUNTS.read}</span>
-            <span className="text-[10px] text-amber-700">写入 {TOOL_COUNTS.write}</span>
-            <span className="text-[10px] text-danger">危险 {TOOL_COUNTS.dangerous}</span>
+            <span className="text-xs text-info">只读 {TOOL_COUNTS.read}</span>
+            <span className="text-xs text-warning">写入 {TOOL_COUNTS.write}</span>
+            <span className="text-xs text-danger">危险 {TOOL_COUNTS.dangerous}</span>
             <ChevronDown className={`w-3.5 h-3.5 ml-auto transition-transform ${showTools ? 'rotate-180' : ''}`} />
           </button>
           {showTools && (
             <div className="mt-3 max-h-64 overflow-y-auto space-y-1.5">
               {TOOL_DEFINITIONS.map((tool) => (
-                <div key={tool.name} className="flex items-start gap-2 text-[11px]">
+                <div key={tool.name} className="flex items-start gap-2 text-xs">
                   <span className={`shrink-0 px-1.5 py-0.5 rounded border ${RISK_STYLE[tool.risk]}`}>{RISK_LABEL[tool.risk]}</span>
                   <code className="font-mono text-text-primary shrink-0">{tool.name}</code>
                   <span className="text-text-muted leading-relaxed">{tool.description}</span>
@@ -217,12 +217,12 @@ export function ExternalAiCard({ onNotify }: { onNotify: Notify }) {
         {status?.lastError && (
           <div className="flex items-start gap-2 p-2.5 rounded-lg bg-danger/10 border border-danger/20">
             <ShieldAlert className="w-4 h-4 text-danger shrink-0 mt-0.5" />
-            <p className="text-[11px] text-danger break-all leading-relaxed">{status.lastError}</p>
+            <p className="text-xs text-danger break-all leading-relaxed">{status.lastError}</p>
           </div>
         )}
 
         <div className="rounded-xl border border-warning/20 bg-warning/5 p-3">
-          <p className="text-[11px] text-text-secondary leading-relaxed">
+          <p className="text-xs text-text-secondary leading-relaxed">
             <b>一条龙安装：</b>在项目目录运行 <code className="font-mono">./scripts/install.sh</code>，脚本会自动构建扩展、生成令牌、
             写入 Claude Code / Codex / Cursor / 小龙虾 的 MCP 配置并启动服务。
             最后只需在 Chrome 加载 <code className="font-mono">dist/</code> 并点上面的「连接本地桥接」。

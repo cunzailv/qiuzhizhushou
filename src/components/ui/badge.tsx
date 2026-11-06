@@ -7,12 +7,13 @@ interface BadgeProps {
 }
 
 export function Badge({ children, variant = 'default', className = '' }: BadgeProps) {
+  // 徽章是安静的文字标签，不是发光药丸；语义色只在文字上表达
   const variants = {
-    default: 'bg-primary/20 text-primary-light',
-    success: 'bg-success/20 text-success',
-    danger: 'bg-danger/20 text-danger',
-    warning: 'bg-warning/20 text-warning',
-    info: 'bg-info/20 text-info',
+    default: 'bg-surface-dark text-text-secondary',
+    success: 'bg-success/10 text-success',
+    danger: 'bg-danger/10 text-danger',
+    warning: 'bg-warning/10 text-warning',
+    info: 'bg-info/10 text-info',
   }
 
   return (

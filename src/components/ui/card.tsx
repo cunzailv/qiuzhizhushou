@@ -9,7 +9,7 @@ interface CardProps {
 export function Card({ children, className = '', onClick }: CardProps) {
   return (
     <div
-      className={`glass-card ${onClick ? 'cursor-pointer' : ''} ${className}`}
+      className={`bg-surface-darkest border border-surface-hairline rounded-xl p-4 shadow-card ${onClick ? 'cursor-pointer' : ''} ${className}`}
       onClick={onClick}
     >
       {children}
@@ -22,7 +22,7 @@ export function CardHeader({ children, className = '' }: { children: React.React
 }
 
 export function CardTitle({ children, className = '' }: { children: React.ReactNode; className?: string }) {
-  return <h3 className={`text-sm font-semibold text-text-primary ${className}`}>{children}</h3>
+  return <h3 className={`text-sm font-medium text-text-primary ${className}`}>{children}</h3>
 }
 
 export function CardContent({ children, className = '' }: { children: React.ReactNode; className?: string }) {

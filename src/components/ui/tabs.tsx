@@ -18,7 +18,7 @@ export function Tabs({ tabs, activeTab, onTabChange, className = '', layout = 'c
   const isCol = layout === 'col'
 
   return (
-    <div className={`flex gap-1 p-1 bg-surface-dark border border-black/5 rounded-xl ${className}`}>
+    <div className={`flex gap-1 p-1 bg-surface-dark border border-surface-hairline rounded-xl ${className}`}>
       {tabs.map((tab) => {
         const isActive = activeTab === tab.id
         return (
@@ -26,20 +26,21 @@ export function Tabs({ tabs, activeTab, onTabChange, className = '', layout = 'c
             key={tab.id}
             type="button"
             onClick={() => onTabChange(tab.id)}
-            className={`flex flex-1 items-center justify-center rounded-lg transition-all duration-200 select-none ${
-              isCol ? 'flex-col py-1 px-0.5 gap-0.5' : 'flex-row py-1.5 px-2 gap-1.5'
+            aria-current={isActive ? 'page' : undefined}
+            className={`flex flex-1 items-center justify-center rounded-lg transition-colors duration-150 select-none ${
+              isCol ? 'flex-col py-1.5 px-0.5 gap-1' : 'flex-row py-1.5 px-2 gap-1.5'
             } ${
               isActive
-                ? 'bg-white text-primary font-semibold shadow-xs border border-black/5'
-                : 'text-text-muted hover:text-text-secondary hover:bg-black/5'
+                ? 'bg-surface-darkest text-text-primary shadow-card border border-surface-hairline'
+                : 'text-text-muted hover:text-text-secondary hover:bg-surface-darkest border border-transparent'
             }`}
           >
             {tab.icon && (
-              <span className={`flex items-center justify-center shrink-0 ${isActive ? 'text-primary' : 'text-text-muted'}`}>
+              <span className={`flex items-center justify-center shrink-0 ${isActive ? 'text-text-primary' : 'text-text-muted'}`}>
                 {tab.icon}
               </span>
             )}
-            <span className="text-[11px] leading-tight truncate">
+            <span className="text-xs leading-tight truncate">
               {tab.label}
             </span>
           </button>

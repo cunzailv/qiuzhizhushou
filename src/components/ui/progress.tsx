@@ -10,12 +10,12 @@ export function Progress({ value, className = '', color }: ProgressProps) {
   const clampedValue = Math.min(100, Math.max(0, value))
 
   return (
-    <div className={`w-full bg-surface-darkest rounded-full h-2 overflow-hidden ${className}`}>
+    <div className={`queue-rule h-2 rounded ${className}`}>
       <div
-        className="h-full rounded-full transition-all duration-500 ease-out"
+        className="queue-rule-fill h-full rounded transition-[width] duration-300"
         style={{
           width: `${clampedValue}%`,
-          background: color || `linear-gradient(90deg, #F97316, #FB923C)`,
+          backgroundColor: color || '#C2410C',
         }}
       />
     </div>

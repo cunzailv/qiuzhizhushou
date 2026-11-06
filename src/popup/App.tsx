@@ -417,7 +417,7 @@ export default function App() {
       }
     >
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-white/85 backdrop-blur-md border-b border-black/10">
+      <div className="sticky top-0 z-10 bg-surface-darkest border-b border-surface-hairline">
         {/* 品牌行 */}
         <div className="flex items-center gap-2.5 px-3.5 pt-3 pb-1.5">
           <img
@@ -427,12 +427,12 @@ export default function App() {
           />
           <div className="min-w-0">
             <div className="flex items-center gap-1.5">
-              <h1 className="text-[15px] font-bold leading-tight bg-gradient-to-r from-brand-orange to-primary-light bg-clip-text text-transparent">
+              <h1 className="text-[15px] font-medium leading-tight text-text-primary">
                 求职投递助手
               </h1>
             </div>
-            <p className="text-[10px] text-text-muted leading-tight truncate">
-              AI 匹配评估 · 多平台一键投递
+            <p className="text-xs text-text-muted leading-tight truncate">
+              岗位匹配 · 多平台投递 · 回复复盘
             </p>
           </div>
           <div className="ml-auto shrink-0 flex items-center gap-1.5">
@@ -441,50 +441,50 @@ export default function App() {
               <button
                 onClick={handleOpenSidebar}
                 title={standalone ? '去招聘网站展开整高侧栏' : '在网页右侧展开整高侧栏'}
-                className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary-light hover:bg-primary/20 transition"
+                className="inline-flex items-center gap-1 rounded-md border border-surface-hairline bg-surface-dark px-2 py-0.5 text-xs font-medium text-accent hover:bg-surface-dark transition"
               >
                 <PanelRight className="w-3 h-3" />
                 {standalone ? '展开侧栏' : '侧栏'}
               </button>
             )}
             {effectivePlatformName ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary-light border border-primary/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-primary-light animate-pulse" />
+              <span className="inline-flex items-center gap-1 rounded-md bg-surface-dark px-2 py-0.5 text-xs font-medium text-accent border border-surface-hairline">
+                <span className="w-1.5 h-1.5 rounded-full bg-accent" />
                 {effectivePlatformName}
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 rounded-full bg-black/5 px-2 py-0.5 text-[10px] text-text-muted border border-black/10">
+              <span className="inline-flex items-center gap-1 rounded-md bg-surface-dark px-2 py-0.5 text-xs text-text-muted border border-surface-hairline">
                 未检测到招聘平台
               </span>
             )}
           </div>
         </div>
         <Tabs tabs={TABS} activeTab={activeTab} onTabChange={setActiveTab} className="m-3.5 mt-1" />
-        <div className="px-3.5 pb-2.5 -mt-1 flex items-center justify-between gap-2 text-[11px] text-text-muted">
+        <div className="px-3.5 pb-2.5 -mt-1 flex items-center justify-between gap-2 text-xs text-text-muted">
           <label className="flex items-center gap-1.5">
             平台：
             <select
               value={platformOverride}
               onChange={(e) => handlePlatformChange(e.target.value)}
-              className="rounded bg-surface-dark px-1.5 py-0.5 text-[11px] text-text-primary border border-black/10 outline-none focus:border-primary"
+              className="rounded bg-surface-dark px-1.5 py-0.5 text-xs text-text-primary border border-surface-hairline outline-none focus:border-accent"
             >
               <option value="auto">自动识别</option>
               {platforms.map((p) => (
-                <option key={p.id} value={p.id}>{p.icon} {p.name}</option>
+                <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
           </label>
           <span className="truncate">
             {effectivePlatformName
-              ? <span className="text-primary-light">{effectivePlatformName}</span>
+              ? <span className="text-accent">{effectivePlatformName}</span>
               : '未检测到招聘平台页面'}
           </span>
         </div>
       </div>
 
       {standalone && (
-        <div className="px-3.5 py-2 text-[11px] leading-relaxed text-primary-light bg-primary/5 border-b border-black/5">
-          💡 当前是独立助手面板。点右上角「展开侧栏」即可在招聘网站右侧展开整高侧栏；之后点浏览器工具栏的插件图标也能随时唤起助手。
+        <div className="px-3.5 py-2 text-xs leading-relaxed text-text-secondary bg-surface-dark border-b border-surface-hairline">
+          独立面板模式。点右上角「展开侧栏」可在招聘网站右侧展开整高侧栏。
         </div>
       )}
 
