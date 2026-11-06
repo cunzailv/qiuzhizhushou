@@ -18,3 +18,11 @@ export type { ModelPreset } from './model-presets'
 export { generateJobGreeting } from './greeting'
 export type { GreetingGenerationResult } from './greeting'
 export { prefetchNextTasksAI } from './prefetch'
+export {
+  assessJobRelevance,
+  computeLocalRelevance,
+  parseRelevanceResponse,
+  buildRelevanceSignature,
+  MAX_AI_REVIEW_JOBS,
+} from './job-relevance'
+export type { JobRelevanceInput, JobRelevanceResult, RelevanceJob, RelevanceSource } from './job-relevance'

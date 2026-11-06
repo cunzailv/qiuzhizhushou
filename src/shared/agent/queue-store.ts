@@ -41,6 +41,8 @@ export interface ApplyTask {
   tags?: string[]
   bossName?: string
   bossTitle?: string
+  /** L3 结果复盘：该岗位由哪个搜索关键词采集而来，用于按方向统计真实回复率 */
+  searchKeyword?: string
   status: TaskStatus
   attempts: number            // 已尝试次数，上限 2
   leaseUntil?: number         // running 态租约到期时间戳（毫秒）

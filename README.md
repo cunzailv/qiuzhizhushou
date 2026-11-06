@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-948%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-985%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -103,6 +103,9 @@
 | **筛选条件两边通用** | 概览「沟通筛选条件」与 AIbot 全自动流水线通过 `src/shared/agent/filter-config.ts` 读写同一批设置键；AI 评分开关与最低匹配分不再硬编码，任一侧修改两边立即生效 |
 | **配置双向同步** | AIbot 配置面板的「面板形态」卡片可设置整高侧栏 / 半圆浮球 / 停止与置顶常驻，并同步投递模式、AI 评分、猎聘简历模式；运行中切换从下一个任务起生效 |
 | **投递方式由用户决定** | 启动前必须由用户选择「精投」或「海投」，系统不预设。精投 = AI 逐岗打分 + 个性化话术、45-180 秒/个、门槛 60；海投 = 本地快速评分 + 平台模板、15-45 秒/个、门槛 25。两套参数由 `src/shared/agent/delivery-strategy.ts` 成套切换，杜绝「海投的间隔配精投的门槛」；未选择时启动会被拦截并弹出选择卡片 |
+| **AI 语义复核（会判断对错）** | 采集后不再用「标题是否含关键词」判断相关性。精投模式由 `src/shared/ai/job-relevance.ts` 把整页岗位标题一次性交 AI 判定是否真的在招这个方向，识别「PHP技术支持」这类含词但不对口的岗位并直接剔除；同义不同字（后端开发 ↔ PHP开发工程师）不会误杀。AI 结论按页面指纹缓存 30 分钟，海投 / AI 未启用 / AI 失败时自动回退本地职业族谱判定并如实标注来源，低置信度结论不会单方面剔除岗位 | 
+| **关键词自愈** | 一整页没有一个真正对口的岗位时，判定搜索源失效（推荐流降级 / 未登录），把该关键词标记无效 24 小时并自动换词；所有关键词都无效则暂停并通知，不再原地空转 | 
+| **L3 结果复盘反馈** | `src/shared/db/outcome-store.ts` 记录真实事件（AIbot 投递、聊天页 HR 新消息、已读/沟通/面试/不合适状态变更），按内容哈希去重；`src/shared/agent/outcome-feedback.ts` 按搜索方向统计真实回复率、零回复方向与有效方向，回灌给 Planner 生成「降权 / 加权 / 改话术」建议。摘要里的每个数字都来自真实事件，LLM 只允许输出不含数字的定性解读，含数字整条丢弃；真实结果样本不足时不允许自动改配额 | 
 | **停止链路统一** | 标题栏 `⏻`、侧栏「停止」、AIbot 面板「终止」是同一个动作：终止 campaign、清除 `apply-tick` 闹钟、取消当前任务、广播 `ASSISTANT_CANCEL`、释放全局运行锁，并把状态写成 `closed` |
 | **不再被自愈误伤** | `dismissUnexpectedModals` 清理高 `z-index` 遮罩时跳过扩展自有节点，避免运行一段时间后侧栏被当作页面弹窗隐藏 |
 

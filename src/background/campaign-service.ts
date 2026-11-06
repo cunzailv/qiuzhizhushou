@@ -42,6 +42,7 @@ import { extractTargetCareers, diagnoseCareerTokens, normalizeCareerTokens } fro
 import { loadSharedApplyFilters } from '../shared/agent/filter-config'
 import { replanIfNeeded } from '../shared/agent/planner'
 import { sendWebhookNotification } from '../shared/notification/webhook-notifier'
+import { recordOutcomeEvent } from '../shared/db/outcome-store'
 import {
   getNextSearchKeyword,
   isQueueBelowThreshold,
@@ -215,8 +216,16 @@ interface CollectJobsResult {
   filteredByBlacklist?: number
   pageCardTotal?: number
   excludedOnPage?: number
-  /** 与搜索关键词相关的卡片数；-1 表示未传关键词 */
+  /** 与搜索关键词字符串命中的卡片数；-1 表示未传关键词（旧口径，仅用于对比） */
   keywordHits?: number
+  /** L2 语义复核后真正对口的卡片数；-1 表示未传关键词 */
+  relevantHits?: number
+  /** 'ai' 表示 AI 语义复核，'local' 表示本地族谱判定（AI 未启用/失败/海投） */
+  relevanceSource?: 'ai' | 'local'
+  relevanceConfidence?: number
+  relevanceReason?: string
+  /** 被 AI 判定为不对口而剔除的岗位数 */
+  filteredByRelevance?: number
   error?: string
 }
 
@@ -759,6 +768,28 @@ async function autoCollectJobsForCampaign(
       // 通信成功（无论是否新增岗位）都应清空该平台的连续失败计数
       if (collectRes) collectErrorStreak[platform] = 0
 
+      // L2 语义复核结论：AI 判过时以 AI 为准（能识破「PHP技术支持」这类含词不对口），
+      // AI 不可用/海投模式则退到本地族谱判定；旧的字符串命中数只作为对比口径保留。
+      const effectiveRelevantHits = typeof collectRes?.relevantHits === 'number'
+        ? collectRes.relevantHits
+        : (collectRes?.keywordHits ?? -1)
+
+      // 把 AI 的「判断过程」写进可见日志：字符串命中几个、真正对口几个、剔除了什么、为什么。
+      // 只在结论与旧口径不一致 / 零命中 / 有剔除时输出，避免每轮刷屏。
+      if (collectRes?.success && primaryCareerKeyword) {
+        const finalCollected = collectRes.collected ?? 0
+        const stringHits = collectRes.keywordHits ?? -1
+        const dropped = collectRes.filteredByRelevance ?? 0
+        const diverged = effectiveRelevantHits >= 0 && stringHits >= 0 && effectiveRelevantHits !== stringHits
+        if (collectRes.relevanceSource === 'ai' && (diverged || effectiveRelevantHits === 0 || dropped > 0)) {
+          const reason = (collectRes.relevanceReason || '').slice(0, 120)
+          await appendCampaignLog(
+            `🧠 【${pName}】AI 语义复核【${primaryCareerKeyword}】：本页 ${finalCollected} 个岗位里 ${effectiveRelevantHits} 个真正对口（字符串命中 ${stringHits}），已剔除 ${dropped} 个不对口岗位${reason ? `｜${reason}` : ''}`,
+            effectiveRelevantHits === 0 ? 'warn' : 'info',
+          )
+        }
+      }
+
       if (collectRes?.success && (collectRes.added ?? 0) > 0) {
         careerFilterMissStreak = 0
         careerRelaxAnnounced = false
@@ -796,10 +827,12 @@ async function autoCollectJobsForCampaign(
         // 搜索关键词零命中：这批卡片与目标方向完全无关，通常意味着搜索页没生效
         //（被重定向到推荐流 / 未登录降级）。继续按方向过滤只会无限空转，
         // 因此把这个词标记为无效（24 小时），让下一轮自动换词，而不是原地打转。
-        if (collected > 0 && (collectRes?.keywordHits ?? -1) === 0) {
+        if (collected > 0 && primaryCareerKeyword && effectiveRelevantHits === 0) {
           await markKeywordInvalid(primaryCareerKeyword)
+          const verdict = collectRes?.relevanceSource === 'ai' ? 'AI 语义复核判定' : '本地职业族谱判定'
+          const reason = (collectRes?.relevanceReason || '').slice(0, 100)
           await appendCampaignLog(
-            `🚫 【${pName}】关键词【${primaryCareerKeyword}】的 ${collected} 个岗位里没有一个相关，已标记为无效（24 小时内跳过），下一轮自动换词重试。若是页面被降级成推荐流，请确认该平台已登录`,
+            `🚫 【${pName}】关键词【${primaryCareerKeyword}】的 ${collected} 个岗位经${verdict}后没有一个真正对口（字符串命中 ${collectRes?.keywordHits ?? -1} 个），已标记为无效（24 小时内跳过），下一轮自动换词重试${reason ? `｜${reason}` : ''}。若页面被降级成推荐流，请确认该平台已登录`,
             'warn',
           )
           continue
@@ -811,9 +844,12 @@ async function autoCollectJobsForCampaign(
             : filters.publishTime === 'month' ? '本月活跃'
             : filters.publishTime === 'all' ? '不限时间'
             : '本周活跃'
+        const relevanceNote = typeof collectRes?.relevantHits === 'number' && collectRes.relevantHits >= 0
+          ? `、语义复核判定对口 ${collectRes.relevantHits} 个（${collectRes.relevanceSource === 'ai' ? 'AI' : '本地规则'}，剔除不对口 ${collectRes.filteredByRelevance ?? 0} 个）`
+          : ''
         const detail = pageCardTotal === 0
           ? '页面未解析到任何岗位卡片（搜索结果为空或页面未加载完成）'
-          : `抓到 ${collected + excludedOnPage} 个卡片（其中 ${excludedOnPage} 个已投过），职业方向筛掉 ${byCareer} 个、活跃时间筛掉 ${byTime} 个、黑名单筛掉 ${byBlacklist} 个`
+          : `抓到 ${collected + excludedOnPage} 个卡片（其中 ${excludedOnPage} 个已投过），职业方向筛掉 ${byCareer} 个、活跃时间筛掉 ${byTime} 个、黑名单筛掉 ${byBlacklist} 个${relevanceNote}`
         await appendCampaignLog(
           `ℹ️ 【${pName}】本轮未新增岗位：${detail}。目标【${careerLabel} · ${freshnessLabel} · 来源：${careerSourceLabel}】${relaxCareerFilter ? '（本轮已放宽方向限制）' : ''}`,
           'info',
@@ -941,6 +977,15 @@ async function handleTaskExecutionResult(task: ApplyTask, result: ExecuteTaskRes
   if (result.status === 'done') {
     consecutiveNotFoundMap[task.platform] = 0
     log(MOD, 'handleTaskExecutionResult', `Successfully applied: ${task.jobTitle} @ ${task.company}`)
+    // L3 结果回流：记录「哪个搜索方向投出去的」，后续 HR 回复才能按方向算真实回复率
+    await recordOutcomeEvent({
+      kind: 'applied',
+      jobId: task.jobId,
+      jobTitle: task.jobTitle,
+      company: task.company,
+      platform: task.platform,
+      direction: task.searchKeyword,
+    })
     await appendCampaignLog(
       `✅ 投递成功！已向 [${task.platform}]「${task.company} - ${task.jobTitle}」发起沟通并发送个性化话术`,
       'success',

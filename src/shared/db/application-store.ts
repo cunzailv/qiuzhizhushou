@@ -1,6 +1,17 @@
 import { db } from './index'
 import type { Application, ApplicationStatus } from '../types/application'
 import { sendWebhookNotification } from '../notification/webhook-notifier'
+import { recordOutcomeEvent } from './outcome-store'
+import type { OutcomeEventKind } from './outcome-store'
+
+/** 状态变更 → L3 结果事件；applied 由 AIbot 单独记录，这里不重复 */
+const STATUS_OUTCOME_KIND: Partial<Record<ApplicationStatus, OutcomeEventKind>> = {
+  read: 'read',
+  communicating: 'communicating',
+  interview: 'interview',
+  rejected: 'rejected',
+  hired: 'hired',
+}
 
 function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2)
@@ -44,6 +55,28 @@ export async function updateApplicationStatus(id: string, status: ApplicationSta
     updates.notes = notes
   }
   await db.applications.update(id, updates)
+
+  // L3 结果回流：用户/外部把投递状态改成「已读、沟通中、面试、不合适」时，
+  // 同步落一条可复盘的真实结果事件，供 planner 按搜索方向统计回复率。
+  const outcomeKind = STATUS_OUTCOME_KIND[status]
+  if (outcomeKind) {
+    void (async () => {
+      try {
+        const app = await db.applications.get(id)
+        if (!app) return
+        await recordOutcomeEvent({
+          kind: outcomeKind,
+          jobId: app.jobId,
+          jobTitle: app.jobTitle,
+          company: app.companyName,
+          platform: app.platformId,
+          snippet: notes,
+        })
+      } catch {
+        // 复盘记录失败不能影响状态更新
+      }
+    })()
+  }
 
   // 触发跨端实时推送通知（如 HR 面试邀约）
   if (status === 'interview') {

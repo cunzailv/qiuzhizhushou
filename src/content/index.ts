@@ -32,7 +32,8 @@ import {
   type PanelState,
 } from '../shared/assistant-state'
 import { randomDelay, scanRisk, checkDailyLimit, incrementCounter } from '../shared/antiBot'
-import { matchResumeToJob } from '../shared/ai'
+import { matchResumeToJob, assessJobRelevance } from '../shared/ai'
+import { recordOutcomeEvent } from '../shared/db/outcome-store'
 import { reactLoop } from '../shared/agent'
 import { transition, recordMachineTransition, saveApplyRun, clearApplyRun, type ApplyState, type ApplyEvent } from '../shared/agent/apply-state-machine'
 import { getSharedResumeSummary, getSharedFullResume, getSharedAppliedJobIds, addSharedAppliedJobId } from '../shared/db/shared-state'
@@ -518,6 +519,33 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         ? rawJobs.filter((j) => `${j.title} ${(j.tags || []).join(' ')}`.includes(searchKeyword)).length
         : -1
 
+      // L2 过程自检：字符串命中不等于真的相关。
+      // 精投模式让 AI 一次性审阅整页标题，识别「PHP技术支持」这类含词但不对口的岗位，
+      // 以及「后端开发」搜出「PHP开发工程师」这类不同字但同义的好岗位。
+      // 海投（极速）/ 未启用 AI 时只跑本地语义，不消耗 AI 预算。
+      const [aiEnabledForRelevance, fastModeForRelevance] = await Promise.all([
+        getSetting<boolean>('aiEnabled', false),
+        getSetting<boolean>('aibotFastMode', false),
+      ])
+      const relevanceInput = {
+        keyword: searchKeyword,
+        targetCareers,
+        jobs: rawJobs,
+        platform: adapter.id,
+      }
+      // 没有搜索关键词时不发 AI 判定：模型在「目标方向未指定」下会把整页都判成不相关
+      let relevance = await assessJobRelevance(relevanceInput, {
+        useAi: !!searchKeyword && aiEnabledForRelevance && !fastModeForRelevance,
+      })
+      // 模型自己给的置信度过低时不采信，退回本地语义结论，避免误杀一整页好岗位
+      if (relevance.source === 'ai' && relevance.confidence < 0.6) {
+        relevance = await assessJobRelevance(relevanceInput, { useAi: false })
+      }
+      // 只有高置信度的 AI 结论才有权把岗位从队列里剔掉；
+      // 本地语义判定只用于统计与提示，绝不单方面否决岗位。
+      const aiRelevanceGate = relevance.source === 'ai' && relevance.confidence >= 0.6
+      const irrelevantJobIds = new Set(relevance.irrelevantJobIds)
+
       // 对采集到的卡片进行过滤。
       // 关键策略：只有「硬条件」（黑名单、无关行业、时间/薪资等）才直接丢弃；
       // 「职业方向不匹配」降级为软过滤 —— 先记下来，严格通过的不够时再用它补足名额。
@@ -528,8 +556,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       let filteredByCareer = 0
       let filteredByTime = 0
       let filteredByBlacklist = 0
+      let filteredByRelevance = 0
 
       for (const job of rawJobs) {
+        // AI 语义复核判定为「不是这个方向的岗位」→ 直接丢弃，不再进队列浪费投递额度
+        if (aiRelevanceGate && irrelevantJobIds.has(job.id)) {
+          filteredByRelevance++
+          continue
+        }
         const evalRes = evaluateJobCandidate(job, {
           filters: effectiveFilters,
           targetCareers,
@@ -572,6 +606,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         tags: j.tags,
         bossName: j.bossName,
         bossTitle: j.bossTitle,
+        // L3 结果复盘：把「这条岗位是哪个搜索方向找来的」带进任务，
+        // 投递成功后才能按方向统计真实回复率，而不是只按岗位名事后瞎猜。
+        searchKeyword: searchKeyword || undefined,
       }))
       const added = await appendTasksToCampaign(tasks)
       sendResponse({
@@ -581,9 +618,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         filteredByCareer,
         filteredByTime,
         filteredByBlacklist,
+        filteredByRelevance,
         pageCardTotal,
         excludedOnPage,
         keywordHits,
+        relevantHits: searchKeyword ? relevance.hits : -1,
+        relevanceSource: relevance.source,
+        relevanceConfidence: relevance.confidence,
+        relevanceReason: relevance.reason,
       })
     })().catch((err) => {
       sendResponse({ success: false, error: String(err) })
@@ -1663,6 +1705,15 @@ export async function checkAndTriggerChatCopilot(): Promise<void> {
       '.chat-conversation .company-name, [class*="company-title"], .chat-user .company, .chat-user-header [class*="company"]',
     )
     if (compEl?.textContent?.trim()) companyName = compEl.textContent.trim()
+
+    // L3 结果回流：聊天页观察到的 HR 新消息是「投递之后真实发生了什么」的第一手证据。
+    // outcome-store 按消息内容哈希去重，2.5 秒轮询不会把同一句话记成几十条。
+    await recordOutcomeEvent({
+      kind: 'hr_reply',
+      jobTitle,
+      company: companyName,
+      snippet: currentText,
+    })
 
     // 4. 调用 HR Copilot 引擎生成高情商建议
     const result = await generateHrReplyCopilot({
