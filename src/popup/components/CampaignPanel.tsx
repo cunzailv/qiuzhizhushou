@@ -61,6 +61,7 @@ import {
   subscribeRuntimeState,
   type AssistantRuntimeState,
 } from '../../shared/runtime-state'
+import { Disclosure } from '../../components/ui/disclosure'
 
 const PLATFORM_INFOS: Array<{ id: PlatformId; name: string }> = [
   { id: 'boss', name: 'Boss直聘' },
@@ -69,6 +70,10 @@ const PLATFORM_INFOS: Array<{ id: PlatformId; name: string }> = [
   { id: '51job', name: '前程无忧' },
   { id: 'maimai', name: '脉脉' },
 ]
+
+/** 折叠组里的低频动作共用同一套安静按钮样式 */
+const MAINTENANCE_BUTTON =
+  'flex items-center justify-center gap-1 rounded-md border border-surface-hairline bg-surface-darkest px-2 py-1.5 text-xs text-text-secondary hover:bg-surface-dark hover:text-text-primary transition-colors disabled:opacity-50 cursor-pointer'
 
 interface CampaignPanelProps {
   onNotify?: (msg: string, type: 'success' | 'warning' | 'error' | 'info') => void
@@ -745,34 +750,111 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         </div>
       </div>
 
-      {/* 管家事后复盘与策略进化快捷跳转 */}
-      {onNavigateTab && (
-        <div className="flex items-center justify-between bg-surface-dark px-2.5 py-1.5 rounded-lg border border-surface-hairline text-xs">
-          <span className="text-xs text-text-muted flex items-center gap-1 font-medium">
-            <Bot className="w-3.5 h-3.5 text-primary" />
-            管家事后复盘与策略进化
-          </span>
-          <div className="flex items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => onNavigateTab('butler')}
-              className="px-2 py-0.5 rounded bg-surface-darkest border border-surface-hairline text-primary hover:bg-surface-dark font-medium transition cursor-pointer text-xs flex items-center gap-0.5"
-            >
-              管家日报
-            </button>
-            <button
-              type="button"
-              onClick={() => onNavigateTab('butler')}
-              className="px-2 py-0.5 rounded bg-surface-darkest border border-brand-orange/30 text-brand-orange hover:bg-brand-orange/5 font-medium transition cursor-pointer text-xs flex items-center gap-0.5"
-            >
-              策略进化
-            </button>
+      {/* 控制操作栏：首屏只留「现在做什么」 */}
+      <div className="flex items-center gap-2">
+        {runtime.mode === 'manual' && (
+          <div className="w-full rounded-lg border border-surface-hairline bg-surface-dark px-2.5 py-2 text-xs leading-relaxed text-warning">
+            概览的<strong>半自动</strong>沟通正在运行。两条流水线互斥，请先在概览页点「停止」再启动 AIbot 全自动。
           </div>
-        </div>
-      )}
+        )}
+        {!isRunning && !isPaused && (
+          <button
+            onClick={() => void handleStart()}
+            disabled={loading || runtime.mode === 'manual'}
+            className="flex-1 py-2.5 px-3 rounded-lg bg-accent text-white font-medium text-xs flex items-center justify-center gap-1.5 shadow-sm hover:brightness-105 transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            <Play className="w-3.5 h-3.5 fill-current" />
+            一键开跑 AIbot
+          </button>
+        )}
+        {isRunning && (
+          <button
+            onClick={handlePause}
+            disabled={loading}
+            className="flex-1 py-2.5 px-3 rounded-lg bg-warning hover:bg-amber-600 text-white font-medium text-xs flex items-center justify-center gap-1.5 shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            <Pause className="w-3.5 h-3.5" />
+            暂停 AIbot
+          </button>
+        )}
+        {isPaused && (
+          <button
+            onClick={handleResume}
+            disabled={loading}
+            className="flex-1 py-2.5 px-3 rounded-lg bg-accent text-white font-medium text-xs flex items-center justify-center gap-1.5 shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            <RotateCw className="w-3.5 h-3.5" />
+            {isCaptchaPaused ? '已解验证码，继续' : '恢复执行'}
+          </button>
+        )}
+        {(isRunning || isPaused) && (
+          <button
+            onClick={handleAbort}
+            disabled={loading}
+            className="py-2.5 px-3 rounded-lg bg-surface-dark hover:bg-rose-50 text-rose-600 border border-surface-hairline font-medium text-xs flex items-center justify-center gap-1 transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            <Square className="w-3 h-3 fill-current" />
+            终止
+          </button>
+        )}
+      </div>
 
-      {/* 全自主无人值守队列说明与补仓卡片 */}
-      <div className="bg-surface-dark border border-surface-hairline rounded-lg p-2.5 flex items-center justify-between text-xs gap-2">
+      {/* 低频动作统一收纳：复盘跳转 / 补仓 / 配额 / 授权，功能一个不删 */}
+      <Disclosure label="复盘与维护工具" hint="跳转 · 补仓 · 配额 · 授权">
+        <div className="grid grid-cols-2 gap-1.5">
+          {onNavigateTab && (
+            <>
+              <button type="button" onClick={() => onNavigateTab('butler')} className={MAINTENANCE_BUTTON}>
+                管家日报
+              </button>
+              <button type="button" onClick={() => onNavigateTab('butler')} className={MAINTENANCE_BUTTON}>
+                策略进化
+              </button>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={handleClearPending}
+            disabled={clearingPending}
+            className={MAINTENANCE_BUTTON}
+            title="清空旧页面残留的待投缓存，并立即根据当前最新网页重新获取岗位"
+          >
+            <Trash2 className={`w-3 h-3 ${clearingPending ? 'animate-spin' : ''}`} />
+            {clearingPending ? '重获中...' : '清空重获'}
+          </button>
+          <button
+            type="button"
+            onClick={handleTriggerAutoCollect}
+            disabled={collectingJobs}
+            className={MAINTENANCE_BUTTON}
+            title="立即探测已开启平台的职位流并补充进待投队列"
+          >
+            <RotateCw className={`w-3 h-3 ${collectingJobs ? 'animate-spin' : ''}`} />
+            {collectingJobs ? '探测中...' : '立即补仓'}
+          </button>
+          <button
+            type="button"
+            onClick={handleResetQuotas}
+            className={MAINTENANCE_BUTTON}
+            title="恢复各平台推荐默认投递数量"
+          >
+            恢复默认配额
+          </button>
+          <button
+            type="button"
+            onClick={checkAuth}
+            disabled={checkingAuth}
+            className={MAINTENANCE_BUTTON}
+            title="重新检查各平台登录 Cookie 授权"
+          >
+            <RotateCw className={`w-3 h-3 ${checkingAuth ? 'animate-spin' : ''}`} />
+            刷新授权
+          </button>
+        </div>
+      </Disclosure>
+
+      {/* 全自主无人值守队列说明：补仓按钮已收进「复盘与维护工具」 */}
+      <div className="bg-surface-dark border border-surface-hairline rounded-lg p-2.5 flex items-center text-xs gap-2">
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <Sparkles className="w-4 h-4 text-primary shrink-0" />
           <div className="min-w-0">
@@ -787,65 +869,13 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             </div>
           </div>
         </div>
-
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            type="button"
-            onClick={handleClearPending}
-            disabled={clearingPending}
-            className="px-2 py-1 rounded-md bg-surface-darkest border border-rose-200 text-rose-600 hover:bg-rose-50 text-xs font-medium transition flex items-center gap-1 shadow-2xs disabled:opacity-50 cursor-pointer"
-            title="清空旧页面残留的待投缓存，并立即根据当前最新网页重新获取岗位"
-          >
-            <Trash2 className={`w-3 h-3 ${clearingPending ? 'animate-spin' : ''}`} />
-            {clearingPending ? '重获中...' : '清空重获'}
-          </button>
-
-          <button
-            type="button"
-            onClick={handleTriggerAutoCollect}
-            disabled={collectingJobs}
-            className="px-2 py-1 rounded-md bg-surface-darkest border border-surface-hairline text-primary hover:bg-surface-dark text-xs font-medium transition flex items-center gap-1 shadow-2xs disabled:opacity-50 cursor-pointer"
-            title="立即探测已开启平台的职位流并补充进待投队列"
-          >
-            <RotateCw className={`w-3 h-3 ${collectingJobs ? 'animate-spin' : ''}`} />
-            {collectingJobs ? '探测中...' : '立即补仓'}
-          </button>
-        </div>
       </div>
 
-      {/* 平台开关与登录授权区 */}
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-medium text-text-secondary">
-            平台轮转与登录授权
-            <span className="ml-1 font-normal text-text-muted">· 点击右侧数量可改</span>
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleResetQuotas}
-              className="text-xs text-text-muted hover:text-primary transition flex items-center gap-0.5 cursor-pointer"
-              title="恢复各平台推荐默认投递数量"
-            >
-              <RotateCw className="w-2.5 h-2.5" />
-              恢复默认
-            </button>
-            <button
-              type="button"
-              onClick={checkAuth}
-              disabled={checkingAuth}
-              className="text-xs text-text-muted hover:text-primary transition flex items-center gap-0.5 cursor-pointer"
-              title="重新检查各平台登录 Cookie 授权"
-            >
-              <RotateCw className={`w-2.5 h-2.5 ${checkingAuth ? 'animate-spin' : ''}`} />
-              刷新授权
-            </button>
-            <span className="text-xs text-text-muted">
-              已开启 {Object.values(enabledPlatforms).filter(Boolean).length}/5
-            </span>
-          </div>
-        </div>
-
+      {/* 平台开关与登录授权区：默认收起，展开后仍是完整的 5 个平台 */}
+      <Disclosure
+        label="平台与配额"
+        hint={`已开启 ${Object.values(enabledPlatforms).filter(Boolean).length}/5 · 点击数量可改`}
+      >
         <div className="grid grid-cols-1 gap-1.5">
           {PLATFORM_INFOS.map(({ id, name }) => {
             const isEnabled = !!enabledPlatforms[id]
@@ -979,149 +1009,89 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             )
           })}
         </div>
-      </div>
+      </Disclosure>
 
-      {/* 悬浮窗配置：与页面浮窗双向同步 */}
-      <div className="border border-surface-hairline rounded-lg bg-surface-darkest p-2.5 space-y-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5 text-xs font-medium text-text-secondary">
-            <Sparkles className="w-3.5 h-3.5 text-primary" />
-            悬浮窗配置
-          </div>
-          <span className="text-xs text-text-muted">与页面浮窗实时同步</span>
-        </div>
+      {/* 悬浮窗配置：低频开关统一收起 */}
+      <Disclosure label="悬浮窗配置" hint="投递模式 · 评分 · 面板形态">
+        <div className="space-y-2">
+          <p className="text-xs leading-relaxed text-text-muted rounded-md bg-surface-dark border border-surface-hairline px-2 py-1.5">
+            岗位、地点、薪资、AI 评分等<strong className="text-accent">沟通筛选条件与概览共用</strong>，
+            请到「概览 → 沟通筛选条件」修改；此处改评分开关也会同步回概览。
+          </p>
 
-        <p className="text-xs leading-relaxed text-text-muted rounded-md bg-surface-dark border border-surface-hairline px-2 py-1.5">
-          岗位、地点、薪资、AI 评分等<strong className="text-accent">沟通筛选条件与概览共用</strong>，
-          请到「概览 → 沟通筛选条件」修改；此处改评分开关也会同步回概览。
-        </p>
-
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-text-secondary w-14 shrink-0">投递模式</span>
-          <button onClick={() => updateAssistant({ applyMode: 'batch' })}
-            className={`flex-1 py-1.5 rounded-md text-xs border transition ${assistant.applyMode === 'batch' ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
-            批量沟通
-          </button>
-          <button onClick={() => updateAssistant({ applyMode: 'recommend' })}
-            className={`flex-1 py-1.5 rounded-md text-xs border transition ${assistant.applyMode === 'recommend' ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
-            AI自动确认
-          </button>
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-text-secondary w-14 shrink-0">AI 评分</span>
-          <button onClick={() => handleAiMatchChange(true)}
-            className={`flex-1 py-1.5 rounded-md text-xs border transition ${assistant.enableAiMatch ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
-            按分筛选
-          </button>
-          <button onClick={() => handleAiMatchChange(false)}
-            className={`flex-1 py-1.5 rounded-md text-xs border transition ${!assistant.enableAiMatch ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
-            不评分沟通
-          </button>
-        </div>
-
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-text-secondary w-14 shrink-0">猎聘简历</span>
-          <button onClick={() => updateAssistant({ liepinResumeMode: false })}
-            className={`flex-1 py-1.5 rounded-md text-xs border transition ${!assistant.liepinResumeMode ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
-            直接沟通
-          </button>
-          <button onClick={() => updateAssistant({ liepinResumeMode: true })}
-            className={`flex-1 py-1.5 rounded-md text-xs border transition ${assistant.liepinResumeMode ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
-            投简历
-          </button>
-        </div>
-
-        <div className="space-y-1.5">
-          <span className="text-xs text-text-secondary">面板形态</span>
-          <div className="grid grid-cols-2 gap-1.5">
-            <button onClick={() => handlePanelState('expanded')}
-              className={`py-1.5 rounded-md text-xs border transition ${assistant.panelState === 'expanded' ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
-              整高侧栏
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-text-secondary w-14 shrink-0">投递模式</span>
+            <button onClick={() => updateAssistant({ applyMode: 'batch' })}
+              className={`flex-1 py-1.5 rounded-md text-xs border transition ${assistant.applyMode === 'batch' ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
+              批量沟通
             </button>
-            <button onClick={() => handlePanelState('bubble')}
-              className={`py-1.5 rounded-md text-xs border transition ${assistant.panelState === 'bubble' ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
-              半圆浮球
+            <button onClick={() => updateAssistant({ applyMode: 'recommend' })}
+              className={`flex-1 py-1.5 rounded-md text-xs border transition ${assistant.applyMode === 'recommend' ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
+              AI自动确认
             </button>
           </div>
-          <button onClick={() => handlePanelState('closed')}
-            className="w-full py-1.5 rounded-md text-xs border border-rose-200 bg-surface-darkest text-rose-600 hover:bg-rose-50 transition">
-            停止并关闭 AIbot
-          </button>
-        </div>
 
-        <button
-          onClick={() => updateAssistant({ pinned: !assistant.pinned })}
-          className={`w-full flex items-center justify-between px-2.5 py-2 rounded-md text-xs border transition ${
-            assistant.pinned
-              ? 'bg-surface-dark border-surface-hairline text-primary'
-              : 'bg-surface-darkest border-surface-hairline text-text-secondary hover:bg-surface-page'
-          }`}
-        >
-          <span className="flex items-center gap-1.5">置顶常驻</span>
-          <span className={`w-7 h-3.5 rounded-full relative transition ${assistant.pinned ? 'bg-primary' : 'bg-surface-light'}`}>
-            <span className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-surface-darkest transition-colors ${assistant.pinned ? 'left-3.5' : 'left-0.5'}`} />
-          </span>
-        </button>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-text-secondary w-14 shrink-0">AI 评分</span>
+            <button onClick={() => handleAiMatchChange(true)}
+              className={`flex-1 py-1.5 rounded-md text-xs border transition ${assistant.enableAiMatch ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
+              按分筛选
+            </button>
+            <button onClick={() => handleAiMatchChange(false)}
+              className={`flex-1 py-1.5 rounded-md text-xs border transition ${!assistant.enableAiMatch ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
+              不评分沟通
+            </button>
+          </div>
 
-        <p className="text-xs text-text-muted leading-relaxed">
-          点击浏览器工具栏的插件图标 → 网页右侧展开整高侧栏（完整助手面板）；点右上角 × → 收起成半圆浮球；再点浮球 → 还原整高侧栏。置顶后新页面也保持展开、不再自动收起。
-        </p>
-      </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-text-secondary w-14 shrink-0">猎聘简历</span>
+            <button onClick={() => updateAssistant({ liepinResumeMode: false })}
+              className={`flex-1 py-1.5 rounded-md text-xs border transition ${!assistant.liepinResumeMode ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
+              直接沟通
+            </button>
+            <button onClick={() => updateAssistant({ liepinResumeMode: true })}
+              className={`flex-1 py-1.5 rounded-md text-xs border transition ${assistant.liepinResumeMode ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
+              投简历
+            </button>
+          </div>
 
-      {/* 控制操作栏 */}
-      <div className="space-y-2 pt-1">
-        <div className="flex items-center gap-2">
-          {runtime.mode === 'manual' && (
-            <div className="w-full rounded-lg border border-surface-hairline bg-surface-dark px-2.5 py-2 text-xs leading-relaxed text-warning">
-              概览的<strong>半自动</strong>沟通正在运行。两条流水线互斥，请先在概览页点「停止」再启动 AIbot 全自动。
+          <div className="space-y-1.5">
+            <span className="text-xs text-text-secondary">面板形态</span>
+            <div className="grid grid-cols-2 gap-1.5">
+              <button onClick={() => handlePanelState('expanded')}
+                className={`py-1.5 rounded-md text-xs border transition ${assistant.panelState === 'expanded' ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
+                整高侧栏
+              </button>
+              <button onClick={() => handlePanelState('bubble')}
+                className={`py-1.5 rounded-md text-xs border transition ${assistant.panelState === 'bubble' ? 'bg-primary text-white border-primary' : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'}`}>
+                半圆浮球
+              </button>
             </div>
-          )}
-          {!isRunning && !isPaused && (
-            <button
-              onClick={() => void handleStart()}
-              disabled={loading || runtime.mode === 'manual'}
-              className="flex-1 py-2.5 px-3 rounded-lg bg-accent text-white font-medium text-xs flex items-center justify-center gap-1.5 shadow-sm hover:brightness-105 active:scale-[0.99] transition disabled:opacity-50 cursor-pointer"
-            >
-              <Play className="w-3.5 h-3.5 fill-current" />
-              一键开跑 AIbot
+            <button onClick={() => handlePanelState('closed')}
+              className="w-full py-1.5 rounded-md text-xs border border-rose-200 bg-surface-darkest text-rose-600 hover:bg-rose-50 transition">
+              停止并关闭 AIbot
             </button>
-          )}
+          </div>
 
-          {isRunning && (
-            <button
-              onClick={handlePause}
-              disabled={loading}
-              className="flex-1 py-2.5 px-3 rounded-lg bg-warning hover:bg-amber-600 text-white font-medium text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-[0.99] transition disabled:opacity-50 cursor-pointer"
-            >
-              <Pause className="w-3.5 h-3.5" />
-              暂停 AIbot
-            </button>
-          )}
+          <button
+            onClick={() => updateAssistant({ pinned: !assistant.pinned })}
+            className={`w-full flex items-center justify-between px-2.5 py-2 rounded-md text-xs border transition ${
+              assistant.pinned
+                ? 'bg-surface-dark border-surface-hairline text-primary'
+                : 'bg-surface-darkest border-surface-hairline text-text-secondary hover:bg-surface-page'
+            }`}
+          >
+            <span className="flex items-center gap-1.5">置顶常驻</span>
+            <span className={`w-7 h-3.5 rounded-full relative transition ${assistant.pinned ? 'bg-primary' : 'bg-surface-light'}`}>
+              <span className={`absolute top-0.5 w-2.5 h-2.5 rounded-full bg-surface-darkest transition-colors ${assistant.pinned ? 'left-3.5' : 'left-0.5'}`} />
+            </span>
+          </button>
 
-          {isPaused && (
-            <button
-              onClick={handleResume}
-              disabled={loading}
-              className="flex-1 py-2.5 px-3 rounded-lg bg-accent text-white font-medium text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-[0.99] transition disabled:opacity-50 cursor-pointer"
-            >
-              <RotateCw className="w-3.5 h-3.5" />
-              {isCaptchaPaused ? '已解验证码，继续' : '恢复执行'}
-            </button>
-          )}
-
-          {(isRunning || isPaused) && (
-            <button
-              onClick={handleAbort}
-              disabled={loading}
-              className="py-2.5 px-3 rounded-lg bg-surface-dark hover:bg-rose-50 text-rose-600 border border-surface-hairline font-medium text-xs flex items-center justify-center gap-1 transition disabled:opacity-50 cursor-pointer"
-            >
-              <Square className="w-3 h-3 fill-current" />
-              终止
-            </button>
-          )}
+          <p className="text-xs text-text-muted leading-relaxed">
+            工具栏图标展开整高侧栏，右上角 × 收成半圆浮球；置顶后新页面保持展开。
+          </p>
         </div>
-      </div>
+      </Disclosure>
 
       {/* 每时每刻行为日志终端 */}
       <div className="border border-surface-hairline rounded-lg overflow-hidden bg-[#0F172A] text-slate-200">
@@ -1176,6 +1146,52 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             )}
           </div>
         )}
+      </div>
+
+      {/* 三个常驻调节入口：展开的编辑器紧随其后，不用反向滚动 */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-text-muted px-1 pt-0.5">
+        <button
+          type="button"
+          onClick={() => {
+            setShowTimeEditor(!showTimeEditor)
+            if (showIntervalEditor) setShowIntervalEditor(false)
+          }}
+          className="flex items-center gap-1 text-primary hover:text-accent transition-colors group cursor-pointer"
+          title="点击修改投递时段"
+        >
+          <Clock className="w-3 h-3 text-primary" />
+          <span className="group-hover:underline">工作时段: {formatTimeWindows(timeWindows)}</span>
+          <Edit2 className="w-2.5 h-2.5 opacity-70 group-hover:opacity-100" />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setShowIntervalEditor(!showIntervalEditor)
+            if (showTimeEditor) setShowTimeEditor(false)
+          }}
+          className="flex items-center gap-1 text-brand-orange hover:brightness-110 transition-colors group cursor-pointer"
+          title="点击修改拟人间歇"
+        >
+          <Sparkles className="w-3 h-3 text-brand-orange" />
+          <span className="group-hover:underline">
+            拟人间歇: {intervalConfig.minSeconds}-{intervalConfig.maxSeconds}s
+          </span>
+          <Edit2 className="w-2.5 h-2.5 opacity-70 group-hover:opacity-100" />
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setShowStrategyPicker(true)}
+          className={`flex items-center gap-1 font-medium transition-colors cursor-pointer ${
+            strategy ? 'text-brand-orange' : 'text-primary'
+          }`}
+          title="选择投递方式：精投（AI 逐岗判断）或海投（快速铺量）"
+        >
+          <Zap className="w-3 h-3" />
+          <span>投递方式：{strategy ? STRATEGY_PROFILES[strategy].label : '未选择'}</span>
+          <Edit2 className="w-2.5 h-2.5 opacity-70 group-hover:opacity-100" />
+        </button>
       </div>
 
       {/* 拟人间歇自定义编辑卡片（满足用户：aibot 拟人间歇 45-180s 需要可配置） */}
@@ -1438,51 +1454,6 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         </div>
       )}
 
-      {/* 底部保护机制说明与修改时段/间歇按钮 */}
-      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-text-muted px-1 pt-0.5">
-        <button
-          type="button"
-          onClick={() => {
-            setShowTimeEditor(!showTimeEditor)
-            if (showIntervalEditor) setShowIntervalEditor(false)
-          }}
-          className="flex items-center gap-1 text-primary hover:text-accent transition-colors group cursor-pointer"
-          title="点击修改投递时段"
-        >
-          <Clock className="w-3 h-3 text-primary" />
-          <span className="group-hover:underline">工作时段: {formatTimeWindows(timeWindows)}</span>
-          <Edit2 className="w-2.5 h-2.5 opacity-70 group-hover:opacity-100" />
-        </button>
-
-        <button
-          type="button"
-          onClick={() => {
-            setShowIntervalEditor(!showIntervalEditor)
-            if (showTimeEditor) setShowTimeEditor(false)
-          }}
-          className="flex items-center gap-1 text-brand-orange hover:brightness-110 transition-colors group cursor-pointer"
-          title="点击修改拟人间歇"
-        >
-          <Sparkles className="w-3 h-3 text-brand-orange" />
-          <span className="group-hover:underline">
-            拟人间歇: {intervalConfig.minSeconds}-{intervalConfig.maxSeconds}s
-          </span>
-          <Edit2 className="w-2.5 h-2.5 opacity-70 group-hover:opacity-100" />
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setShowStrategyPicker(true)}
-          className={`flex items-center gap-1 font-medium transition-colors cursor-pointer ${
-            strategy ? 'text-brand-orange' : 'text-primary'
-          }`}
-          title="选择投递方式：精投（AI 逐岗判断）或海投（快速铺量）"
-        >
-          <Zap className="w-3 h-3" />
-          <span>投递方式：{strategy ? STRATEGY_PROFILES[strategy].label : '未选择'}</span>
-          <Edit2 className="w-2.5 h-2.5 opacity-70 group-hover:opacity-100" />
-        </button>
-      </div>
     </div>
   )
 }

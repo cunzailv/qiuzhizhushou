@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1021%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1038%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -27,6 +27,7 @@
 
 - **主 Logo**：商务徽章式设计 —— 暖橙（`#FF7A2F`）× 深蓝（`#1E3A8A`）双色徽章，双手握手图形 + 品牌字标
 - **界面方向（2026-11）**：全扩展（popup / options / 招聘页注入侧栏）统一为 **冷调石墨中性表面 · 近黑主按钮 · 单一压暗橙 accent**。品牌橙保留为唯一强调色但离开表面；渐变文字、彩色发光、毛玻璃、emoji 图标与循环动效已全部移除。Logo 徽章作为真实品牌资产保持不变
+- **信息架构（2026-11）**：首屏只留「现在做什么 / 现在怎么样了」，低频设置分层收纳进折叠组，功能一个不删；详见下方「信息架构 · 分层收纳」
 
 | 资产 | 用途 |
 |------|------|
@@ -247,6 +248,22 @@ npm run build
 
 ---
 
+### 🗂️ 信息架构 · 分层收纳（2026-11）
+
+视觉收敛后仍有一问题：**控件太多**。popup 首屏常驻 175 个控件，其中 AIbot 面板 47 个、管家页 32 个。这轮不改样式，改的是信息层级——原则是 **分层收纳、不删功能**：首屏只回答「现在做什么 / 现在怎么样了」，低频设置全部可展开。
+
+| 区域 | 改造 |
+|---|---|
+| 常驻头部 | 一行放完品牌 + 平台状态 + 导航；平台名只在下拉里出现一次；5 个平台直达卡收进「打开平台」 |
+| 概览 | 5 个独立统计卡合并成一行紧凑数字；半自动的「投递模式 / AI 评分」收进「更多设置」，开跑按钮仍常驻 |
+| AIbot | 「一键开跑 / 暂停 / 恢复 / 终止」上移到指标看板正下方；3 个常驻调节入口（时段 / 间歇 / 投递方式）紧邻其编辑器；复盘跳转、补仓、配额、授权收进「复盘与维护工具」，5 个平台开关收进「平台与配额」，10 个悬浮窗开关收进「悬浮窗配置」 |
+| 管家 | 二级导航只留「对话中控 / 跟进与留痕 / 异常留痕」+「更多视图」（管家日报 / 策略进化 / 待修清单）；日报明细、闭环说明、提案筛选、诊断维护、来源筛选、导出刷新各自折叠 |
+| 硬约束 | 浏览器 E2E 依赖的按钮一律常驻：`一键开跑 AIbot`、`工作时段:`、`24小时不限`、`保存时段`、`每时每刻行为日志`（且默认展开）、`全自主无人值守队列`、`扫描跟进`、`异常留痕`、`已处理` |
+
+折叠底座是 `src/components/ui/disclosure.tsx`（`aria-expanded`、`type="button"`、默认收起、无 emoji / 渐变 / 循环动效）。`tests/popup-information-architecture.test.ts`（17 例）把「Disclosure 成对闭合、至少 15 / 10 个控件被折叠、E2E 关键文案在深度 0、低频按钮的事件处理器在深度 > 0、功能文案一个没删」固化为静态契约。
+
+---
+
 ## 🏗️ 技术栈
 
 | 层 | 技术选型 |
@@ -256,7 +273,7 @@ npm run build
 | 样式 | Tailwind CSS 3 + shadow DOM 注入 |
 | 数据 | Dexie (IndexedDB) + chrome.storage |
 | AI | OpenAI / DeepSeek / 自定义兼容接口 + 本地语义精筛 + AI SDK 7 tool-calling 循环 |
-| 测试 | Vitest（1021 用例 / 75 文件）+ Playwright（E2E） |
+| 测试 | Vitest（1038 用例 / 76 文件）+ Playwright（E2E） |
 | UI 组件 | Lucide React + Recharts + react-markdown / remark-gfm |
 
 ## 📁 项目结构
@@ -304,8 +321,8 @@ docs/EXTERNAL_AI.md     # 外部 AI 接入完整指南
 ## 🧪 测试与验收
 
 ```bash
-npm test                                       # tsc -b + vite build + 全部 1021 个测试用例
-npx vitest run                                  # 全量单测/E2E：75 文件 / 1021 用例
+npm test                                       # tsc -b + vite build + 全部 1038 个测试用例
+npx vitest run                                  # 全量单测/E2E：76 文件 / 1038 用例
 npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用例（基线 110 + 新增 36）
 ```
 
@@ -318,6 +335,7 @@ npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用�
 
 | 版本 | 内容 |
 |------|------|
+| `未发布` | 🗂️ 信息架构分层收纳：首屏只留「现在做什么 / 现在怎么样了」，低频设置进 Disclosure，功能一个不删；新增 17 例信息架构契约测试 |
 | `未发布` | 🎨 按 unslop 完成全量界面收敛：石墨中性底座 + 单一压暗橙 accent、去掉渐变/发光/毛玻璃/emoji 图标/循环动效、落地队列进度刻度线签名，新增 8 例设计契约测试 |
 | `未发布` | 🩺 异常留痕跨上下文统一：页面域异常不再丢失，对话台全链路降级留痕、日志脱敏、诊断中心新增「对话台」筛选 |
 | `未发布` | 🧠 智能中控对话台升级为 Tool-Calling Agent：多轮上下文 + 46 个内部工具自动调用 + 危险动作审批 + 执行轨迹 + 三级可见降级 |

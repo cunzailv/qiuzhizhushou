@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react'
-import { Card } from '../../components/ui/card'
 import { getStats } from '../../shared/db/application-store'
 import { loadSharedApplyFilters, persistSharedFilters } from '../../shared/agent/filter-config'
 import { log } from '../../shared/utils/logger'
@@ -9,9 +8,6 @@ import FilterPanel from '../components/FilterPanel'
 import BatchControlCard from '../components/BatchControlCard'
 import { subscribeAssistantState } from '../../shared/assistant-state'
 import type { AssistantRuntimeState } from '../../shared/runtime-state'
-import {
-  TrendingUp, Send, Eye, CalendarCheck, Target,
-} from 'lucide-react'
 
 const MOD = 'Popup:Dashboard'
 
@@ -88,11 +84,11 @@ export default function Dashboard({
   }
 
   const statCards = [
-    { label: '今日投递', value: stats.today, icon: Send, color: '#F97316' },
-    { label: '总投递数', value: stats.total, icon: TrendingUp, color: '#FB923C' },
-    { label: 'HR已读', value: stats.read, icon: Eye, color: '#3B82F6' },
-    { label: '面试邀约', value: stats.interview, icon: CalendarCheck, color: '#10B981' },
-    { label: '转化率', value: `${stats.passRate}%`, icon: Target, color: '#F59E0B' },
+    { label: '今日投递', value: stats.today },
+    { label: '总投递数', value: stats.total },
+    { label: 'HR已读', value: stats.read },
+    { label: '面试邀约', value: stats.interview },
+    { label: '转化率', value: `${stats.passRate}%` },
   ]
 
   return (
@@ -110,14 +106,13 @@ export default function Dashboard({
         startDisabled={startLocked}
       />
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-3 gap-2">
+      {/* 一行紧凑数字：不再用 5 个独立卡片与彩色图标 */}
+      <div className="grid grid-cols-5 gap-2 rounded-xl border border-surface-hairline bg-surface-darkest p-3">
         {statCards.map((stat) => (
-          <Card key={stat.label} className="flex flex-col items-center justify-center py-3 px-2 text-center">
-            <stat.icon className="w-4 h-4 mb-1" style={{ color: stat.color }} />
-            <p className="text-lg font-medium text-text-primary">{stat.value}</p>
-            <p className="text-xs text-text-muted">{stat.label}</p>
-          </Card>
+          <div key={stat.label} className="text-center min-w-0">
+            <p className="text-base font-medium text-text-primary tabular-nums">{stat.value}</p>
+            <p className="text-xs text-text-muted truncate">{stat.label}</p>
+          </div>
         ))}
       </div>
 

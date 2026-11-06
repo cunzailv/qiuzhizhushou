@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import type { ApplyFilters } from '../../shared/types/filters'
 import { checkDailyLimit } from '../../shared/antiBot'
+import { Disclosure } from '../../components/ui/disclosure'
 import {
   DEFAULT_ASSISTANT_STATE,
   getAssistantState,
@@ -143,62 +144,64 @@ export default function BatchControlCard({
         </div>
 
         {/* 运行配置：投递模式 + AI 评分（与 AIbot 共用） */}
-        <div className="space-y-2">
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-text-muted w-14 shrink-0">投递模式</span>
-            <button
-              type="button"
-              onClick={() => handleModeChange('batch')}
-              className={`flex-1 py-1.5 rounded-md text-xs border transition ${
-                assistant.applyMode === 'batch'
-                  ? 'bg-primary text-white border-primary'
-                  : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'
-              }`}
-            >
-              <Zap className="w-3 h-3 inline mr-0.5" />批量沟通
-            </button>
-            <button
-              type="button"
-              onClick={() => handleModeChange('recommend')}
-              className={`flex-1 py-1.5 rounded-md text-xs border transition ${
-                assistant.applyMode === 'recommend'
-                  ? 'bg-primary text-white border-primary'
-                  : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'
-              }`}
-            >
-              <Sparkles className="w-3 h-3 inline mr-0.5" />AI自动确认
-            </button>
-          </div>
+        <Disclosure label="更多设置" hint="投递模式 · AI 评分">
+          <div className="space-y-2">
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-text-muted w-14 shrink-0">投递模式</span>
+              <button
+                type="button"
+                onClick={() => handleModeChange('batch')}
+                className={`flex-1 py-1.5 rounded-md text-xs border transition ${
+                  assistant.applyMode === 'batch'
+                    ? 'bg-primary text-white border-primary'
+                    : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'
+                }`}
+              >
+                <Zap className="w-3 h-3 inline mr-0.5" />批量沟通
+              </button>
+              <button
+                type="button"
+                onClick={() => handleModeChange('recommend')}
+                className={`flex-1 py-1.5 rounded-md text-xs border transition ${
+                  assistant.applyMode === 'recommend'
+                    ? 'bg-primary text-white border-primary'
+                    : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'
+                }`}
+              >
+                <Sparkles className="w-3 h-3 inline mr-0.5" />AI自动确认
+              </button>
+            </div>
 
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-text-muted w-14 shrink-0">AI 评分</span>
-            <button
-              type="button"
-              onClick={() => onFilterChange({ enableAiMatch: true })}
-              className={`flex-1 py-1.5 rounded-md text-xs border transition ${
-                filters.enableAiMatch
-                  ? 'bg-primary text-white border-primary'
-                  : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'
-              }`}
-            >
-              按分筛选
-            </button>
-            <button
-              type="button"
-              onClick={() => onFilterChange({ enableAiMatch: false })}
-              className={`flex-1 py-1.5 rounded-md text-xs border transition ${
-                !filters.enableAiMatch
-                  ? 'bg-primary text-white border-primary'
-                  : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'
-              }`}
-            >
-              不评分沟通
-            </button>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-text-muted w-14 shrink-0">AI 评分</span>
+              <button
+                type="button"
+                onClick={() => onFilterChange({ enableAiMatch: true })}
+                className={`flex-1 py-1.5 rounded-md text-xs border transition ${
+                  filters.enableAiMatch
+                    ? 'bg-primary text-white border-primary'
+                    : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'
+                }`}
+              >
+                按分筛选
+              </button>
+              <button
+                type="button"
+                onClick={() => onFilterChange({ enableAiMatch: false })}
+                className={`flex-1 py-1.5 rounded-md text-xs border transition ${
+                  !filters.enableAiMatch
+                    ? 'bg-primary text-white border-primary'
+                    : 'bg-surface-darkest text-text-secondary border-surface-hairline hover:bg-surface-page'
+                }`}
+              >
+                不评分沟通
+              </button>
+            </div>
+            <p className="text-xs text-text-muted leading-relaxed">
+              岗位、地点、薪资等门槛在上方筛选卡片设置，<strong>半自动与 AIbot 全自动共用同一份配置</strong>。
+            </p>
           </div>
-          <p className="text-xs text-text-muted leading-relaxed">
-            岗位、地点、薪资等门槛在上方筛选卡片设置，<strong>半自动与 AIbot 全自动共用同一份配置</strong>。
-          </p>
-        </div>
+        </Disclosure>
 
         {/* 开始 / 停止 */}
         {busy ? (
@@ -229,7 +232,6 @@ export default function BatchControlCard({
               <ListChecks className="w-3.5 h-3.5 text-primary" />
               最近匹配结果
             </span>
-            <span className="text-xs text-text-muted">仅展示最近 3 条</span>
           </div>
           {runtime.recentMatches.length === 0 ? (
             <p className="text-xs text-text-muted text-center py-3 rounded-lg bg-surface-dark border border-dashed border-surface-hairline">

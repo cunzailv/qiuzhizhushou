@@ -416,70 +416,47 @@ export default function App() {
             : 'w-[440px] max-h-[600px] overflow-y-auto bg-surface-darkest'
       }
     >
-      {/* Header */}
+      {/* Header：一行品牌 + 平台状态（只出现一次）+ 导航 */}
       <div className="sticky top-0 z-10 bg-surface-darkest border-b border-surface-hairline">
-        {/* 品牌行 */}
-        <div className="flex items-center gap-2.5 px-3.5 pt-3 pb-1.5">
+        <div className="flex items-center gap-2.5 px-3.5 py-2.5">
           <img
             src={logoUrl}
             alt="求职投递助手"
             className="w-8 h-8 rounded-lg object-contain shrink-0"
           />
-          <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
-              <h1 className="text-[15px] font-medium leading-tight text-text-primary">
-                求职投递助手
-              </h1>
-            </div>
-            <p className="text-xs text-text-muted leading-tight truncate">
-              岗位匹配 · 多平台投递 · 回复复盘
-            </p>
-          </div>
+          <h1 className="text-[15px] font-medium leading-tight text-text-primary shrink-0">
+            求职投递助手
+          </h1>
           <div className="ml-auto shrink-0 flex items-center gap-1.5">
-            {/* 已经在网页右侧侧栏里运行时不再显示「打开侧栏」 */}
             {!inSidebarFrame && (
               <button
                 onClick={handleOpenSidebar}
                 title={standalone ? '去招聘网站展开整高侧栏' : '在网页右侧展开整高侧栏'}
-                className="inline-flex items-center gap-1 rounded-md border border-surface-hairline bg-surface-dark px-2 py-0.5 text-xs font-medium text-accent hover:bg-surface-dark transition"
+                className="inline-flex items-center gap-1 rounded-md border border-surface-hairline bg-surface-dark px-2 py-1 text-xs font-medium text-accent hover:bg-surface-light transition-colors"
               >
                 <PanelRight className="w-3 h-3" />
                 {standalone ? '展开侧栏' : '侧栏'}
               </button>
             )}
-            {effectivePlatformName ? (
-              <span className="inline-flex items-center gap-1 rounded-md bg-surface-dark px-2 py-0.5 text-xs font-medium text-accent border border-surface-hairline">
-                <span className="w-1.5 h-1.5 rounded-full bg-accent" />
-                {effectivePlatformName}
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 rounded-md bg-surface-dark px-2 py-0.5 text-xs text-text-muted border border-surface-hairline">
-                未检测到招聘平台
-              </span>
-            )}
+            <label className="inline-flex items-center gap-1.5" title="当前招聘平台">
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${effectivePlatformName ? 'bg-success' : 'bg-surface-light'}`} />
+              <select
+                value={platformOverride}
+                onChange={(e) => handlePlatformChange(e.target.value)}
+                aria-label="目标平台"
+                className="rounded bg-surface-dark px-1.5 py-1 text-xs text-text-primary border border-surface-hairline outline-none focus:border-accent"
+              >
+                <option value="auto">
+                  {effectivePlatformName ? `自动 · ${effectivePlatformName}` : '自动识别'}
+                </option>
+                {platforms.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </label>
           </div>
         </div>
-        <Tabs tabs={TABS} activeTab={activeTab} onTabChange={setActiveTab} className="m-3.5 mt-1" />
-        <div className="px-3.5 pb-2.5 -mt-1 flex items-center justify-between gap-2 text-xs text-text-muted">
-          <label className="flex items-center gap-1.5">
-            平台：
-            <select
-              value={platformOverride}
-              onChange={(e) => handlePlatformChange(e.target.value)}
-              className="rounded bg-surface-dark px-1.5 py-0.5 text-xs text-text-primary border border-surface-hairline outline-none focus:border-accent"
-            >
-              <option value="auto">自动识别</option>
-              {platforms.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-          </label>
-          <span className="truncate">
-            {effectivePlatformName
-              ? <span className="text-accent">{effectivePlatformName}</span>
-              : '未检测到招聘平台页面'}
-          </span>
-        </div>
+        <Tabs tabs={TABS} activeTab={activeTab} onTabChange={setActiveTab} className="mx-3.5 mb-2.5" />
       </div>
 
       {standalone && (
@@ -488,7 +465,7 @@ export default function App() {
         </div>
       )}
 
-      {/* 平台官网直达：五个平台一键跳转，无需手动输网址 */}
+      {/* 平台直达收进折叠，默认不占首屏 */}
       <PlatformShortcuts />
 
       {/* Content */}

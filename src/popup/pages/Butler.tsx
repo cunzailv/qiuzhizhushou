@@ -33,8 +33,20 @@ import type { ReviewResult } from '../../shared/agent/butler/review-planner'
 import type { ButlerDailyReport, DailyReportConfig, EvolutionProposal } from '../../shared/types/butler-evolution'
 import type { ErrorRecord } from '../../shared/db/index'
 import ButlerChatView from '../components/ButlerChatView'
+import { Disclosure } from '../../components/ui/disclosure'
 
 const MOD = 'ButlerTab'
+
+/** 二级导航按钮共用一套安静的选中态，避免每个入口重复一大段 className */
+function navButton(active: boolean, danger = false): string {
+  return [
+    'flex items-center justify-center gap-1.5 rounded-lg px-2 py-2',
+    'text-xs font-medium transition-colors cursor-pointer',
+    active
+      ? `bg-surface-darkest shadow-2xs border border-surface-hairline ${danger ? 'text-danger' : 'text-primary'}`
+      : 'text-text-muted hover:text-text-primary hover:bg-surface-darkest',
+  ].join(' ')
+}
 
 /** 开发者待修建议 · 优先级视觉映射 */
 const FIX_PRIORITY_STYLE: Record<
@@ -455,68 +467,17 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
           </button>
         </div>
 
-        {/* 二级导航：两行三列网格，6 个入口不再挤在同一行 */}
-        <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-surface-dark border border-surface-hairline">
-          <button
-            type="button"
-            onClick={() => setSubTab('chat')}
-            className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium transition cursor-pointer ${
-              subTab === 'chat'
-                ? 'bg-surface-darkest shadow-2xs text-primary font-medium border border-surface-hairline'
-                : 'text-text-muted hover:text-text-primary hover:bg-surface-darkest'
-            }`}
-          >
+        {/* 二级导航：常用的 3 个常驻，低频视图收进「更多视图」 */}
+        <div className="grid grid-cols-3 gap-1.5">
+          <button type="button" onClick={() => setSubTab('chat')} className={navButton(subTab === 'chat')}>
             <Bot className="w-3.5 h-3.5 text-accent" />
             对话中控
           </button>
-          <button
-            type="button"
-            onClick={() => setSubTab('daily_report')}
-            className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium transition cursor-pointer ${
-              subTab === 'daily_report'
-                ? 'bg-surface-darkest shadow-2xs text-primary border border-surface-hairline'
-                : 'text-text-muted hover:text-text-primary hover:bg-surface-darkest'
-            }`}
-          >
-            <Calendar className="w-3.5 h-3.5" />
-            管家日报
-          </button>
-          <button
-            type="button"
-            onClick={() => setSubTab('evolution')}
-            className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium transition cursor-pointer relative ${
-              subTab === 'evolution'
-                ? 'bg-surface-darkest shadow-2xs text-primary border border-surface-hairline'
-                : 'text-text-muted hover:text-text-primary hover:bg-surface-darkest'
-            }`}
-          >
-            <Sparkles className="w-3.5 h-3.5 text-brand-orange" />
-            策略进化
-            {pendingProposalsCount > 0 && (
-              <span className="w-1.5 h-1.5 rounded-full bg-brand-orange" />
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => setSubTab('strategy')}
-            className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium transition cursor-pointer ${
-              subTab === 'strategy'
-                ? 'bg-surface-darkest shadow-2xs text-primary border border-surface-hairline'
-                : 'text-text-muted hover:text-text-primary hover:bg-surface-darkest'
-            }`}
-          >
+          <button type="button" onClick={() => setSubTab('strategy')} className={navButton(subTab === 'strategy')}>
             <Target className="w-3.5 h-3.5" />
             跟进与留痕
           </button>
-          <button
-            type="button"
-            onClick={() => setSubTab('errors')}
-            className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium transition cursor-pointer ${
-              subTab === 'errors'
-                ? 'bg-surface-darkest shadow-2xs text-danger font-medium border border-surface-hairline'
-                : 'text-text-muted hover:text-text-primary hover:bg-surface-darkest'
-            }`}
-          >
+          <button type="button" onClick={() => setSubTab('errors')} className={navButton(subTab === 'errors', true)}>
             <Bug className="w-3.5 h-3.5 text-red-500" />
             异常留痕
             {errorCount > 0 && (
@@ -525,24 +486,35 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
               </span>
             )}
           </button>
-          <button
-            type="button"
-            onClick={() => setSubTab('fixes')}
-            className={`flex items-center justify-center gap-1.5 rounded-lg px-2 py-2 text-xs font-medium transition cursor-pointer ${
-              subTab === 'fixes'
-                ? 'bg-surface-darkest shadow-2xs text-warning font-medium border border-surface-hairline'
-                : 'text-text-muted hover:text-text-primary hover:bg-surface-darkest'
-            }`}
-          >
-            <Wrench className="w-3.5 h-3.5 text-warning" />
-            待修清单
-            {fixSuggestions.length > 0 && (
-              <span className="px-1 py-0.5 text-xs rounded-md bg-danger text-white font-medium">
-                {fixSuggestions.length}
-              </span>
-            )}
-          </button>
         </div>
+
+        <Disclosure
+          label="更多视图"
+          hint={`待抉择 ${pendingProposalsCount} · 待修 ${fixSuggestions.length}`}
+        >
+          <div className="grid grid-cols-3 gap-1.5">
+            <button type="button" onClick={() => setSubTab('daily_report')} className={navButton(subTab === 'daily_report')}>
+              <Calendar className="w-3.5 h-3.5" />
+              管家日报
+            </button>
+            <button type="button" onClick={() => setSubTab('evolution')} className={navButton(subTab === 'evolution')}>
+              <Sparkles className="w-3.5 h-3.5 text-brand-orange" />
+              策略进化
+              {pendingProposalsCount > 0 && (
+                <span className="w-1.5 h-1.5 rounded-full bg-brand-orange" />
+              )}
+            </button>
+            <button type="button" onClick={() => setSubTab('fixes')} className={navButton(subTab === 'fixes')}>
+              <Wrench className="w-3.5 h-3.5 text-warning" />
+              待修清单
+              {fixSuggestions.length > 0 && (
+                <span className="px-1 py-0.5 text-xs rounded-md bg-danger text-white font-medium">
+                  {fixSuggestions.length}
+                </span>
+              )}
+            </button>
+          </div>
+        </Disclosure>
       </div>
 
       {/* 视图 0：对话即操作 · 智能中控台 */}
@@ -698,6 +670,9 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                 </div>
               </div>
 
+              {/* 报告明细：护栏、平台分布、高光与诊断统一收起 */}
+              <Disclosure label="报告明细" hint="护栏 · 平台分布 · 高光与诊断">
+              <div className="space-y-3">
               {/* 严格安全护栏（Guardrails）与拟人保护达标证明 */}
               <div className="rounded-xl border border-surface-hairline bg-surface-dark/60 p-3 space-y-2 text-xs">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -784,6 +759,9 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                 </div>
               </div>
 
+              </div>
+              </Disclosure>
+
               {/* 明日作战指南 */}
               <div className="rounded-xl border border-surface-hairline bg-surface-dark p-3 space-y-2 text-xs">
                 <span className="text-xs font-medium text-text-primary flex items-center gap-1">
@@ -822,41 +800,40 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
       {/* 视图 2：高级的进化 · 感知与进化策略中心 */}
       {subTab === 'evolution' && (
         <div className="space-y-4">
-          {/* 人机协同哲学导语卡片 */}
-          <div className="rounded-xl border border-surface-hairline bg-surface-dark p-3.5 space-y-2 text-xs">
-            <div className="flex items-center justify-between">
-              <span className="font-medium text-[12px] text-text-primary flex items-center gap-1">
-                <Sparkles className="w-4 h-4 text-brand-orange" />
-                认知自进化闭环 · 战略抉择中心
-              </span>
-              <button
-                type="button"
-                onClick={handleRunInduction}
-                disabled={analyzingInduction}
-                className="text-xs text-primary bg-surface-darkest border border-surface-hairline hover:bg-surface-dark px-2.5 py-1 rounded-lg transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                title="深度分析海量 JD 与真实回复规律"
-              >
-                <RefreshCw className={`w-2.5 h-2.5 ${analyzingInduction ? 'animate-spin' : ''}`} />
-                {analyzingInduction ? '感知归纳中...' : '重新感知归纳'}
-              </button>
-            </div>
+          {/* 主操作常驻，长篇闭环说明收进折叠 */}
+          <div className="flex items-center justify-between gap-2 rounded-xl border border-surface-hairline bg-surface-dark px-3 py-2">
+            <span className="text-xs font-medium text-text-primary flex items-center gap-1">
+              <Sparkles className="w-3.5 h-3.5 text-brand-orange" />
+              认知自进化闭环 · 战略抉择中心
+            </span>
+            <button
+              type="button"
+              onClick={handleRunInduction}
+              disabled={analyzingInduction}
+              className="text-xs text-primary bg-surface-darkest border border-surface-hairline hover:bg-surface-dark px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              title="深度分析海量 JD 与真实回复规律"
+            >
+              <RefreshCw className={`w-2.5 h-2.5 ${analyzingInduction ? 'animate-spin' : ''}`} />
+              {analyzingInduction ? '感知归纳中...' : '重新感知归纳'}
+            </button>
+          </div>
+          <Disclosure label="闭环说明" hint="系统感知 · 人做战略抉择">
             <p className="text-xs text-text-muted leading-relaxed">
               <strong>系统负责感知与归纳</strong>（深度收集海量岗位 JD 与沟通数据，提炼高回复率特征）；
               <strong>系统向人汇报洞察并提出策略选项</strong>；
               <strong>人做出战略抉择</strong>，系统在严格的<strong>安全护栏（Guardrails）</strong>与拟人策略下克制地执行。
             </p>
-          </div>
+          </Disclosure>
 
-          {/* 提案过滤筛选 */}
-          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="text-text-muted">筛选：</span>
+          {/* 筛选按钮组收起，数量放在折叠标题的提示里 */}
+          <Disclosure label="筛选提案" hint={`共 ${filteredProposals.length} 项进化提案`}>
+            <div className="flex flex-wrap items-center gap-1.5">
               {(['all', 'pending', 'accepted'] as const).map((f) => (
                 <button
                   key={f}
                   type="button"
                   onClick={() => setProposalFilter(f)}
-                  className={`px-2.5 py-1 rounded-lg text-xs transition cursor-pointer ${
+                  className={`px-2.5 py-1 rounded-lg text-xs transition-colors cursor-pointer ${
                     proposalFilter === f
                       ? 'bg-primary text-white font-medium'
                       : 'bg-surface-dark text-text-muted hover:text-text-primary'
@@ -866,10 +843,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                 </button>
               ))}
             </div>
-            <span className="text-xs text-text-muted">
-              共 {filteredProposals.length} 项进化提案
-            </span>
-          </div>
+          </Disclosure>
 
           {/* 进化提案列表 */}
           <div className="space-y-4">
@@ -1131,7 +1105,11 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5">
+          </div>
+
+          {/* 维护动作收起，诊断中心标题与记录数保持常驻 */}
+          <Disclosure label="维护操作" hint="复制 · 清空 · 刷新">
+            <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
                 onClick={handleCopyErrors}
@@ -1159,10 +1137,11 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                 <RefreshCw className={`w-3.5 h-3.5 ${loadingErrors ? 'animate-spin' : ''}`} />
               </button>
             </div>
-          </div>
+          </Disclosure>
 
-          {/* 筛选标签 */}
-          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          {/* 筛选标签：收起，记录数放到折叠提示里 */}
+          <Disclosure label="按来源筛选" hint="Boss · 调度 · 对话台 · 其他">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
             <button
               type="button"
               onClick={() => setErrorFilter('all')}
@@ -1218,7 +1197,8 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
             >
               其他
             </button>
-          </div>
+            </div>
+          </Disclosure>
 
           {/* 列表渲染 */}
           {errorRecords.length === 0 ? (
@@ -1339,7 +1319,11 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-1.5">
+          </div>
+
+          {/* 导出与刷新收起，清单正文保持常驻 */}
+          <Disclosure label="导出与刷新" hint="复制 Markdown · 刷新">
+            <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
                 onClick={handleCopyFixesMarkdown}
@@ -1359,7 +1343,7 @@ ${dailyReport.diagnostics.map((d) => `- ${d}`).join('\n')}
                 <RefreshCw className={`w-3.5 h-3.5 ${loadingFixes ? 'animate-spin' : ''}`} />
               </button>
             </div>
-          </div>
+          </Disclosure>
 
           {/* 空状态 */}
           {fixSuggestions.length === 0 ? (

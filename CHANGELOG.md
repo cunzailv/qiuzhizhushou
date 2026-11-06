@@ -1,8 +1,11 @@
 # Changelog
 
-## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用、智能中控对话台 Tool-Calling Agent、异常留痕跨上下文统一、unslop 界面设计体系
+## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用、智能中控对话台 Tool-Calling Agent、异常留痕跨上下文统一、unslop 界面设计体系、信息架构分层收纳
 
 ### Added
+
+- **分层收纳底座**：新增 `src/components/ui/disclosure.tsx`（`type="button"` + `aria-expanded` + 默认收起 + 无 emoji / 渐变 / 循环动效）。首屏只回答「现在做什么 / 现在怎么样了」，低频设置全部可展开，**功能一个不删**
+- **回归测试**：新增 `tests/popup-information-architecture.test.ts`（17 例：Disclosure 无障碍契约 / 标签成对闭合 / AIbot 至少 15 个控件折叠、管家至少 10 个 / E2E 关键文案必须在深度 0 / 低频按钮按事件处理器定位必须在深度 > 0 / 功能文案一个没删 / 行为日志默认展开 / 概览与外壳去冗余）。测试总量 1021 → 1038（75 → 76 文件）
 
 - **unslop 设计底座**：`tailwind.config.js` 收敛为一条冷调石墨中性 ramp + 唯一 accent `#C2410C`（旧 `primary` / `brand` 兼容别名全部指向新值，零散引用不会退化成透明文字）；`globals.css` 重写组件类，去掉毛玻璃 / 渐变 / 发光，新增 `:focus-visible` 统一焦点环、数字 `tabular-nums` 与签名刻度线 `.queue-rule` / `.queue-rule-fill`
 - **签名细节**：2px 队列进度刻度线落地在 `CampaignPanel.tsx`（AIbot 各平台配额进度）、`BatchControlCard.tsx`（批量沟通进度）与 `components/ui/progress.tsx`，颜色只在这条线与关键数字上出现
@@ -26,6 +29,11 @@
 - **回归测试**：新增 `tests/error-report.test.ts`（10 例：转发成功不双写 / 转发抛错或 success:false 的兜底 / storage 不可用回退 Dexie / 并发写入不互相覆盖 / 去重 / 脏载荷 / 合并读取 / 清空 / 脏共享数据）
 
 ### Changed
+
+- **常驻头部与概览首屏**：`App.tsx` 一行放完品牌 + 平台状态 + 导航，平台名只在下拉里出现一次（删掉重复的平台徽章、副标题与「未检测到招聘平台页面」提示）；`PlatformShortcuts.tsx` 的 5 个平台直达卡收进「打开平台」，同时移除品牌色映射与 hover 位移；`Dashboard.tsx` 的 5 个独立统计卡合并成一行紧凑数字；`BatchControlCard.tsx` 的「投递模式 / AI 评分」收进「更多设置」，开跑按钮仍常驻
+- **AIbot 面板重排**：把「一键开跑 / 暂停 / 恢复 / 终止」从页面底部上移到指标看板正下方；「复盘与维护工具」收纳管家跳转、清空重获、立即补仓、恢复默认配额、刷新授权；「平台与配额」收纳 5 个平台开关 / 授权 / 配额输入；「悬浮窗配置」收纳 10 个模式与形态开关。「全自主无人值守队列 / 免手动」说明条与行为日志保持常驻；时段 / 间歇 / 投递方式三个入口移到编辑器正上方，展开后不用反向滚动
+- **管家页重排**：二级导航由 6 个入口收敛为「对话中控 / 跟进与留痕 / 异常留痕」+「更多视图」（管家日报 / 策略进化 / 待修清单），计数改到折叠提示里；日报明细、闭环说明、提案筛选、诊断维护、来源筛选、导出刷新各自折叠。按钮 className 抽成 `navButton()` 消除 6 段重复
+- **文档同步**：README 新增「信息架构 · 分层收纳」章节、测试数量 1021 → 1038、更新日志；CHANGELOG 补齐 Added / Changed / Fixed
 
 - **九道 pass 全量精修**：35 个界面文件按 Spacing → Color → Icons → Copy → Type → Layout → Details → Visuals → Motion 顺序收敛；26 个文件 830 行样式类批量替换，界面 emoji 装饰清零（日志 / 通知文本前缀保留，避免破坏既有测试断言）
 - **基础组件重写**：`button / card / badge / progress / toast / dialog / tabs` 统一为近黑主按钮、中性 hairline、方角标签与语义色文字；删除 `active:scale-95`、`hover:shadow-glow`、`transition-all`、`font-bold`、9–11px 小字
@@ -53,6 +61,7 @@
 
 ### Fixed
 
+- **折叠提示文案重复导致 E2E 严格模式冲突**：管家「按来源筛选」的 hint 曾写「共 N 条记录」，与诊断中心标题里的同文案同时被 `getByText(/共 \d+ 条记录/)` 命中，`tests/aibot-browser-e2e.test.ts` 失败。改用来源枚举作为 hint，「导出与刷新」的重复计数提示同步移除；两套受影响的浏览器 E2E 复跑通过
 - **副标题与 Tab 同名导致 E2E 严格模式冲突**：精简副标题时曾写入「结果追踪」，使 `getByText('追踪')` 同时匹配副标题与 Tab；改为「回复复盘」后 `tests/extension-flow.test.ts` 12 例恢复全绿
 
 - **页面域异常「留了但看不见」**：content script 直接写 `db.errors` 时落到网页域 IndexedDB，管家诊断中心读扩展域库，永远查不到。现由统一上报入口 + 共享队列 + 合并读取彻底打通
