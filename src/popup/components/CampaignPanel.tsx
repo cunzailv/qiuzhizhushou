@@ -43,6 +43,12 @@ import { PLATFORM_LOGIN_URLS } from '../../shared/platform/auth-checker'
 import { getSetting, setSetting } from '../../shared/db/settings-store'
 import { persistSharedFilters } from '../../shared/agent/filter-config'
 import {
+  getDeliveryStrategy,
+  applyDeliveryStrategy,
+  STRATEGY_PROFILES,
+  type DeliveryStrategy,
+} from '../../shared/agent/delivery-strategy'
+import {
   DEFAULT_ASSISTANT_STATE,
   getAssistantState,
   subscribeAssistantState,
@@ -144,8 +150,9 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
   // 拟人间歇自定义相关状态
   const [intervalConfig, setIntervalConfig] = useState<IntervalConfig>(DEFAULT_INTERVAL_CONFIG)
   const [showIntervalEditor, setShowIntervalEditor] = useState(false)
-  // 极速连投：15-45 秒/个，跳过 AI 语义评分与话术生成，门槛降到 25
-  const [fastMode, setFastMode] = useState(false)
+  // 投递方式（精投 / 海投）：必须由用户自己选，系统不预设
+  const [strategy, setStrategy] = useState<DeliveryStrategy | null>(null)
+  const [showStrategyPicker, setShowStrategyPicker] = useState(false)
   const [minSecInput, setMinSecInput] = useState('45')
   const [maxSecInput, setMaxSecInput] = useState('180')
 
@@ -219,7 +226,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         setIntervalConfig(savedInterval)
         setMinSecInput(String(savedInterval.minSeconds))
         setMaxSecInput(String(savedInterval.maxSeconds))
-        setFastMode(await getSetting<boolean>('aibotFastMode', false))
+        setStrategy(await getDeliveryStrategy())
 
         const savedQuotas = await getSavedPlatformQuotas()
         setPlatformQuotas(savedQuotas)
@@ -447,40 +454,19 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
     setShowIntervalEditor(false)
   }
 
-  // 一键极速连投：把节奏、门槛、话术三处一起切到「先投出去」的档位
-  const handleToggleFastMode = async () => {
-    const next = !fastMode
-    const cfg: IntervalConfig = next
-      ? { minSeconds: 15, maxSeconds: 45 }
-      : { minSeconds: 45, maxSeconds: 180 }
-
-    setFastMode(next)
-    setIntervalConfig(cfg)
-    setMinSecInput(String(cfg.minSeconds))
-    setMaxSecInput(String(cfg.maxSeconds))
-    await saveIntervalConfig(cfg)
-    await setSetting('aibotFastMode', next)
-    if (next) {
-      // 极速模式只保留底线门槛（无关行业/黑名单仍是硬拦截）
-      await persistSharedFilters({ minMatchScore: 25 })
-    }
-
-    try {
-      await chrome.runtime.sendMessage({
-        type: 'UPDATE_CAMPAIGN_INTERVAL',
-        payload: { interval: cfg },
-      })
-      await fetchStats()
-    } catch {
-      // 后台暂时不可达也不影响已落盘的配置
-    }
-
+  // 用户选定投递方式后：成套应用配置（间隔/门槛/AI 评分/话术），并自动继续启动
+  const handlePickStrategy = async (next: DeliveryStrategy) => {
+    const profile = await applyDeliveryStrategy(next)
+    setStrategy(next)
+    setIntervalConfig({ minSeconds: profile.minSeconds, maxSeconds: profile.maxSeconds })
+    setMinSecInput(String(profile.minSeconds))
+    setMaxSecInput(String(profile.maxSeconds))
+    setShowStrategyPicker(false)
     onNotify?.(
-      next
-        ? '🚀 极速连投已开启：15-45 秒/个，跳过 AI 语义评分与话术生成，匹配门槛降到 25'
-        : '已恢复正常模式：45-180 秒/个，恢复 AI 评分与个性化话术',
-      next ? 'warning' : 'success',
+      `已选择「${profile.label}」：${profile.minSeconds}-${profile.maxSeconds} 秒/个，匹配门槛 ${profile.minMatchScore} 分`,
+      'success',
     )
+    setTimeout(() => { void handleStart(next) }, 120)
   }
 
   // 手动触发全自主岗位探测与补仓
@@ -528,7 +514,14 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
   }
 
   // 启动流水线（全自动）：先申请 autopilot 锁，与概览的半自动互斥
-  const handleStart = async () => {
+  const handleStart = async (forcedStrategy?: DeliveryStrategy) => {
+    // 首次启动必须先让用户自己选投递方式，不替用户决定
+    const activeStrategy = forcedStrategy ?? strategy
+    if (!activeStrategy) {
+      setShowStrategyPicker(true)
+      onNotify?.('请先选择投递方式：精投（AI 逐岗判断）或海投（快速铺量）', 'info')
+      return
+    }
     if (runtime.mode === 'manual') {
       onNotify?.('概览的半自动沟通正在运行，请先在概览页点「停止」', 'warning')
       return
@@ -1089,7 +1082,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
           )}
           {!isRunning && !isPaused && (
             <button
-              onClick={handleStart}
+              onClick={() => void handleStart()}
               disabled={loading || runtime.mode === 'manual'}
               className="flex-1 py-2.5 px-3 rounded-lg bg-gradient-to-r from-brand-orange to-primary text-white font-medium text-xs flex items-center justify-center gap-1.5 shadow-sm hover:brightness-105 active:scale-[0.99] transition disabled:opacity-50 cursor-pointer"
             >
@@ -1398,6 +1391,56 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         </div>
       )}
 
+      {/* 投递方式选择：由用户自己决定精投还是海投，系统不预设 */}
+      {showStrategyPicker && (
+        <div className="bg-surface-dark border border-primary/30 rounded-lg p-3 space-y-2.5 text-xs">
+          <div className="flex items-center justify-between pb-1 border-b border-black/5">
+            <span className="font-semibold text-text-primary flex items-center gap-1">
+              <Zap className="w-3.5 h-3.5 text-primary" />
+              选择投递方式
+            </span>
+            <button
+              type="button"
+              onClick={() => setShowStrategyPicker(false)}
+              className="text-text-muted hover:text-text-primary p-0.5 rounded cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {(Object.keys(STRATEGY_PROFILES) as DeliveryStrategy[]).map((key) => {
+            const profile = STRATEGY_PROFILES[key]
+            const active = strategy === key
+            return (
+              <button
+                key={key}
+                type="button"
+                onClick={() => void handlePickStrategy(key)}
+                className={`w-full text-left rounded-lg border p-2.5 transition cursor-pointer ${
+                  active
+                    ? 'border-primary bg-primary/5'
+                    : 'border-black/10 bg-white hover:border-primary/50'
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-text-primary">{profile.label}</span>
+                  <span className="text-[10px] text-text-muted">
+                    {profile.minSeconds}-{profile.maxSeconds}s/个 · 门槛 {profile.minMatchScore} 分
+                  </span>
+                </div>
+                <p className="mt-1 text-[11px] leading-relaxed text-text-secondary">
+                  {profile.description}
+                </p>
+              </button>
+            )
+          })}
+
+          <p className="text-[10px] text-text-muted leading-relaxed">
+            选定后自动应用对应配置并开始投递；两套参数成套切换，不会出现「海投的间隔配精投的门槛」这种混搭。
+          </p>
+        </div>
+      )}
+
       {/* 底部保护机制说明与修改时段/间歇按钮 */}
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[10px] text-text-muted px-1 pt-0.5">
         <button
@@ -1432,14 +1475,15 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
 
         <button
           type="button"
-          onClick={handleToggleFastMode}
+          onClick={() => setShowStrategyPicker(true)}
           className={`flex items-center gap-1 font-medium transition-colors cursor-pointer ${
-            fastMode ? 'text-brand-orange' : 'text-text-muted hover:text-primary'
+            strategy ? 'text-brand-orange' : 'text-primary'
           }`}
-          title="一键切到 15-45 秒/个：跳过 AI 语义评分与话术生成，匹配门槛降到 25，先把岗位投出去"
+          title="选择投递方式：精投（AI 逐岗判断）或海投（快速铺量）"
         >
-          <Zap className={`w-3 h-3 ${fastMode ? 'text-brand-orange' : ''}`} />
-          <span>{fastMode ? '极速连投：开' : '极速连投'}</span>
+          <Zap className="w-3 h-3" />
+          <span>投递方式：{strategy ? STRATEGY_PROFILES[strategy].label : '未选择'}</span>
+          <Edit2 className="w-2.5 h-2.5 opacity-70 group-hover:opacity-100" />
         </button>
       </div>
     </div>

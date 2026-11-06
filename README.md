@@ -5,7 +5,7 @@
 <p align="center">
   <h1 align="center">🤝 智能求职助手</h1>
   <p align="center">
-    多平台 AI 驱动的求职投递 Chrome 扩展 —— AI 匹配评估 · 管家 Agent · 一键投递 · 简历管理
+    多平台 AI 驱动的求职投递 Chrome 扩展 —— AI 匹配评估 · 管家 Agent · 精投/海投双模式 · 简历管理
   </p>
 </p>
 
@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-807%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-948%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -102,6 +102,7 @@
 | **半自动 ⇄ 全自动互斥** | 概览「开始批量沟通」是半自动（`manual`），AIbot 是全自动（`autopilot`）。两者由 `src/shared/runtime-state.ts` 的全局锁仲裁：两处启动按钮同时禁用、启动请求被拒并显示提示；暂停 AIbot 会让出锁，恢复时重新申请；异常退出残留超过 2 小时的锁可被抢占 |
 | **筛选条件两边通用** | 概览「沟通筛选条件」与 AIbot 全自动流水线通过 `src/shared/agent/filter-config.ts` 读写同一批设置键；AI 评分开关与最低匹配分不再硬编码，任一侧修改两边立即生效 |
 | **配置双向同步** | AIbot 配置面板的「面板形态」卡片可设置整高侧栏 / 半圆浮球 / 停止与置顶常驻，并同步投递模式、AI 评分、猎聘简历模式；运行中切换从下一个任务起生效 |
+| **投递方式由用户决定** | 启动前必须由用户选择「精投」或「海投」，系统不预设。精投 = AI 逐岗打分 + 个性化话术、45-180 秒/个、门槛 60；海投 = 本地快速评分 + 平台模板、15-45 秒/个、门槛 25。两套参数由 `src/shared/agent/delivery-strategy.ts` 成套切换，杜绝「海投的间隔配精投的门槛」；未选择时启动会被拦截并弹出选择卡片 |
 | **停止链路统一** | 标题栏 `⏻`、侧栏「停止」、AIbot 面板「终止」是同一个动作：终止 campaign、清除 `apply-tick` 闹钟、取消当前任务、广播 `ASSISTANT_CANCEL`、释放全局运行锁，并把状态写成 `closed` |
 | **不再被自愈误伤** | `dismissUnexpectedModals` 清理高 `z-index` 遮罩时跳过扩展自有节点，避免运行一段时间后侧栏被当作页面弹窗隐藏 |
 

@@ -70,6 +70,11 @@ describe('AIbot browser real E2E test', () => {
     await startBtn.waitFor({ timeout: 5000 })
     await startBtn.click()
 
+    // 首次启动必须先让用户选择投递方式（精投 / 海投），选完会自动继续启动
+    const pickVolume = popupPage.getByText('海投', { exact: true })
+    await pickVolume.waitFor({ timeout: 5000 })
+    await pickVolume.click()
+
     // 验证状态变为「运行中」（精确匹配徽标，避免命中配置说明里同样含「运行中」的文案）
     await popupPage.getByText('运行中', { exact: true }).waitFor({ timeout: 5000 })
 
