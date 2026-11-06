@@ -46,6 +46,7 @@ export {
 }
 export type { ChatContact } from './action-simulator'
 import type { PlatformAdapter, PlatformRiskConfig } from '../types'
+import { detectLoginStateFromDom } from '../login-detect'
 
 const riskConfig: PlatformRiskConfig = {
   id: 'boss',
@@ -81,6 +82,7 @@ export const bossAdapter: PlatformAdapter = {
   getJobSpecificGreeting,
   snapshotCommunicationUi,
   closeDetailPanel,
+  detectLoginState: detectLoginStateFromDom,
   getRiskConfig: () => riskConfig,
 }
 

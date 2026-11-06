@@ -48,12 +48,22 @@ export function generateCustomModelId(): string {
 export const BUILTIN_MODELS: ModelPreset[] = [
   {
     id: 'deepseek',
-    name: 'DeepSeek V4',
+    name: 'DeepSeek V4.1 Flash',
     provider: '深度求索',
     baseUrl: 'https://api.deepseek.com/v1',
-    modelName: 'deepseek-chat',
-    description: 'DeepSeek 最新旗舰，中文能力强，性价比极高',
+    modelName: 'deepseek-flash',
+    description: '最新旗舰·原生支持图片理解（扫描件/截图），更快更便宜，AIbot 全流程默认推荐',
     free: true,
+    docsUrl: 'https://platform.deepseek.com/api_keys',
+  },
+  {
+    id: 'deepseek-v4-pro',
+    name: 'DeepSeek V4 Pro',
+    provider: '深度求索',
+    baseUrl: 'https://api.deepseek.com/v1',
+    modelName: 'deepseek-v4-pro',
+    description: '⚠️ 纯文本模型，不支持图片输入；遇到扫描件/截图会失效，仅在特殊推理场景备选',
+    free: false,
     docsUrl: 'https://platform.deepseek.com/api_keys',
   },
   {
@@ -103,5 +113,5 @@ export function getPresetById(id: string): ModelPreset | undefined {
 }
 
 export function getDefaultPreset(): ModelPreset {
-  return BUILTIN_MODELS[0] // DeepSeek V4
+  return BUILTIN_MODELS[0] // DeepSeek V4.1 Flash
 }

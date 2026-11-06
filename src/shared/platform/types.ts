@@ -87,4 +87,6 @@ export interface PlatformAdapter {
   getRiskConfig(): PlatformRiskConfig
   // 关闭已打开的详情面板（非推荐岗位释放资源）
   closeDetailPanel?(): Promise<void>
+  // 基于页面 DOM 判断登录态；unknown 表示无法判断（此时保留 cookie 判定结果）
+  detectLoginState?(): 'logged-in' | 'logged-out' | 'unknown'
 }

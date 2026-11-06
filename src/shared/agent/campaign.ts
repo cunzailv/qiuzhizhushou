@@ -192,17 +192,15 @@ export function isCampaignFinished(campaign: Campaign): boolean {
   )
   if (platforms.length === 0) return true
 
-  const allPlatformsCompleted = platforms.every((p) => {
+  // 只有「所有启用平台的配额达成 / 被平台限流耗尽」才算真正完成。
+  //
+  // 注意：队列里暂时没有 pending 任务 **不等于** 完成。
+  // 岗位会被跳过（匹配分不足）或被筛掉，这时队列会短暂见底，
+  // 但配额还没投满，应该继续补仓找新岗位。
+  // 历史上这里一旦「无 pending」就 return true，导致刚跳过一两个岗位
+  // 就宣布「所有平台任务圆满完成」并停止整个流水线。
+  return platforms.every((p) => {
     const q = campaign.quotas[p]
     return q.exhausted || q.applied >= q.quota
   })
-  if (allPlatformsCompleted) return true
-
-  // 检查是否已无 pending 且无 running 任务（只统计已启用的平台）
-  const hasPending = campaign.tasks.some(
-    (t) =>
-      (t.status === 'pending' || t.status === 'running') &&
-      campaign.quotas[t.platform]?.enabled !== false,
-  )
-  return !hasPending && campaign.tasks.length > 0
 }

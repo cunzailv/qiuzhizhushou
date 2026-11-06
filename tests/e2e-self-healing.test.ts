@@ -872,7 +872,8 @@ describe('Self-Healing Resilient Architecture — 4-Tier E2E Test Suite', () => 
         const updated = await getCampaign()
         const stats = aggregateCampaignStats(updated!)
         expect(stats.skipped).toBe(1)
-        expect(isCampaignFinished(updated!)).toBe(true)
+        // 跳过不消耗配额：活动必须继续补仓，而不是因为队列暂时空了就宣布完成
+        expect(isCampaignFinished(updated!)).toBe(false)
       })
 
       it('F8-3: execute cleanupUiFortified without residual masks', async () => {
@@ -1483,7 +1484,7 @@ describe('Self-Healing Resilient Architecture — 4-Tier E2E Test Suite', () => 
         expect(stats.done).toBe(0)
       })
 
-      it('F8-B4: campaign finish detection when all tasks are skipped', async () => {
+      it('F8-B4: all tasks skipped still leaves the campaign running', async () => {
         const cmp = await createNewCampaign({ boss: 1 }, ['boss'], [{ startHour: 0, startMin: 0, endHour: 23, endMin: 59 }])
         await appendTasksToCampaign([
           { id: '1', platform: 'boss', jobId: '1', jobTitle: 'T', company: 'C', jobUrl: 'u' },
@@ -1491,7 +1492,11 @@ describe('Self-Healing Resilient Architecture — 4-Tier E2E Test Suite', () => 
         const { task } = await claimNextTask(60000)
         await updateTaskResult(task!.id, { status: 'skipped', failReason: 'low score' })
         const updated = (await getCampaign())!
-        expect(isCampaignFinished(updated)).toBe(true)
+        // 岗位被跳过 ≠ 配额投满。此时必须继续补仓找新岗位，
+        // 否则会重现「投几个就宣布全部完成并停止流水线」的致命 bug。
+        expect(updated.quotas.boss.applied).toBe(0)
+        expect(isCampaignFinished(updated)).toBe(false)
+        expect(cmp.status).toBe('running')
       })
 
       it('F8-B5: handles missing callback without throwing', async () => {
@@ -1888,7 +1893,8 @@ describe('Self-Healing Resilient Architecture — 4-Tier E2E Test Suite', () => 
       expect(stats.done).toBe(4)
       expect(stats.skipped).toBe(1)
       expect(stats.pending).toBe(0)
-      expect(isCampaignFinished(cmp!)).toBe(true)
+      // 20 个配额里只投成 4 个，远未投满：活动应保持运行继续补仓
+      expect(isCampaignFinished(cmp!)).toBe(false)
 
       const recs = await getDiagnosticFixRecommendations()
       expect(recs.length).toBeGreaterThan(0)

@@ -110,6 +110,32 @@ export default function Resumes() {
       }
       log(MOD, 'upload', `Parsed rawText: ${rawText.length} chars`)
 
+      // 扫描件 / 图片型 PDF 没有文本层，parsePDF 拿不到内容。
+      // 用支持视觉的模型（DeepSeek V4.1 Flash 原生支持图片）把前两页读成文字。
+      if (fileType === 'pdf' && rawText.trim().length < 100) {
+        try {
+          showToast('检测到扫描件简历，正在用视觉模型识别...', 'info')
+          const { renderPDFPagesToImages } = await import('../../shared/parser/pdf-parser')
+          const { chatCompletionWithVision } = await import('../../shared/ai')
+          const images = await renderPDFPagesToImages(file, 2)
+          if (images.length > 0) {
+            const ocrText = await chatCompletionWithVision(
+              '你是专业的简历文字提取助手。逐字提取图片中的简历内容，保留原有分区（个人信息、工作经历、项目经历、教育背景、技能），不要总结、不要编造、不要补充图片里没有的内容。',
+              '请把这份简历图片转换成纯文本，尽量保留原文措辞与时间、公司、职位等关键信息。',
+              images.map((data) => ({ data })),
+              0.1,
+            )
+            if (ocrText && ocrText.trim().length > rawText.trim().length) {
+              rawText = ocrText.trim()
+              log(MOD, 'upload', `Vision OCR extracted ${rawText.length} chars from scanned PDF`)
+              showToast('扫描件识别完成', 'success')
+            }
+          }
+        } catch (error) {
+          logWarn(MOD, 'upload', 'Scanned PDF vision fallback failed', error)
+        }
+      }
+
       if (!rawText || !rawText.trim()) {
         log(MOD, 'upload', 'Parsed content is empty')
         showToast('简历内容为空，请检查文件是否损坏或为扫描件图片', 'error')

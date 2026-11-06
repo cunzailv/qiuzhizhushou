@@ -147,6 +147,38 @@ export async function saveCandidatePreferences(
   return updated
 }
 
+// ─────────────── 默认模型迁移（DeepSeek 旧模型名 → V4.1 Flash）───────────────
+// 官方 API 现状（2026-09 起）：
+//   deepseek-flash   → DeepSeek-V4.1-Flash（当前默认，支持图片）
+//   deepseek-v4-pro  → DeepSeek-V4-Pro（推理旗舰）
+//   deepseek-chat / deepseek-reasoner 已于 2026-07-24 停用，调用必然失败
+// 这里做一次性对齐：仅当「预设仍是内置 DeepSeek」且「模型名是已停用/旧默认值」时才升级。
+
+const MODEL_PRESET_KEY = 'modelPreset'
+const MODEL_NAME_KEY = 'modelName'
+const LEGACY_DEFAULT_MODEL_NAMES = [
+  'deepseek-chat',
+  'deepseek-reasoner',
+  'deepseek-v4-flash',
+  'deepseek-v4.1-flash',
+  'deepseek-v4-flash-vision-exp',
+  'deepseek-v4.1',
+]
+const CURRENT_DEFAULT_MODEL_NAME = 'deepseek-flash'
+
+/** 把已停用/旧的默认模型名对齐到当前默认（幂等，可多次调用） */
+export async function migrateDefaultModelName(): Promise<string | null> {
+  const presetId = await getSetting<string>(MODEL_PRESET_KEY, 'deepseek')
+  if (presetId !== 'deepseek') return null
+
+  const currentName = await getSetting<string>(MODEL_NAME_KEY, '')
+  if (!currentName) return null
+  if (!LEGACY_DEFAULT_MODEL_NAMES.includes(currentName)) return null
+
+  await setSetting(MODEL_NAME_KEY, CURRENT_DEFAULT_MODEL_NAME)
+  return CURRENT_DEFAULT_MODEL_NAME
+}
+
 // ─────────────── 安全阀档位（Safety Profile）───────────────
 // 只在「首次启动且本地没有任何节奏参数」时写入默认保守档；
 // 老用户若已经调过 dailyLimit / minDelay 等任意一项，标记为 custom，绝不覆盖其数值。

@@ -19,76 +19,101 @@ function sanitizeKeyword(raw: string): string {
     .trim()
 }
 
+/** 单个搜索词的最大长度：超过即认为是“一段描述”而不是“一个职位名”，直接丢弃 */
+const MAX_KEYWORD_LEN = 12
+/** 关键词矩阵最多保留数量（轮转巡检用） */
+const MAX_KEYWORDS = 8
+
 /**
- * 从简历、求职偏好及筛选器中智能归纳并提取多维自主搜索关键词矩阵
+ * 把用户填写的期望职位等文本切成一个个可用的搜索词。
+ * 支持逗号 / 顿号 / 分号 / 竖线 / 斜杠 / 换行，
+ * 避免「商城后台维护、BUG 修复与新增功能开发」这类整句被当成一个搜索词。
+ */
+function splitKeywordTokens(raw: string): string[] {
+  return raw
+    .split(/[,，、;；\n|/\\]+/)
+    .map(sanitizeKeyword)
+    .filter(Boolean)
+}
+
+/** 是否是可直接用于平台搜索的干净短词 */
+function isUsableKeyword(token: string): boolean {
+  if (token.length < 2 || token.length > MAX_KEYWORD_LEN) return false
+  return /[\u4e00-\u9fa5a-zA-Z]/.test(token)
+}
+
+/**
+ * 公司名 / 项目名 / 简历字段噪音。
+ * 简历里的「项目角色」常写成「某某科技网站 全栈独立开发」，
+ * 一旦被当搜索词扔给招聘平台，搜出来的结果基本是空的——必须硬拦。
+ */
+const COMPANY_NOISE_RE = /(有限公司|公司|集团|科技|网络|信息技术|智创|工作室|网站|平台|系统|项目|简历|求职|负责|参与|主导)/
+
+/** 职位语义词：从简历等自由文本抽词时的强校验，避免把公司名当职位 */
+const ROLE_SEMANTIC_RE =
+  /(开发|工程师|前端|后端|服务端|后台|全栈|架构|技术经理|技术主管|研发|测试|运维|算法|数据|产品经理|AI|智能体|PHP|Java|Go|Python|Node|React|Vue|Laravel|小程序)/
+
+/**
+ * 提取自主搜索关键词。
+ *
+ * 设计原则：**只使用可信的职位名来源**，宁可少也不能脏。
+ *  - 用户明确填写的「期望职位」→ 直接用
+ *  - 简历里的「工作经历-职位」（如「PHP开发工程师」）→ 通过职位语义校验后使用
+ *  - 简历姓名 / 个人简介长句 / 项目名称 / 求职底线 → **一律不参与**，
+ *    这些自由文本抽出来的几乎都是公司名或非职位词，会直接污染搜索结果。
  */
 export function extractSearchKeywords(
   resume?: Resume | null,
-  preferences?: CandidateProfilePreferences,
+  _preferences?: CandidateProfilePreferences,
   filters?: ApplyFilters,
 ): string[] {
   const keywordSet = new Set<string>()
 
-  // 1. 优先来自用户手动设定的搜索期望职位
+  // 1. 用户明确填写的期望职位（按顿号等多分隔符拆分，仅剔除公司名噪音）
   if (filters?.jobTitles) {
-    const customTitles = filters.jobTitles
-      .split(/[,，;\n|]+/)
+    for (const t of splitKeywordTokens(filters.jobTitles)) {
+      if (isUsableKeyword(t) && !COMPANY_NOISE_RE.test(t)) keywordSet.add(t)
+    }
+  }
+
+  // 2. 简历工作经历中的职位名称——招聘流程里的标准职位名，最可靠的第二来源
+  for (const w of resume?.structuredData?.workExperience || []) {
+    for (const t of splitKeywordTokens(w.position || '')) {
+      if (
+        isUsableKeyword(t) &&
+        ROLE_SEMANTIC_RE.test(t) &&
+        !COMPANY_NOISE_RE.test(t)
+      ) {
+        keywordSet.add(t)
+      }
+    }
+  }
+
+  // 3. 简历名称 / 文件名：只在「含职位语义」时采用
+  //    「全栈架构师」「张三-全栈开发-6年」→ 取出职位；「张三」这种人名直接丢弃，
+  //    绝不能用求职者姓名去搜岗位。
+  if (resume?.name) {
+    const nameParts = resume.name
+      .replace(/\.[a-zA-Z0-9]+$/, '')
+      .replace(/[（(].*?[)）]/g, ' ')
+      .split(/[\s\-_—]+/)
       .map(sanitizeKeyword)
-      .filter((k) => k.length >= 2)
-    for (const t of customTitles) {
-      keywordSet.add(t)
-    }
-  }
-
-  // 2. 从简历结构化数据中提取职位与核心角色
-  if (resume) {
-    if (resume.name) {
-      const cleanName = sanitizeKeyword(resume.name)
-      if (cleanName.length >= 2) keywordSet.add(cleanName)
-    }
-
-    // 历史工作经历的职位名称
-    const workPositions = (resume.structuredData?.workExperience || [])
-      .map((w) => sanitizeKeyword(w.position || ''))
-      .filter((p) => p.length >= 2)
-    for (const pos of workPositions) {
-      keywordSet.add(pos)
-    }
-
-    // 简历画像或摘要中的核心方向
-    if (resume.profile?.profile) {
-      const match = resume.profile.profile.match(/(\d+年)?(.*?)(经验|方向|架构|全栈|开发)/)
-      if (match && match[2]) {
-        const clean = sanitizeKeyword(match[2])
-        if (clean.length >= 2 && clean.length <= 15) keywordSet.add(clean)
-      }
-    }
-
-    // 项目经历角色
-    const projectRoles = (resume.structuredData?.projects || [])
-      .map((p) => sanitizeKeyword(p.role || ''))
-      .filter((r) => r.length >= 2 && r.length <= 12)
-    for (const r of projectRoles) {
-      keywordSet.add(r)
-    }
-  }
-
-  // 3. 从求职偏好中提取目标方向
-  if (preferences?.customBottomLines) {
-    const customMatches = preferences.customBottomLines.match(/[a-zA-Z0-9\u4e00-\u9fa5]{2,10}/g) || []
-    for (const m of customMatches.slice(0, 3)) {
-      if (!['不接受', '不考虑', '拒绝', '必须'].includes(m)) {
-        keywordSet.add(sanitizeKeyword(m))
+      .filter(Boolean)
+    for (const t of nameParts) {
+      if (isUsableKeyword(t) && ROLE_SEMANTIC_RE.test(t) && !COMPANY_NOISE_RE.test(t)) {
+        keywordSet.add(t)
       }
     }
   }
 
-  // 4. 若提取结果为空，提供行业通用主流兜底词库
-  if (keywordSet.size === 0) {
+  const usable = Array.from(keywordSet).filter(isUsableKeyword).slice(0, MAX_KEYWORDS)
+
+  // 3. 若提取结果为空，提供行业通用主流兜底词库
+  if (usable.length === 0) {
     return ['全栈工程师', '前端开发工程师', '后端开发工程师', '技术经理']
   }
 
-  return Array.from(keywordSet).slice(0, 8)
+  return usable
 }
 
 /** 获取当前自主搜索轮转关键词游标 */

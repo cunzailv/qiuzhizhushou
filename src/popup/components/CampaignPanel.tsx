@@ -18,6 +18,7 @@ import {
   Save,
   X,
   Trash2,
+  Zap,
 } from 'lucide-react'
 import type { CampaignStats } from '../../shared/agent/campaign'
 import type { PlatformId, TimeWindow, IntervalConfig } from '../../shared/agent/quota'
@@ -143,6 +144,8 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
   // 拟人间歇自定义相关状态
   const [intervalConfig, setIntervalConfig] = useState<IntervalConfig>(DEFAULT_INTERVAL_CONFIG)
   const [showIntervalEditor, setShowIntervalEditor] = useState(false)
+  // 极速连投：15-45 秒/个，跳过 AI 语义评分与话术生成，门槛降到 25
+  const [fastMode, setFastMode] = useState(false)
   const [minSecInput, setMinSecInput] = useState('45')
   const [maxSecInput, setMaxSecInput] = useState('180')
 
@@ -216,6 +219,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         setIntervalConfig(savedInterval)
         setMinSecInput(String(savedInterval.minSeconds))
         setMaxSecInput(String(savedInterval.maxSeconds))
+        setFastMode(await getSetting<boolean>('aibotFastMode', false))
 
         const savedQuotas = await getSavedPlatformQuotas()
         setPlatformQuotas(savedQuotas)
@@ -441,6 +445,42 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
 
     onNotify?.(`拟人间歇已更新为：${minSec}-${maxSec} 秒随机等待`, 'success')
     setShowIntervalEditor(false)
+  }
+
+  // 一键极速连投：把节奏、门槛、话术三处一起切到「先投出去」的档位
+  const handleToggleFastMode = async () => {
+    const next = !fastMode
+    const cfg: IntervalConfig = next
+      ? { minSeconds: 15, maxSeconds: 45 }
+      : { minSeconds: 45, maxSeconds: 180 }
+
+    setFastMode(next)
+    setIntervalConfig(cfg)
+    setMinSecInput(String(cfg.minSeconds))
+    setMaxSecInput(String(cfg.maxSeconds))
+    await saveIntervalConfig(cfg)
+    await setSetting('aibotFastMode', next)
+    if (next) {
+      // 极速模式只保留底线门槛（无关行业/黑名单仍是硬拦截）
+      await persistSharedFilters({ minMatchScore: 25 })
+    }
+
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'UPDATE_CAMPAIGN_INTERVAL',
+        payload: { interval: cfg },
+      })
+      await fetchStats()
+    } catch {
+      // 后台暂时不可达也不影响已落盘的配置
+    }
+
+    onNotify?.(
+      next
+        ? '🚀 极速连投已开启：15-45 秒/个，跳过 AI 语义评分与话术生成，匹配门槛降到 25'
+        : '已恢复正常模式：45-180 秒/个，恢复 AI 评分与个性化话术',
+      next ? 'warning' : 'success',
+    )
   }
 
   // 手动触发全自主岗位探测与补仓
@@ -1359,7 +1399,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
       )}
 
       {/* 底部保护机制说明与修改时段/间歇按钮 */}
-      <div className="flex items-center justify-between text-[10px] text-text-muted px-1 pt-0.5">
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[10px] text-text-muted px-1 pt-0.5">
         <button
           type="button"
           onClick={() => {
@@ -1388,6 +1428,18 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             拟人间歇: {intervalConfig.minSeconds}-{intervalConfig.maxSeconds}s
           </span>
           <Edit2 className="w-2.5 h-2.5 opacity-70 group-hover:opacity-100" />
+        </button>
+
+        <button
+          type="button"
+          onClick={handleToggleFastMode}
+          className={`flex items-center gap-1 font-medium transition-colors cursor-pointer ${
+            fastMode ? 'text-brand-orange' : 'text-text-muted hover:text-primary'
+          }`}
+          title="一键切到 15-45 秒/个：跳过 AI 语义评分与话术生成，匹配门槛降到 25，先把岗位投出去"
+        >
+          <Zap className={`w-3 h-3 ${fastMode ? 'text-brand-orange' : ''}`} />
+          <span>{fastMode ? '极速连投：开' : '极速连投'}</span>
         </button>
       </div>
     </div>

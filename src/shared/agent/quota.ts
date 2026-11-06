@@ -196,14 +196,17 @@ export async function saveTimeWindows(windows: TimeWindow[]): Promise<void> {
   await chrome.storage.local.set({ [SETTINGS_KEY_TIME_WINDOWS]: windows })
 }
 
-/** 检查当前时间是否处于允许投递的时间窗口内 */
+/** 检查当前时间是否处于允许投递的时间窗口内（支持跨午夜窗口，如 22:00-02:00） */
 export function isWithinWindow(windows: TimeWindow[] = DEFAULT_WINDOWS, now = new Date()): boolean {
   if (!windows || windows.length === 0) return true // 若未配置时段，默认全天允许
   const currentMinutes = now.getHours() * 60 + now.getMinutes()
   return windows.some((win) => {
     const start = win.startHour * 60 + win.startMin
     const end = win.endHour * 60 + win.endMin
-    return currentMinutes >= start && currentMinutes <= end
+    if (start === end) return true // 首尾相同视为全天
+    if (start < end) return currentMinutes >= start && currentMinutes <= end
+    // 跨午夜：当天晚些时候到次日凌晨
+    return currentMinutes >= start || currentMinutes <= end
   })
 }
 
@@ -213,22 +216,17 @@ export function getDelayUntilNextWindow(windows: TimeWindow[] = DEFAULT_WINDOWS,
   if (!windows || windows.length === 0) return 0
   const currentMinutes = now.getHours() * 60 + now.getMinutes()
 
-  // 寻找今天后续的窗口
+  // 统一按“距离最近的窗口开始时间”计算，跨午夜窗口也成立
+  let minDeltaMinutes = Number.POSITIVE_INFINITY
   for (const win of windows) {
     const start = win.startHour * 60 + win.startMin
-    if (start > currentMinutes) {
-      return (start - currentMinutes) * 60 * 1000
-    }
+    let delta = start - currentMinutes
+    if (delta <= 0) delta += 24 * 60
+    if (delta < minDeltaMinutes) minDeltaMinutes = delta
   }
 
-  // 今天窗口都已过，计算距离明天第一个窗口的时间
-  if (windows.length > 0) {
-    const firstWin = windows[0]
-    const tomorrowMinutes = 24 * 60 - currentMinutes + (firstWin.startHour * 60 + firstWin.startMin)
-    return tomorrowMinutes * 60 * 1000
-  }
-
-  return 60_000
+  if (!Number.isFinite(minDeltaMinutes)) return 60_000
+  return minDeltaMinutes * 60 * 1000
 }
 
 /** 生成指定平台的拟人随机延迟（毫秒），支持传入用户自定义秒级间歇配置 */

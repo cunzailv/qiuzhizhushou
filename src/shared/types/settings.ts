@@ -60,7 +60,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   modelPreset: 'deepseek',
   apiBaseUrl: 'https://api.deepseek.com/v1',
   apiKey: '',
-  modelName: 'deepseek-chat',
+  modelName: 'deepseek-flash',
   aiEnabled: false,
   panelState: 'expanded',
   liepinResumeMode: false,

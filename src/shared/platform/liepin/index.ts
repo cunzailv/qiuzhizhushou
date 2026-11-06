@@ -8,6 +8,7 @@
 // 真实 DOM 会随官方改版而变化。标注 [待校准] 的地方需在真实页面上验证。
 import type { JobCard, MatchResult } from '../../types/job'
 import type { PlatformAdapter, PlatformRiskConfig, CollectOptions, PageType, CommunicationUiSnapshot } from '../types'
+import { detectLoginStateFromDom } from '../login-detect'
 import { log } from '../../utils/logger'
 import { extractLanguageFamilies, extractResumeLanguageFamilies, getHighestDegree } from '../../ai/local-matcher'
 import type { Resume } from '../../types/resume'
@@ -885,5 +886,6 @@ export const liepinAdapter: PlatformAdapter = {
   getJobSpecificGreeting,
   snapshotCommunicationUi,
   closeDetailPanel: async () => { await closeAnyModal() },
+  detectLoginState: detectLoginStateFromDom,
   getRiskConfig: () => riskConfig,
 }

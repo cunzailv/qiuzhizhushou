@@ -1,5 +1,6 @@
 // 招聘平台登录与授权状态探测器
 import type { PlatformId } from '../agent/quota'
+import type { PageLoginState } from './login-detect'
 
 export interface PlatformAuthInfo {
   platform: PlatformId
@@ -54,6 +55,39 @@ const PLATFORM_DISPLAY_NAMES: Record<PlatformId, string> = {
   maimai: '脉脉',
 }
 
+/** DOM 探测结果缓存（避免每轮巡检都发消息） */
+const pageAuthCache: Partial<Record<PlatformId, { state: PageLoginState; at: number }>> = {}
+const PAGE_AUTH_CACHE_MS = 5 * 60_000
+
+/**
+ * 当 cookie 判定为「未登录」时，用页面真实渲染结果复核一次。
+ * 平台改了 cookie 名 / 换用新登录机制时，只靠 cookie 会把已登录误判成未登录，
+ * 导致整个平台被跳过。
+ */
+async function detectLoginStateByPage(platform: PlatformId): Promise<PageLoginState> {
+  const cached = pageAuthCache[platform]
+  if (cached && Date.now() - cached.at < PAGE_AUTH_CACHE_MS) return cached.state
+
+  let state: PageLoginState = 'unknown'
+  try {
+    const cfg = PLATFORM_DOMAINS[platform]
+    const host = cfg.domain.replace(/^\./, '')
+    const tabs = await chrome.tabs.query({})
+    const tab = tabs.find((t) => t.url && t.url.includes(host))
+    if (tab?.id) {
+      const res = (await chrome.tabs.sendMessage(tab.id, { type: 'CHECK_PLATFORM_LOGIN' })) as
+        | { state?: PageLoginState }
+        | undefined
+      if (res?.state === 'logged-in' || res?.state === 'logged-out') state = res.state
+    }
+  } catch {
+    // content script 未注入 / 标签页已关闭：保持 unknown，沿用 cookie 判定
+  }
+
+  pageAuthCache[platform] = { state, at: Date.now() }
+  return state
+}
+
 /** 探测指定平台的登录授权状态 */
 export async function checkPlatformAuth(platform: PlatformId): Promise<PlatformAuthInfo> {
   const cfg = PLATFORM_DOMAINS[platform]
@@ -92,10 +126,23 @@ export async function checkPlatformAuth(platform: PlatformId): Promise<PlatformA
       cfg.cookieNames.includes(c.name) && !!c.value && c.value.trim().length > 0,
     )
 
+    if (hasAuthCookie) {
+      return {
+        platform,
+        name,
+        isLoggedIn: true,
+        loginUrl,
+        lastCheckedAt: Date.now(),
+      }
+    }
+
+    // 3. cookie 判定为未登录 → 用页面实际渲染结果复核一次，
+    //    防止平台改了 cookie 名或改用新登录机制时把已登录误判成未登录
+    const pageState = await detectLoginStateByPage(platform)
     return {
       platform,
       name,
-      isLoggedIn: hasAuthCookie,
+      isLoggedIn: pageState === 'logged-in',
       loginUrl,
       lastCheckedAt: Date.now(),
     }

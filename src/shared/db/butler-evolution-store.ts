@@ -9,6 +9,7 @@ import { DEFAULT_DAILY_REPORT_CONFIG } from '../types/butler-evolution'
 import { getSetting, setSetting } from './settings-store'
 import { logDecision } from './butler-store'
 import { getCareerProfile, updateCareerProfile } from './career-store'
+import { normalizeCareerTokens } from '../agent/job-filter'
 import { log } from '../utils/logger'
 
 const MOD = 'ButlerEvolutionStore'
@@ -110,11 +111,13 @@ export async function acceptEvolutionProposal(
     await updateCareerProfile({ skills: updatedSkills })
     appliedChange = `已将「${target.diff.after}」增补写入职业画像技能库`
   } else if (target.diff.targetField === 'targetTitles') {
-    // 战略方向跃迁：将新目标职位并入投递搜索偏好
+    // 战略方向跃迁：并入投递搜索偏好前必须清洗，
+    // 否则 AI 生成的长句 / 简历里的公司名（如「某某网站 全栈独立开发」）会被原样写进「岗位名称」
     const applyFilters = (await getSetting<any>('applyFilters', {})) || {}
-    const currentTitles = (applyFilters.jobTitles || '').split(/\s+/).filter(Boolean)
-    const newTitles = target.diff.after.split(/[,，、/ ]+/).filter(Boolean)
-    const combined = Array.from(new Set([...currentTitles, ...newTitles])).join(' ')
+    const currentTitles = normalizeCareerTokens(applyFilters.jobTitles || '')
+    const newTitles = normalizeCareerTokens(target.diff.after)
+    const combinedList = Array.from(new Set([...currentTitles, ...newTitles]))
+    const combined = combinedList.join(' ')
     applyFilters.jobTitles = combined
     await setSetting('applyFilters', applyFilters)
     appliedChange = `已将主攻岗位方向升级扩展为：「${combined}」`

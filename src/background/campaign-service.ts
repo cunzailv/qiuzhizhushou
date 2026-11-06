@@ -31,13 +31,14 @@ import {
   isCampaignFinished,
 } from '../shared/agent/campaign'
 import { prefetchNextTasksAI } from '../shared/ai/prefetch'
+import { AI_FAILURE_KEY, type AiFailureMark } from '../shared/ai/api-client'
 import { getDefaultResume } from '../shared/db/resume-store'
-import { ensurePlatformTab, sendTabMessageWithRetry } from './tab-manager'
-import { checkPlatformAuth } from '../shared/platform/auth-checker'
+import { ensurePlatformTab, sendTabMessageWithRetry, openPlatformLoginTab } from './tab-manager'
+import { checkPlatformAuth, checkAllPlatformsAuth } from '../shared/platform/auth-checker'
 import { generateDailyButlerReport } from '../shared/agent/butler/daily-report-generator'
 import { getDailyReportConfig } from '../shared/db/butler-evolution-store'
 import { recordError } from '../shared/db/error-store'
-import { extractTargetCareers } from '../shared/agent/job-filter'
+import { extractTargetCareers, diagnoseCareerTokens, normalizeCareerTokens } from '../shared/agent/job-filter'
 import { loadSharedApplyFilters } from '../shared/agent/filter-config'
 import { replanIfNeeded } from '../shared/agent/planner'
 import { sendWebhookNotification } from '../shared/notification/webhook-notifier'
@@ -48,6 +49,7 @@ import {
 } from '../shared/agent/job-discovery'
 import type { ApplyFilters } from '../shared/types/filters'
 import { releaseRunMode } from '../shared/runtime-state'
+import { getSetting, setSetting } from '../shared/db/settings-store'
 import { log, logWarn, logError } from '../shared/utils/logger'
 
 const MOD = 'CampaignService'
@@ -65,6 +67,101 @@ let isTicking = false
 let scheduledTimer: ReturnType<typeof setTimeout> | null = null
 const consecutiveNotFoundMap: Partial<Record<PlatformId, number>> = {}
 
+/**
+ * 连续因“职业方向”过滤导致零新增的轮次。
+ * 达到阈值后自动放宽方向限制，改由 AI 匹配分把关，避免方向清单配置不当把产量打成 0。
+ */
+let careerFilterMissStreak = 0
+let careerRelaxAnnounced = false
+const CAREER_RELAX_THRESHOLD = 3
+
+/**
+ * 每个「平台:关键词」的搜索页码游标（持久化到 storage）。
+ * 之前只存内存，Service Worker 被回收后游标归零，
+ * 于是每次重启都会重新扫第 1 页（全是投过的岗位）再逐页往后挪，白白空转好几轮。
+ */
+const SEARCH_PAGE_CURSOR_KEY = 'aibot_search_page_cursor'
+const MAX_SEARCH_PAGE = 5
+/** 超过这个时间的游标作废，回到第 1 页（新岗位通常出现在搜索结果前部） */
+const PAGE_CURSOR_TTL_MS = 12 * 60 * 60 * 1000
+
+interface PageCursorEntry {
+  page: number
+  at: number
+}
+
+export async function getSearchPageCursor(pageKey: string): Promise<number> {
+  try {
+    const res = await chrome.storage.local.get(SEARCH_PAGE_CURSOR_KEY)
+    const map = (res?.[SEARCH_PAGE_CURSOR_KEY] || {}) as Record<string, PageCursorEntry>
+    const entry = map[pageKey]
+    if (!entry || !entry.page) return 1
+    if (Date.now() - (entry.at || 0) > PAGE_CURSOR_TTL_MS) return 1
+    return Math.min(Math.max(1, entry.page), MAX_SEARCH_PAGE)
+  } catch {
+    return 1
+  }
+}
+
+export async function setSearchPageCursor(pageKey: string, page: number): Promise<void> {
+  try {
+    const res = await chrome.storage.local.get(SEARCH_PAGE_CURSOR_KEY)
+    const map = (res?.[SEARCH_PAGE_CURSOR_KEY] || {}) as Record<string, PageCursorEntry>
+    map[pageKey] = { page, at: Date.now() }
+    await chrome.storage.local.set({ [SEARCH_PAGE_CURSOR_KEY]: map })
+  } catch {
+    // 持久化失败时退化为本轮内存行为，不影响采集
+  }
+}
+
+/** 方向诊断日志去重签名，避免每轮补仓重复刷同一条 */
+let careerDiagnosticSig = ''
+
+/** 已上报过的 AI 失败时间戳，保证同一次失败只提示一次 */
+let lastReportedAiFailureAt = 0
+
+/**
+ * AI 降级可见化：AI 调用失败会被静默回退到本地规则，
+ * 用户完全感知不到「AI 其实没工作」。这里把失败标记读出来写进 AIbot 日志。
+ */
+async function reportAiDegradeIfAny(): Promise<void> {
+  try {
+    const res = await chrome.storage.local.get(AI_FAILURE_KEY)
+    const mark = res?.[AI_FAILURE_KEY] as AiFailureMark | undefined
+    if (!mark || !mark.at || mark.at <= lastReportedAiFailureAt) return
+    lastReportedAiFailureAt = mark.at
+
+    const reason =
+      mark.kind === 'model' ? '模型名可能无效或已停用'
+        : mark.kind === 'http' ? '接口返回错误'
+        : '网络请求失败'
+
+    await appendCampaignLog(
+      `⚠️ AI 调用失败（${reason}）｜模型：${mark.model || '未知'}｜${mark.message}。当前已降级为本地规则评分与话术，请到设置页点「测试连接」排查`,
+      'warn',
+    )
+  } catch {
+    // 读取失败不影响主流程
+  }
+}
+
+/** 连续多轮补仓零新增的次数，用于空转退避（没事干就少折腾） */
+let emptyDiscoveryStreak = 0
+
+/** 各平台上次提示“未登录”的时间戳，10 分钟内静默跳过，避免刷屏 */
+const authWarnedAt: Partial<Record<PlatformId, number>> = {}
+/** 已自动拉起过登录页的平台，只打扰一次 */
+const loginTabOpened: Partial<Record<PlatformId, boolean>> = {}
+const AUTH_RECHECK_INTERVAL = 10 * 60_000
+
+/**
+ * 各平台连续采集通信失败的次数。
+ * content script 丢失 / 页面被关 / 平台改版 都会表现成 "Receiving end does not exist"，
+ * 连续多次说明不是偶发抖动，必须主动告警，否则用户只会看到一直「没有新岗位」。
+ */
+const collectErrorStreak: Partial<Record<PlatformId, number>> = {}
+const COLLECT_ERROR_ALERT_THRESHOLD = 3
+
 export interface ExecuteTaskResult {
   taskId: string
   status: 'done' | 'skipped' | 'failed' | 'paused'
@@ -74,6 +171,19 @@ export interface ExecuteTaskResult {
   riskDetected?: 'captcha' | 'rate' | 'block'
   failReason?: string
   appliedAt?: string
+}
+
+/** Content Script 采集岗位后回传的统计结果 */
+interface CollectJobsResult {
+  success: boolean
+  collected?: number
+  added?: number
+  filteredByCareer?: number
+  filteredByTime?: number
+  filteredByBlacklist?: number
+  pageCardTotal?: number
+  excludedOnPage?: number
+  error?: string
 }
 
 /** 触发通知提醒 */
@@ -91,6 +201,17 @@ function sendNotification(title: string, message: string, priority = 1) {
   }
 }
 
+/**
+ * 单次最长休眠分片（5 分钟）。
+ * MV3 的 Service Worker 会被浏览器回收，内存 setTimeout 随之丢失；长延时 alarm 在
+ * 系统休眠 / 扩展重载 / 浏览器重启后也可能被清空，一旦两处都失效就会永久静默。
+ * 因此任何长等待都切成分片轮询，最坏情况下 5 分钟内必定重新校验一次时段。
+ */
+const MAX_SLEEP_CHUNK_MS = 5 * 60_000
+
+/** 上次输出“不在投递时段”日志的时间，用于分片轮询时的日志去重 */
+let lastWindowSleepLogAt = 0
+
 /** 设定下一次 tick 触发（结合 setTimeout 与 Alarm 机制双重保险） */
 export function scheduleNextTick(delayMs = 60_000) {
   if (scheduledTimer) {
@@ -98,14 +219,87 @@ export function scheduleNextTick(delayMs = 60_000) {
     scheduledTimer = null
   }
 
+  // 长等待切片：保证任何异常导致 alarm 丢失时都能在 5 分钟内自愈
+  const safeDelay = Math.max(1_000, Math.min(delayMs, MAX_SLEEP_CHUNK_MS))
+
   // 1. 设置内存定时器（快速响应）
   scheduledTimer = setTimeout(() => {
     runCampaignTick().catch((e) => logError(MOD, 'scheduleNextTick', e))
-  }, delayMs)
+  }, safeDelay)
 
   // 2. 同时使用 chrome.alarms 保底（防止 Service Worker 休眠错过）
-  const delayMinutes = Math.max(1, Math.round(delayMs / 60_000))
+  const delayMinutes = Math.max(1, Math.ceil(safeDelay / 60_000))
   chrome.alarms.create(ALARM_APPLY_TICK, { delayInMinutes: delayMinutes })
+}
+
+/**
+ * 一次性修复历史脏数据：把「岗位名称」里被 AI 进化提案 / 简历项目名污染的长句清洗成干净短词。
+ * 典型脏数据：「刚刚好智创网站 全栈独立开发 / AI全栈:后台开发 / 全栈」
+ * 清洗后：「全栈独立开发 AI全栈 后台开发 全栈」
+ */
+export async function cleanupDirtyJobTitles(): Promise<void> {
+  try {
+    const filters = (await getSetting<Record<string, unknown>>('applyFilters', {})) || {}
+    const raw = String(filters.jobTitles || '').trim()
+    if (!raw) return
+
+    const cleaned = normalizeCareerTokens(raw)
+    if (cleaned.length === 0) return
+
+    const joined = cleaned.join(' ')
+    const normalizedRaw = raw.replace(/\s+/g, ' ').trim()
+    if (joined === normalizedRaw) return
+
+    filters.jobTitles = joined
+    await setSetting('applyFilters', filters)
+    log(MOD, 'cleanupDirtyJobTitles', `Cleaned jobTitles: "${raw}" -> "${joined}"`)
+    await appendCampaignLog(
+      `🧽 已自动清洗「岗位名称」中的非法方向词：${normalizedRaw} → ${joined}`,
+      'success',
+    )
+  } catch (e) {
+    logWarn(MOD, 'cleanupDirtyJobTitles', e)
+  }
+}
+
+/**
+ * 解除「验证码误报」造成的挂起。
+ * 验证码检测已收窄为只看可见浮层，历史上因为整页文本命中而挂起的活动
+ * 在扩展重载时自动恢复一次；若确实存在验证码，下一轮会再次挂起。
+ */
+export async function resumeFalseCaptchaPauseIfNeeded(): Promise<void> {
+  try {
+    const campaign = await getCampaign()
+    if (!campaign || campaign.status !== 'paused' || campaign.pausedReason !== 'captcha') return
+
+    await resumeAgentCampaign()
+    await appendCampaignLog(
+      '🔄 上次因验证码挂起，已自动恢复投递。如果页面确实弹了验证码，下一轮会再次挂起',
+      'info',
+    )
+    scheduleNextTick(2_000)
+  } catch (e) {
+    logWarn(MOD, 'resumeFalseCaptchaPauseIfNeeded', e)
+  }
+}
+
+/**
+ * Service Worker / 浏览器冷启动自愈。
+ * 扩展被重新加载或浏览器重启后，上一轮注册的 tick alarm 会被清空，
+ * 若此时流水线仍处于 running 状态，必须重新挂上调度，否则会永久不再推进。
+ */
+export async function resumeSchedulerIfNeeded(): Promise<void> {
+  try {
+    const existing = await chrome.alarms.get(ALARM_APPLY_TICK)
+    if (existing) return
+    const campaign = await getCampaign()
+    if (!campaign || campaign.status !== 'running') return
+    log(MOD, 'resumeSchedulerIfNeeded', 'Tick alarm missing while campaign running, rescheduling')
+    await appendCampaignLog('🔁 检测到调度定时器丢失，已自动恢复 AIbot 流水线', 'info')
+    scheduleNextTick(3_000)
+  } catch (e) {
+    logWarn(MOD, 'resumeSchedulerIfNeeded', e)
+  }
 }
 
 /**
@@ -149,13 +343,21 @@ export async function runCampaignTick(): Promise<void> {
       const waitMs = getDelayUntilNextWindow(campaign.windows)
       const waitMins = Math.max(1, Math.round(waitMs / 60_000))
       log(MOD, 'runCampaignTick', `Outside window. Sleeping for ${waitMins} minutes`)
-      await appendCampaignLog(
-        `🌙 当前不在投递时段内 (允许时段: ${formatTimeWindows(campaign.windows)})，AIbot 进入静默休眠。您可点击底部【工作时段】随时修改或一键设为【24小时不限】立即唤醒`,
-        'info',
-      )
+      // 分片轮询会频繁命中这里，日志每 30 分钟最多提示一次，避免刷屏
+      if (Date.now() - lastWindowSleepLogAt > 30 * 60_000) {
+        lastWindowSleepLogAt = Date.now()
+        await appendCampaignLog(
+          `🌙 当前不在投递时段内 (允许时段: ${formatTimeWindows(campaign.windows)})，AIbot 进入静默休眠。您可点击底部【工作时段】随时修改或一键设为【24小时不限】立即唤醒`,
+          'info',
+        )
+      }
+      // 切片等待：到点后最多 5 分钟内自动醒来，不再依赖单个长延时 alarm
       scheduleNextTick(waitMs)
       return
     }
+
+    // 已进入允许时段，重置休眠日志去重标记，便于下次休眠时再次提示
+    lastWindowSleepLogAt = 0
 
     // 3. 检查强制休息时间（模拟真人离开电脑休息）
     if (campaign.restUntil && campaign.restUntil > now) {
@@ -185,6 +387,7 @@ export async function runCampaignTick(): Promise<void> {
     }
 
     // 3.5 自主重规划：按真实复盘 + 经验记忆调整今日策略（失败静默降级，不影响原流水线）
+    await reportAiDegradeIfAny()
     await replanIfNeeded(campaign)
 
     // 4. 从队列领取下一个任务
@@ -219,9 +422,35 @@ export async function runCampaignTick(): Promise<void> {
       // 全自动巡检已开启的招聘平台并抓取全新岗位入队
       const hasAdded = await autoCollectJobsForCampaign(campaign, activePlatforms)
       if (hasAdded) {
+        emptyDiscoveryStreak = 0
         scheduleNextTick(1000) // 抓取入队成功，1 秒后立即执行新入队任务！
       } else {
-        scheduleNextTick(30_000) // 所有开启平台本轮均无全新岗位，稍后 30 秒再次巡检
+        emptyDiscoveryStreak++
+        // 空转退避：没有新岗位时逐步拉长巡检间隔，避免每 30 秒扫同一批页面白耗
+        const nextMs =
+          emptyDiscoveryStreak <= 2 ? 30_000
+            : emptyDiscoveryStreak <= 5 ? 2 * 60_000
+            : 5 * 60_000
+
+        // 空转 3 轮时给一次“到底卡在哪”的整体诊断，而不是无限重复同一句话
+        if (emptyDiscoveryStreak === 3 || emptyDiscoveryStreak === 6) {
+          const authMap = await checkAllPlatformsAuth().catch(() => null)
+          const offline = authMap
+            ? (Object.keys(campaign.quotas) as PlatformId[])
+                .filter((p) => campaign.quotas[p]?.enabled !== false && authMap && !authMap[p].isLoggedIn)
+                .map((p) => PLATFORM_NAMES[p])
+            : []
+
+          const tips: string[] = []
+          if (offline.length > 0) tips.push(`登录失效：${offline.join('、')}`)
+          tips.push('可将「活跃时间」放宽到本月，或在「岗位名称」里补充更多短职位词')
+
+          await appendCampaignLog(
+            `💤 已连续 ${emptyDiscoveryStreak} 轮没有发现新岗位，自动降频为每 ${Math.round(nextMs / 60_000)} 分钟巡检一次（一有新岗位立即恢复高频）。诊断建议：${tips.join('；')}`,
+            'info',
+          )
+        }
+        scheduleNextTick(nextMs)
       }
       return
     }
@@ -338,30 +567,85 @@ async function autoCollectJobsForCampaign(
   // 2. 依据简历与筛选偏好提取意向职业清单与轮转关键词 (Feature D)
   const keywordInfo = await getNextSearchKeyword(defaultResume, undefined, filters)
   const targetCareers = extractTargetCareers(defaultResume, filters)
-  const primaryCareerKeyword = keywordInfo.keyword || targetCareers[0] || filters.jobTitles.split(/\s+/)[0] || ''
+  const primaryCareerKeyword =
+    keywordInfo.keyword ||
+    targetCareers[0] ||
+    (filters.jobTitles || '').split(/[,，、;；\s|]+/).filter(Boolean)[0] ||
+    ''
   const careerLabel = targetCareers.length > 0 ? targetCareers.join(' / ') : keywordInfo.keyword
+
+  // 方向来源与清洗透明度：让用户看清系统实际使用的方向，以及哪些词因“公司名/长句”被剔除
+  const rawJobTitles = (filters.jobTitles || '').trim()
+  const rawResumePos = (defaultResume?.structuredData?.workExperience?.[0]?.position || '').trim()
+  const careerSourceRaw = rawJobTitles || rawResumePos
+  const careerSourceLabel = rawJobTitles ? '「岗位名称」设置' : '简历最近工作职位'
+  const diagSig = `${careerSourceRaw}||${careerLabel}`
+  if (careerSourceRaw && diagSig !== careerDiagnosticSig) {
+    careerDiagnosticSig = diagSig
+    const diag = diagnoseCareerTokens(careerSourceRaw)
+    if (diag.dropped.length > 0) {
+      await appendCampaignLog(
+        `🧹 目标方向来源：${careerSourceLabel}｜已剔除 ${diag.dropped.length} 个非职位词：${diag.dropped.map((d) => `「${d}」`).join('、')}（公司名/项目名/长句不能当职业方向）`,
+        'warn',
+      )
+    }
+  }
+
+  // 连续多轮被“职业方向”过滤到零新增时自动放宽，改由 AI 匹配分把关，避免永远补不到货
+  const relaxCareerFilter = careerFilterMissStreak >= CAREER_RELAX_THRESHOLD
+  if (relaxCareerFilter && !careerRelaxAnnounced) {
+    careerRelaxAnnounced = true
+    await appendCampaignLog(
+      `🔓 已连续 ${careerFilterMissStreak} 轮因职业方向过滤导致零新增，本轮起自动放宽方向限制（改由 AI 匹配分把关），先保证有岗位可投。建议同步检查「期望职位」是否填成了长句`,
+      'warn',
+    )
+  }
+
+  // 本轮真正可用的平台数（登录正常），用于区分“没岗位”和“平台都用不了”
+  let usablePlatforms = 0
 
   for (const platform of activePlatforms) {
     const pName = PLATFORM_NAMES[platform] || platform
-
     // 先检查该平台登录状态
     const auth = await checkPlatformAuth(platform)
     if (!auth.isLoggedIn) {
-      await appendCampaignLog(
-        `⚠️ 【${pName}】检测到尚未登录或授权失效，跳过此平台。请在下方卡片点击「去登录」后重试`,
-        'warn',
-      )
+      const lastWarn = authWarnedAt[platform] || 0
+      // 10 分钟内已提示过：静默跳过，不刷屏也不重复弹登录页
+      if (Date.now() - lastWarn < AUTH_RECHECK_INTERVAL) continue
+
+      authWarnedAt[platform] = Date.now()
+
+      // 首次发现失效时主动拉起登录页，用户扫码登录后自动恢复，不需要到处找入口
+      if (!loginTabOpened[platform]) {
+        loginTabOpened[platform] = true
+        const opened = await openPlatformLoginTab(platform)
+        await appendCampaignLog(
+          opened
+            ? `🔐 【${pName}】登录已失效，已自动为你打开登录页。完成登录后该平台会自动恢复投递（在此之前每 10 分钟复查一次，不再反复提醒）`
+            : `🔐 【${pName}】登录已失效，请手动登录后该平台会自动恢复（每 10 分钟复查一次）`,
+          'warn',
+        )
+        sendNotification(`🔐 ${pName} 需要重新登录`, `已为你打开登录页，登录完成后 AIbot 会自动恢复该平台投递。`)
+      }
       continue
     }
 
-    log(MOD, 'autoCollect', `Connecting to ${platform} for autonomous job collection targeting: ${primaryCareerKeyword}...`)
+    // 登录正常：清除该平台的告警与引导标记，下次失效时能重新提醒
+    delete authWarnedAt[platform]
+    delete loginTabOpened[platform]
+    usablePlatforms++
+
+    const pageKey = `${platform}:${primaryCareerKeyword}`
+    const currentPage = await getSearchPageCursor(pageKey)
+
+    log(MOD, 'autoCollect', `Connecting to ${platform} for autonomous job collection targeting: ${primaryCareerKeyword} (page ${currentPage})...`)
     await appendCampaignLog(
-      `🔍 待投队列待补充，全自主采集中枢轮转启动关键词【${primaryCareerKeyword}】(${keywordInfo.index + 1}/${keywordInfo.total})，正在连接【${pName}】精准补仓...`,
+      `🔍 待投队列待补充，全自主采集中枢轮转启动关键词【${primaryCareerKeyword}】(${keywordInfo.index + 1}/${keywordInfo.total})，正在连接【${pName}】精准补仓（第 ${currentPage} 页）...`,
       'info',
     )
 
-    // 传入目标搜索关键词，优先打开或定位到目标职业的搜索页面
-    const tab = await ensurePlatformTab(platform, primaryCareerKeyword)
+    // 传入目标搜索关键词与页码，优先打开或定位到目标职业的搜索页面
+    const tab = await ensurePlatformTab(platform, primaryCareerKeyword, currentPage)
     if (!tab || !tab.id) {
       logWarn(MOD, 'autoCollect', `Cannot open or connect tab for ${platform}`)
       await appendCampaignLog(`⚠️ 无法建立与【${pName}】页面的连接，尝试下一个平台...`, 'warn')
@@ -369,28 +653,59 @@ async function autoCollectJobsForCampaign(
     }
 
     try {
-      const collectRes = await sendTabMessageWithRetry<{
-        success: boolean
-        collected?: number
-        added?: number
-        filteredByCareer?: number
-        filteredByTime?: number
-        error?: string
-      }>(
+      let collectRes = await sendTabMessageWithRetry<CollectJobsResult>(
         tab.id,
         {
           type: 'COLLECT_PLATFORM_JOBS',
           payload: {
-            maxJobs: 25,
+            maxJobs: 35,
             existingJobIds,
             targetCareers,
+            relaxCareerFilter,
             filters,
           },
         },
         3,
       )
 
+      // 命中率过低时「同轮放宽重采」：
+      // 抓了 50 个岗位却因为方向白名单过窄只入队 0~1 个，没必要干等好几轮退避，
+      // 直接本轮放宽方向再采一次（AI 匹配分仍会把关，不会乱投不相关岗位）。
+      const collectedCount = collectRes?.collected ?? 0
+      const filteredByCareerCount = collectRes?.filteredByCareer ?? 0
+      const hitRateTooLow =
+        (collectRes?.added ?? 0) === 0 &&
+        filteredByCareerCount >= 5 &&
+        filteredByCareerCount >= collectedCount * 0.5
+
+      if (hitRateTooLow && !relaxCareerFilter) {
+        await appendCampaignLog(
+          `🔓 【${pName}】${collectedCount} 个岗位里有 ${filteredByCareerCount} 个被职业方向筛掉（白名单过窄），本轮立即放宽方向限制重采一次`,
+          'warn',
+        )
+        collectRes = await sendTabMessageWithRetry<CollectJobsResult>(
+          tab.id,
+          {
+            type: 'COLLECT_PLATFORM_JOBS',
+            payload: {
+              maxJobs: 35,
+              existingJobIds,
+              targetCareers,
+              relaxCareerFilter: true,
+              filters,
+            },
+          },
+          3,
+        )
+        careerFilterMissStreak = 0
+      }
+
+      // 通信成功（无论是否新增岗位）都应清空该平台的连续失败计数
+      if (collectRes) collectErrorStreak[platform] = 0
+
       if (collectRes?.success && (collectRes.added ?? 0) > 0) {
+        careerFilterMissStreak = 0
+        careerRelaxAnnounced = false
         const pendingCount = campaign.tasks.filter((t) => t.status === 'pending').length
         const logMsg = formatDiscoveryLogMessage({
           keyword: primaryCareerKeyword,
@@ -402,10 +717,46 @@ async function autoCollectJobsForCampaign(
         await appendCampaignLog(logMsg, 'success')
         return true
       } else {
+        // 明细诊断：区分“页面根本没抓到岗位”与“抓到了但被筛掉”，避免无脑循环看不到原因
+        const collected = collectRes?.collected ?? 0
+        const byCareer = collectRes?.filteredByCareer ?? 0
+        const byTime = collectRes?.filteredByTime ?? 0
+        const byBlacklist = collectRes?.filteredByBlacklist ?? 0
+        const excludedOnPage = collectRes?.excludedOnPage ?? 0
+        const pageCardTotal = collectRes?.pageCardTotal ?? 0
+
+        // 本页卡片全部是被排除的已投岗位 → 这一页挖尽了，必须翻页，否则会永远原地空转
+        if (collected === 0 && excludedOnPage > 0) {
+          const nextPage = currentPage >= MAX_SEARCH_PAGE ? 1 : currentPage + 1
+          await setSearchPageCursor(pageKey, nextPage)
+          careerFilterMissStreak = 0 // 这不是方向过滤问题，不计入放宽计数
+          await appendCampaignLog(
+            `📄 【${pName}】关键词【${primaryCareerKeyword}】第 ${currentPage} 页的 ${pageCardTotal} 个岗位全部已投过，本页挖尽，下次自动${nextPage === 1 ? '回到第 1 页（关键词轮转）' : `翻到第 ${nextPage} 页`}`,
+            'info',
+          )
+          continue
+        }
+
+        const freshnessLabel =
+          filters.publishTime === 'today' ? '今日活跃'
+            : filters.publishTime === '3days' ? '3日内活跃'
+            : filters.publishTime === 'month' ? '本月活跃'
+            : filters.publishTime === 'all' ? '不限时间'
+            : '本周活跃'
+        const detail = pageCardTotal === 0
+          ? '页面未解析到任何岗位卡片（搜索结果为空或页面未加载完成）'
+          : `抓到 ${collected + excludedOnPage} 个卡片（其中 ${excludedOnPage} 个已投过），职业方向筛掉 ${byCareer} 个、活跃时间筛掉 ${byTime} 个、黑名单筛掉 ${byBlacklist} 个`
         await appendCampaignLog(
-          `ℹ️ 【${pName}】本轮扫描未发现更多符合【${careerLabel}】及活跃时间的新岗位，轮转探测下一开启平台...`,
+          `ℹ️ 【${pName}】本轮未新增岗位：${detail}。目标【${careerLabel} · ${freshnessLabel} · 来源：${careerSourceLabel}】${relaxCareerFilter ? '（本轮已放宽方向限制）' : ''}`,
           'info',
         )
+        // 统计“被职业方向砍到零产出”的连续轮次，用于自动放宽
+        if (collected > 0 && byCareer > 0 && (collectRes?.added ?? 0) === 0) {
+          careerFilterMissStreak++
+        } else if (collected > 0 && byCareer === 0) {
+          // 放宽后已无方向过滤仍无新增：说明确实没新岗位，不必继续加码
+          careerFilterMissStreak = 0
+        }
       }
     } catch (err) {
       logWarn(MOD, 'autoCollect', err)
@@ -416,11 +767,33 @@ async function autoCollectJobsForCampaign(
         context: JSON.stringify({ platform, careerLabel }),
       })
       await appendCampaignLog(`⚠️ 【${pName}】自动扫描通信异常: ${String(err)}，尝试下一平台...`, 'warn')
+
+      const streak = (collectErrorStreak[platform] || 0) + 1
+      collectErrorStreak[platform] = streak
+      if (streak === COLLECT_ERROR_ALERT_THRESHOLD) {
+        await appendCampaignLog(
+          `🚨 【${pName}】已连续 ${streak} 次无法与平台页面通信，通常是页面被关闭、扩展未注入或平台页面改版。请打开该平台页面确认后再继续`,
+          'error',
+        )
+        sendNotification(
+          `⚠️ ${pName} 采集中断`,
+          `已连续 ${streak} 次无法与该平台页面通信，可能是页面已关闭或平台改版。请打开平台页面检查。`,
+          2,
+        )
+      }
     }
   }
 
+  if (usablePlatforms === 0) {
+    await appendCampaignLog(
+      '⛔ 所有已启用平台当前都无法使用（未登录 / 授权失效），本轮补仓已跳过。完成登录后 AIbot 会自动恢复，无需重新启动',
+      'warn',
+    )
+    return false
+  }
+
   await appendCampaignLog(
-    'ℹ️ 所有已启用平台当前页面暂无更多全新岗位，AIbot 将静默 30 秒后再次自动巡检补仓...',
+    'ℹ️ 可用平台本轮均无更多全新岗位，AIbot 将按自适应频率继续巡检补仓（连续无进展会自动降频，一有新岗位立刻恢复）',
     'info',
   )
   return false
@@ -436,7 +809,10 @@ async function handleTaskExecutionResult(task: ApplyTask, result: ExecuteTaskRes
       failReason: '命中验证码，等待人工解除',
     })
     await pauseAgentCampaign('captcha')
-    await appendCampaignLog(`🚨 [${task.platform}] 检测到安全验证码！AIbot 已紧急挂起，等待人工验证`, 'error')
+    await appendCampaignLog(
+      `🚨 [${task.platform}] 检测到安全验证码！AIbot 已紧急挂起，等待人工验证。若页面上看不到验证码，多半是岗位描述/页脚出现「验证码」「安全验证」等字样导致的误判——直接点「继续」或重载扩展即可恢复`,
+      'error',
+    )
     sendNotification('⚠️ 命中安全验证码', `平台 [${task.platform}] 触发验证码，已自动挂起投递。请在浏览器中解除后点击“继续”。`, 2)
     sendWebhookNotification({
       title: `🚨 命中安全验证码 (${task.platform})`,
@@ -562,6 +938,13 @@ export const campaignService = {
     windows?: TimeWindow[],
   ) => {
     const cmp = await startAgentCampaign(customQuotas, enabledPlatforms, windows)
+    // 启动即校验时段：非时段立刻给出明确提示，避免“开了却一直没动静”
+    if (cmp && !isWithinWindow(cmp.windows)) {
+      const waitMins = Math.max(1, Math.round(getDelayUntilNextWindow(cmp.windows) / 60_000))
+      const tip = `⏸ AIbot 已启动，但当前不在投递时段（${formatTimeWindows(cmp.windows)}），约 ${waitMins} 分钟后自动开始。如需立刻投递，请点击底部【工作时段】改为「24小时不限」后保存。`
+      await appendCampaignLog(tip, 'warn')
+      sendNotification('⏸ AIbot 已启动 · 当前不在投递时段', tip, 2)
+    }
     scheduleNextTick(1000) // 1 秒后立即启动
     return cmp
   },

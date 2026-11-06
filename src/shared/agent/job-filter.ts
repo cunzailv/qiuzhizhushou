@@ -8,28 +8,118 @@ import { parseSalaryRange } from '../types/filters'
 /**
  * 从简历或筛选设置中提取期望的岗位职业名称清单
  */
+/** 单个目标职业词的最大长度，超长即视为“描述句”而非职位名 */
+const MAX_CAREER_LEN = 12
+/** 明显不属于职业方向的公司/项目/职责噪音 */
+const CAREER_NOISE_RE = /(有限公司|公司|科技|集团|网站|平台|系统|项目|独立开发项目|负责|参与|主导|简历)/
+
+/** 职位语义片段（从长描述中提取真正的职业方向用） */
+const CAREER_SEMANTIC_SRC =
+  '[\\u4e00-\\u9fa5A-Za-z]{0,4}(?:全栈|前端|后端|服务端|后台|小程序|架构|技术经理|技术主管|算法|数据开发|测试|运维|开发|工程师|PHP|Java|Go|Python|Node)[\\u4e00-\\u9fa5A-Za-z]{0,4}'
+
+/** 把单个片段清洗为可用的职业方向短词 */
+function pushCareerToken(raw: string, out: string[]): void {
+  const clean = raw
+    .replace(/[（(].*?[)）]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!clean) return
+
+  // 含空格的多词串先按空格拆开分别校验
+  // 例「全栈工程师 技术经理」→ 两个独立方向；「某某网站 全栈独立开发」→ 前者含噪音被丢弃
+  if (/\s/.test(clean)) {
+    const spaceParts = clean.split(/\s+/).filter(Boolean)
+    if (spaceParts.length > 1) {
+      for (const sp of spaceParts) pushCareerToken(sp, out)
+      return
+    }
+  }
+
+  // 干净短词，直接采用
+  if (clean.length >= 2 && clean.length <= MAX_CAREER_LEN && !CAREER_NOISE_RE.test(clean)) {
+    out.push(clean)
+    return
+  }
+
+  // 超长/含噪音且无法再拆：从描述中抽取职位语义片段
+  const semantic = clean.match(new RegExp(`(${CAREER_SEMANTIC_SRC})`, 'i'))
+  if (semantic?.[1]) {
+    const token = semantic[1].replace(/\s+/g, ' ').trim()
+    if (token.length >= 2 && token.length <= MAX_CAREER_LEN) out.push(token)
+  }
+}
+
+/**
+ * 把一段“期望职位 / 项目角色”文本清洗成可直接用于岗位方向匹配的短词列表。
+ * 兼容三处历史遗留：用户手动粘贴的整句、AI 进化提案写入的长句、
+ * 以及简历里「公司名 + 岗位描述」的工作/项目经历字段。
+ * 例：「刚刚好智创网站 全栈独立开发 / AI全栈:后台开发」→「全栈独立开发 / AI全栈 / 后台开发」
+ */
+export function normalizeCareerTokens(raw: string): string[] {
+  const out: string[] = []
+  const parts = raw
+    .split(/[,，、;；\n|/\\:：]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+  for (const part of parts) pushCareerToken(part, out)
+
+  return Array.from(new Set(out))
+}
+
+/**
+ * 诊断一段方向文本：返回清洗后保留的词与被剔除的词。
+ * 用于在日志里明确告知“哪个公司名/长句被丢掉了”，避免用户困惑词从哪来。
+ */
+export function diagnoseCareerTokens(raw: string): { kept: string[]; dropped: string[] } {
+  const kept = normalizeCareerTokens(raw)
+  const keptSet = new Set(kept)
+  const dropped: string[] = []
+
+  const parts = raw
+    .split(/[,，、;；\n|/\\:：]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+  for (const part of parts) {
+    const clean = part.replace(/[（(].*?[)）]/g, '').replace(/\s+/g, ' ').trim()
+    if (!clean) continue
+
+    const subParts = clean.split(/\s+/).filter(Boolean)
+    if (subParts.length > 1) {
+      // 多词混串：逐个子片段报告，否则「公司名 + 岗位」这种只会报“部分保留”，
+      // 用户永远看不到哪个公司名被丢掉了
+      for (const sp of subParts) {
+        if (!keptSet.has(sp)) dropped.push(sp)
+      }
+      continue
+    }
+
+    // 单词片段：被语义抽取改写过（本身不在 kept 里但存在包含关系）不算丢弃
+    const rewritten = kept.some((k) => clean.includes(k) || k.includes(clean))
+    if (!rewritten && !keptSet.has(clean)) dropped.push(clean)
+  }
+
+  return { kept, dropped: Array.from(new Set(dropped)) }
+}
+
 export function extractTargetCareers(
   resume?: Resume | null,
   filters?: ApplyFilters | null,
 ): string[] {
   const result: string[] = []
 
-  // 1. 优先取用户在筛选器中明确填写的岗位名称
+  // 1. 优先取用户在筛选器中明确填写的岗位名称（先清洗成干净短词）
   if (filters?.jobTitles && filters.jobTitles.trim()) {
-    const list = filters.jobTitles
-      .trim()
-      .split(/[,;\s|]+/)
-      .map((s) => s.trim())
-      .filter((s) => s.length >= 2)
-    result.push(...list)
+    result.push(...normalizeCareerTokens(filters.jobTitles))
   }
 
-  // 2. 若未手动设置，从简历解析的意向或最近一段工作职务中提取
+  // 2. 未设置或清洗后为空时，从简历解析的意向或最近一段工作职务中提取
   if (result.length === 0 && resume) {
     // 2.1 结构化工作经历中的最近一段职位
     const latestPos = resume.structuredData?.workExperience?.[0]?.position
     if (latestPos && latestPos.trim()) {
-      result.push(latestPos.trim())
+      result.push(...normalizeCareerTokens(latestPos))
     }
 
     // 2.2 简历名称中的职位（例如 "张三-全栈开发-6年.pdf"）
@@ -63,6 +153,26 @@ export function extractTargetCareers(
   return Array.from(new Set(result.filter(Boolean)))
 }
 
+/** 与技术人员明确无关的行业/职能（销售、客服、行政等） */
+const UNRELATED_CAREER_RE =
+  /(销售|电销|地推|招商|电话客服|在线客服|前台|行政|人事|招聘顾问|财务|出纳|会计|保安|保洁|房产中介|置业顾问|店员|导购|外卖骑手|司机|兼职刷单)/
+
+/**
+ * 岗位是否属于与目标方向无关的行业。
+ * 独立导出是因为「方向放宽」时 targetCareers 会变成空数组，
+ * 此时原来的硬拦截会被跳过，导致销售/客服岗被大量灌进投递队列。
+ */
+export function isUnrelatedCareer(jobTitle: string, targetCareers: string[] = []): boolean {
+  if (!jobTitle) return false
+  const cleanTitle = jobTitle
+    .toLowerCase()
+    .replace(/[（(].*?[)）)]/g, '')
+    .replace(/[\s\-_/\\|]/g, '')
+  if (!UNRELATED_CAREER_RE.test(cleanTitle)) return false
+  // 用户目标方向本身就包含这类词时放行（例如他就是要找销售岗）
+  return !targetCareers.some((t) => UNRELATED_CAREER_RE.test(t))
+}
+
 /**
  * 校验岗位标题是否与用户的目标职业方向对齐
  */
@@ -74,10 +184,7 @@ export function isJobMatchingCareer(jobTitle: string, targetCareers: string[]): 
   const cleanTitle = rawTitle.replace(/[（(].*?[）)]/g, '').replace(/[\s\-_/\\|]/g, '')
 
   // 1. 无关职业负向硬拦截（除非用户目标职位本身包含这些词）
-  const UNRELATED_CAREER_RE =
-    /(销售|电销|地推|招商|电话客服|在线客服|前台|行政|人事|招聘顾问|财务|出纳|会计|保安|保洁|房产中介|置业顾问|店员|导购|外卖骑手|司机|兼职刷单)/
-  const isTargetUnrelated = targetCareers.some((t) => UNRELATED_CAREER_RE.test(t))
-  if (!isTargetUnrelated && UNRELATED_CAREER_RE.test(cleanTitle)) {
+  if (isUnrelatedCareer(jobTitle, targetCareers)) {
     return false
   }
 
@@ -129,12 +236,16 @@ export function isJobMatchingCareer(jobTitle: string, targetCareers: string[]): 
       return true
     }
 
-    // 后端族谱
+    // 后端族谱（“后台”是招聘平台对后端的常见写法，必须同等对待）
     if (
-      (target.includes('后端') || target.includes('backend') || target.includes('服务端')) &&
+      (target.includes('后端') ||
+        target.includes('backend') ||
+        target.includes('服务端') ||
+        target.includes('后台')) &&
       (cleanTitle.includes('后端') ||
         cleanTitle.includes('backend') ||
         cleanTitle.includes('服务端') ||
+        cleanTitle.includes('后台') ||
         cleanTitle.includes('server'))
     ) {
       return true
@@ -210,7 +321,7 @@ export function evaluateJobCandidate(
     targetCareers?: string[]
     blacklist?: Set<string>
   },
-): { pass: boolean; reason?: string } {
+): { pass: boolean; reason?: string; soft?: boolean } {
   const { filters, targetCareers = [], blacklist = new Set() } = options
 
   // 1. 黑名单公司检查
@@ -218,10 +329,17 @@ export function evaluateJobCandidate(
     return { pass: false, reason: `命中企业黑名单（${job.companyName}）` }
   }
 
-  // 2. 职业方向检查
+  // 1.5 无关行业硬拦截：必须在方向列表为空（放宽模式）时同样生效，
+  //     否则一旦放宽方向，销售/客服/行政岗会直接灌进投递队列。
+  if (isUnrelatedCareer(job.title, targetCareers)) {
+    return { pass: false, reason: `职业方向不匹配（无关行业：${job.title}）` }
+  }
+
+  // 2. 职业方向检查（软过滤：不匹配不等于不可投，交由 AI 匹配分最终把关）
   if (targetCareers.length > 0 && !isJobMatchingCareer(job.title, targetCareers)) {
     return {
       pass: false,
+      soft: true,
       reason: `职业方向不匹配（目标: ${targetCareers.join(' / ')}，岗位: ${job.title}）`,
     }
   }

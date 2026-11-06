@@ -9,7 +9,8 @@ import { setSharedResumeSummary } from '../shared/db/shared-state'
 import { resetDailyCounter } from '../shared/antiBot'
 import { log, logError, logGroup, logGroupEnd } from '../shared/utils/logger'
 import { butlerRunDaily, getActiveFollowUps } from '../shared/agent/butler'
-import { campaignService } from './campaign-service'
+import { campaignService, resumeSchedulerIfNeeded, cleanupDirtyJobTitles, resumeFalseCaptchaPauseIfNeeded } from './campaign-service'
+import { migrateDefaultModelName } from '../shared/db/settings-store'
 import {
   acquireRunMode,
   getRuntimeState,
@@ -127,6 +128,20 @@ chrome.runtime.onInstalled.addListener(() => {
     if (cfg.enabled) return ensureOffscreenDocument()
   }).catch(() => {})
 
+  // 扩展重新加载/更新会清空上一轮注册的 tick alarm：若流水线仍在运行则立即重建调度
+  void resumeSchedulerIfNeeded()
+
+  // 修复历史脏数据：清洗被 AI 提案/简历项目名写进「岗位名称」的长句
+  void cleanupDirtyJobTitles()
+
+  // 验证码误报自愈：历史上整页文本命中会被误判成验证码并挂起，重载时自动解除一次
+  void resumeFalseCaptchaPauseIfNeeded()
+
+  // 默认模型对齐：内置 DeepSeek 已升级为 deepseek-v4.1-flash，旧默认值自动迁移
+  void migrateDefaultModelName().then((updated) => {
+    if (updated) log(MOD, 'installed', `Default model migrated to ${updated}`)
+  }).catch(() => {})
+
   log(MOD, 'installed', 'Alarms created: daily-reset, interview-check, butler-daily, butler-daily-report-check, external-ai-keepalive')
 })
 
@@ -135,6 +150,9 @@ chrome.runtime.onStartup.addListener(() => {
   void getExternalAiConfig().then((cfg) => {
     if (cfg.enabled) return ensureOffscreenDocument()
   }).catch(() => {})
+
+  // 浏览器重启后 alarm 可能已丢失，自愈恢复 AIbot 调度
+  void resumeSchedulerIfNeeded()
 })
 
 // Handle alarms

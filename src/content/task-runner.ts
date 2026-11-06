@@ -12,8 +12,59 @@ import { addSharedAppliedJobId } from '../shared/db/shared-state'
 import { recordSelfHealingEvent } from '../shared/db/diagnostics-store'
 import { dismissUnexpectedModals } from '../shared/platform/boss/action-simulator'
 import { log, logWarn, logError } from '../shared/utils/logger'
+import { getSetting } from '../shared/db/settings-store'
+import { loadSharedApplyFilters } from '../shared/agent/filter-config'
 
 const MOD = 'TaskRunner'
+
+// ─────────── 投递门槛自适应 ───────────
+// 连续多个岗位都因匹配分不足被跳过时，说明门槛与当前候选池不匹配，
+// 逐级下调门槛保证产能；只要成功投递一次就立刻恢复到用户设定值。
+const THRESHOLD_RELAX_KEY = 'aibot_threshold_relax_level'
+const THRESHOLD_SKIP_STREAK_KEY = 'aibot_threshold_skip_streak'
+const MAX_RELAX_LEVEL = 3
+const RELAX_STEP = 10
+const SKIP_STREAK_TO_RELAX = 5
+const MIN_THRESHOLD = 30
+
+async function readNumberSetting(key: string): Promise<number> {
+  try {
+    const res = await chrome.storage.local.get(key)
+    const v = Number(res?.[key] ?? 0)
+    return Number.isFinite(v) ? v : 0
+  } catch {
+    return 0
+  }
+}
+
+async function writeNumberSetting(key: string, value: number): Promise<void> {
+  try {
+    await chrome.storage.local.set({ [key]: value })
+  } catch {
+    // 存储不可用时静默忽略
+  }
+}
+
+async function getThresholdRelaxLevel(): Promise<number> {
+  return Math.min(MAX_RELAX_LEVEL, Math.max(0, await readNumberSetting(THRESHOLD_RELAX_KEY)))
+}
+
+/** 投递成功后恢复门槛与连击计数 */
+async function resetThresholdRelax(): Promise<void> {
+  await writeNumberSetting(THRESHOLD_RELAX_KEY, 0)
+  await writeNumberSetting(THRESHOLD_SKIP_STREAK_KEY, 0)
+}
+
+function notifyCampaignLog(message: string, level: 'info' | 'warn' = 'warn'): void {
+  try {
+    void chrome.runtime.sendMessage({
+      type: 'APPEND_CAMPAIGN_LOG',
+      payload: { message, level },
+    })?.catch?.(() => {})
+  } catch {
+    // 后台不可达时忽略
+  }
+}
 
 export interface TaskRunnerCallbacks {
   onProgress?: (message: string) => void
@@ -315,6 +366,24 @@ export async function executeCampaignTask(
     // AI 筛岗评分（如果已有缓存且有分直接用；否则现场计算）
     let matchScore = task.matchScore
     let matchReason = task.matchReason
+    // 投递门槛：用用户设定的最低匹配分，而不是写死的 60。
+    // AI 未启用时评分走本地规则，量纲偏低（常见 20-45 分），
+    // 直接套 60 会把所有岗位判为不合格 → 队列一进来就全被跳过。
+    // 投递门槛：用用户设定的最低匹配分，而不是写死的 60。
+    // AI 未启用时评分走本地规则，量纲偏低（常见 20-45 分），
+    // 直接套 60 会把所有岗位判为不合格 → 队列一进来就全被跳过。
+    const applyFilters = await loadSharedApplyFilters().catch(() => null)
+    const fastMode = await getSetting<boolean>('aibotFastMode', false)
+    const aiMatchEnabled = await getSetting<boolean>('aiEnabled', false) && !fastMode
+    const baseThreshold = applyFilters?.minMatchScore ?? 60
+    const rawThreshold = aiMatchEnabled
+      ? baseThreshold
+      : Math.max(25, Math.round(baseThreshold * 0.55))
+
+    // 自适应下调：长期零产出时逐级放宽，避免「候选都 30 分、门槛 60」的全跳过死局
+    const relaxLevel = await getThresholdRelaxLevel()
+    const matchThreshold = Math.max(MIN_THRESHOLD, rawThreshold - relaxLevel * RELAX_STEP)
+
     let matchResult: MatchResult
 
     if (matchScore !== undefined) {
@@ -322,27 +391,42 @@ export async function executeCampaignTask(
         jobId: task.jobId,
         score: matchScore,
         recommendation: matchReason || '已匹配',
-        isRecommended: matchScore >= 60,
+        isRecommended: matchScore >= matchThreshold,
         skillMatch: [],
         skillGap: [],
       }
     } else {
-      callbacks?.onProgress?.(`AI 匹配分析中: ${task.jobTitle}`)
-      matchResult = await matchResumeToJob(activeResume, jobCard)
+      callbacks?.onProgress?.(fastMode ? `快速评分中: ${task.jobTitle}` : `AI 匹配分析中: ${task.jobTitle}`)
+      matchResult = await matchResumeToJob(activeResume, jobCard, { forceLocal: fastMode })
       matchScore = matchResult.score
       matchReason = matchResult.recommendation
     }
 
-    // 动态配额门槛：< 60 分判定为不合适，直接 skip，不浪费平台配额
-    if (matchScore < 60) {
-      log(MOD, 'executeCampaignTask', `Score ${matchScore} < 60. Skipping: ${task.jobTitle}`)
-      callbacks?.onProgress?.(`评分 ${matchScore} 不达标，已跳过`)
+    // 动态配额门槛：低于门槛判定为不合适，直接 skip，不浪费平台配额
+    if ((matchScore ?? 0) < matchThreshold) {
+      // 连续被跳过时逐级放宽门槛，保证长期空转下仍能产出
+      const skipStreak = (await readNumberSetting(THRESHOLD_SKIP_STREAK_KEY)) + 1
+      if (skipStreak >= SKIP_STREAK_TO_RELAX && relaxLevel < MAX_RELAX_LEVEL) {
+        const nextLevel = relaxLevel + 1
+        const nextThreshold = Math.max(MIN_THRESHOLD, rawThreshold - nextLevel * RELAX_STEP)
+        await writeNumberSetting(THRESHOLD_RELAX_KEY, nextLevel)
+        await writeNumberSetting(THRESHOLD_SKIP_STREAK_KEY, 0)
+        notifyCampaignLog(
+          `⚡ 已连续 ${skipStreak} 个岗位因匹配分不足被跳过，自动把投递门槛从 ${matchThreshold} 下调到 ${nextThreshold}，先保证有产出（成功投递一次后自动恢复）`,
+          'warn',
+        )
+      } else {
+        await writeNumberSetting(THRESHOLD_SKIP_STREAK_KEY, skipStreak)
+      }
+
+      log(MOD, 'executeCampaignTask', `Score ${matchScore} < ${matchThreshold}. Skipping: ${task.jobTitle}`)
+      callbacks?.onProgress?.(`评分 ${matchScore} 不达标（门槛 ${matchThreshold}），已跳过`)
       result = {
         taskId: task.id,
         status: 'skipped',
         matchScore,
         matchReason,
-        failReason: `AI 评分 ${matchScore} 分低于门槛 60 分`,
+        failReason: `评分 ${matchScore} 分低于门槛 ${matchThreshold} 分`,
       }
       return result
     }
@@ -350,9 +434,18 @@ export async function executeCampaignTask(
     // 5. 生成或读取个性化打招呼话术（基于动态路由的专属画像简历）
     let greeting = task.greeting
     if (!greeting) {
-      callbacks?.onProgress?.(`生成个性化招呼语: ${task.jobTitle}`)
-      const greetRes = await generateJobGreeting(activeResume, jobCard, matchResult, adapter)
-      greeting = greetRes.text
+      if (fastMode) {
+        // 极速模式：跳过 AI 话术生成，直接用平台模板，省 3-8 秒/个
+        greeting = adapter.getJobSpecificGreeting(
+          activeResume.structuredData?.name || '您好',
+          jobCard,
+          matchResult,
+        )
+      } else {
+        callbacks?.onProgress?.(`生成个性化招呼语: ${task.jobTitle}`)
+        const greetRes = await generateJobGreeting(activeResume, jobCard, matchResult, adapter)
+        greeting = greetRes.text
+      }
     }
 
     // 6. 执行点击沟通 / 投递
@@ -407,6 +500,8 @@ export async function executeCampaignTask(
     // 8. 投递成功，记录落盘与去重
     await saveApplicationRecord(jobCard, matchResult, activeResume.id, adapter.id)
     await addSharedAppliedJobId(task.jobId)
+    // 有产出即恢复用户设定的门槛，避免长期停留在放宽状态
+    await resetThresholdRelax()
 
     callbacks?.onProgress?.(`投递成功: ${task.jobTitle}`)
     result = {

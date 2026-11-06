@@ -161,7 +161,9 @@ describe('AIbot 1-Hour Marathon Endurance Simulation', () => {
     expect(stats.totalTasks).toBe(30)
     expect(stats.done + stats.skipped).toBe(30)
     expect(stats.pending).toBe(0)
-    expect(isCampaignFinished(finalCmp!)).toBe(true)
+    // 队列已处理完，但两个平台的配额都没投满（含被跳过的岗位），
+    // 活动不应判定完成 —— 应继续补仓找新岗位，否则会出现「投几个就宣布全部完成并停机」。
+    expect(isCampaignFinished(finalCmp!)).toBe(false)
 
     // 5. 验证事后自动生成管家复盘日报
     const dailyReport = await generateDailyButlerReport('campaign_finished')

@@ -3,7 +3,15 @@ export { matchResumeToJob, batchMatchJobs } from './remote-matcher'
 export { analyzeResumeQuality } from './resume-analyzer'
 export { analyzeJobMatch } from './job-match-analyzer'
 export type { JobMatchAnalysis } from './job-match-analyzer'
-export { chatCompletion, chatCompletionStream, testAIConnection, checkAIConfigured } from './api-client'
+export {
+  chatCompletion,
+  chatCompletionStream,
+  chatCompletionWithVision,
+  isVisionCapableModel,
+  testAIConnection,
+  checkAIConfigured,
+} from './api-client'
+export type { ChatImageInput } from './api-client'
 export { getAiBudgetLimit, getAiUsageToday, resetAiBudget, isAiBudgetExhausted } from './ai-budget'
 export { BUILTIN_MODELS, getPresetById, getDefaultPreset, getCustomModels, saveCustomModels, getAllModels, generateCustomModelId } from './model-presets'
 export type { ModelPreset } from './model-presets'

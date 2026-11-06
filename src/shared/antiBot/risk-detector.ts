@@ -16,22 +16,84 @@ function containsAny(text: string, markers?: string[]): boolean {
   return markers.some((m) => text.includes(m))
 }
 
+/** 元素是否真实可见（隐藏的预加载验证码容器不应触发暂停） */
+function isVisibleElement(el: HTMLElement, minWidth = 40, minHeight = 20): boolean {
+  const style = window.getComputedStyle(el)
+  if (style.display === 'none' || style.visibility === 'hidden') return false
+  // 注意：opacity 未设置时是空字符串，Number('') === 0 会把可见元素误判成全透明
+  if (style.opacity && Number(style.opacity) === 0) return false
+  const rect = el.getBoundingClientRect()
+  // jsdom 等无布局环境 rect 全 0，此时不据尺寸排除
+  if (rect.width > 0 || rect.height > 0) {
+    if (rect.width < minWidth || rect.height < minHeight) return false
+  }
+  return true
+}
+
+/**
+ * 收集页面上「真实可见」的浮层文本。
+ * 验证码、封号、限流提示都以弹层/浮层形式出现，
+ * 整页扫描会把岗位描述、帮助链接里的同名字样当成风控信号（历史误报源）。
+ */
+function getVisibleOverlayText(): string {
+  const overlays = document.querySelectorAll(
+    [
+      '[role="dialog"]',
+      '[class*="dialog"]',
+      '[class*="modal"]',
+      '[class*="popup"]',
+      '[class*="layer"]',
+      '[class*="geetest"]',
+      '[class*="captcha"]',
+      '[class*="verify"]',
+      '[class*="risk"]',
+      '[class*="toast"]',
+      '.error-tips',
+    ].join(', '),
+  )
+
+  let text = ''
+  for (const el of overlays) {
+    if (!(el instanceof HTMLElement)) continue
+    if (!isVisibleElement(el)) continue
+    const t = el.innerText || el.textContent || ''
+    if (t.trim()) text += ` ${t}`
+  }
+  return text
+}
+
+/**
+ * 页面是否已经被错误提示整页替换。
+ * 真正封号/拦截时页面几乎只剩错误文案；正常列表页文本量很大，
+ * 据此可避免「岗位描述里写了账号异常」被误判成账号被封。
+ */
+function readPageText(): string {
+  if (typeof document === 'undefined' || !document.body) return ''
+  return document.body.innerText || document.body.textContent || ''
+}
+
+function isLikelyBlockedPage(pageText: string): boolean {
+  const t = pageText.trim()
+  return t.length > 0 && t.length < 600
+}
+
 export function detectCaptcha(markers?: string[]): boolean {
-  // 只统计"真实显示"的验证码元素：隐藏、不可见或尺寸过小的容器（预加载的验证码
-  // iframe / 隐藏 div 等）不应触发暂停，否则用户看不到验证码却一直卡在"请手动完成验证"。
+  // 1. 真实显示的验证码容器
   const captchaElements = document.querySelectorAll(
     '[class*="captcha"], [class*="verify"], [id*="captcha"], [id*="verify"], .geetest_panel, .captcha-box'
   )
   for (const el of captchaElements) {
     if (!(el instanceof HTMLElement)) continue
-    const style = window.getComputedStyle(el)
-    if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) continue
-    const rect = el.getBoundingClientRect()
-    if (rect.width < 20 || rect.height < 20) continue
+    if (!isVisibleElement(el, 20, 20)) continue
     return true
   }
-  // 文本标记：仅当页面可见文本明确出现验证提示文案时判定
-  if (containsAny(document.body?.innerText || '', markers)) return true
+
+  // 2. 文本标记：只扫「可见浮层」。
+  //    历史实现扫的是 document.body.innerText，导致岗位描述里出现「验证码」、
+  //    页脚出现「安全验证」就判定为命中验证码，用户被挂起却看不到任何验证码。
+  const overlayText = getVisibleOverlayText()
+  if (overlayText && containsAny(overlayText, markers)) return true
+
   return false
 }
 
@@ -40,19 +102,30 @@ export function detectRateLimit(markers?: string[]): boolean {
     '[class*="limit"], [class*="too-many"], [class*="频繁"], .error-tips'
   )
   for (const el of errorElements) {
-    const text = (el as HTMLElement).innerText || ''
+    const text = (el as HTMLElement).innerText || el.textContent || ''
     if (text.includes('操作过于频繁') || text.includes('请稍后再试') || text.includes('limit')) {
       return true
     }
   }
-  if (containsAny(document.body?.innerText || '', markers)) return true
+
+  // 限定在可见浮层内匹配，避免整页文本误报
+  const overlayText = getVisibleOverlayText()
+  if (overlayText && containsAny(overlayText, markers)) return true
   return false
 }
 
 export function detectBlock(markers?: string[]): boolean {
-  const pageText = document.body?.innerText || ''
-  if (pageText.includes('账号异常') || pageText.includes('已被限制')) return true
-  if (containsAny(pageText, markers)) return true
+  const pageText = readPageText()
+  const hit = (t: string): boolean =>
+    t.includes('账号异常') || t.includes('已被限制') || containsAny(t, markers)
+
+  // 1. 浮层里明确出现封号文案
+  const overlayText = getVisibleOverlayText()
+  if (overlayText && hit(overlayText)) return true
+
+  // 2. 整页已被错误提示替换时才按全页文本判定
+  if (isLikelyBlockedPage(pageText) && hit(pageText)) return true
+
   return false
 }
 
@@ -66,7 +139,7 @@ export function detectDailyCommunicationLimit(markers?: string[]): string | null
     text.includes('沟通次数已达上限') ||
     text.includes('已达沟通上限') ||
     (text.includes('已达上限') && text.includes('沟通'))
-  const pageText = document.body?.innerText || ''
+  const pageText = readPageText()
   if (bossCheck(pageText)) {
     return '今日沟通已达上限，已自动停止，请明天再来'
   }
@@ -78,7 +151,7 @@ export function detectDailyCommunicationLimit(markers?: string[]): string | null
     '[class*="dialog"], [class*="modal"], [class*="toast"], [class*="dialog-box"], [class*="limit"], [class*="tip"], .dialog-con'
   )
   for (const el of overlays) {
-    const t = (el as HTMLElement).innerText || ''
+    const t = (el as HTMLElement).innerText || el.textContent || ''
     if (bossCheck(t)) return '今日沟通已达上限，已自动停止，请明天再来'
     if (containsAny(t, markers)) return '今日沟通次数已达上限，已自动停止'
   }

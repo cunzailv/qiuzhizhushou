@@ -5,13 +5,45 @@ function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2)
 }
 
+/**
+ * 同一错误的去重窗口。
+ * 注意：不能对所有调用方默认去重 —— 管家的「待修清单」依赖同一事件被记录多次
+ * 来统计出现频次（occurrences）。只对 AI 这类高频噪音来源按调用方开启。
+ */
+const DEFAULT_DEDUPE_WINDOW_MS = 60_000
+const recentErrorSigs = new Map<string, number>()
+
+/** 判断该错误是否落在去重窗口内（导出以便单测，纯内存不触碰存储） */
+export function shouldSkipDuplicate(
+  source: string,
+  message: string,
+  windowMs = DEFAULT_DEDUPE_WINDOW_MS,
+): boolean {
+  const now = Date.now()
+  if (recentErrorSigs.size > 200) {
+    for (const [k, at] of recentErrorSigs) {
+      if (now - at > windowMs) recentErrorSigs.delete(k)
+    }
+  }
+  const sig = `${source}|${message.slice(0, 120)}`
+  const last = recentErrorSigs.get(sig)
+  if (last !== undefined && now - last < windowMs) return true
+  recentErrorSigs.set(sig, now)
+  return false
+}
+
 /** 记录一条错误（供全局捕获与业务失败点调用） */
 export async function recordError(params: {
   source: string
   message: string
   stack?: string
   context?: string
+  /** 传入即启用去重：窗口内相同 source+message 只落库一次（用于 AI 降级等高频噪音） */
+  dedupeWindowMs?: number
 }): Promise<void> {
+  if (params.dedupeWindowMs && shouldSkipDuplicate(params.source, params.message, params.dedupeWindowMs)) {
+    return
+  }
   try {
     const record: ErrorRecord = {
       id: generateId(),

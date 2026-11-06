@@ -457,9 +457,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const defaultResume = await fetchFullResume()
       const effectiveFilters: ApplyFilters = message.payload?.filters || currentFilters
       const targetCareers: string[] =
-        message.payload?.targetCareers && message.payload.targetCareers.length > 0
-          ? message.payload.targetCareers
-          : extractTargetCareers(defaultResume, effectiveFilters)
+        message.payload?.relaxCareerFilter === true
+          ? []
+          : message.payload?.targetCareers && message.payload.targetCareers.length > 0
+            ? message.payload.targetCareers
+            : extractTargetCareers(defaultResume, effectiveFilters)
 
       let blacklistSet = new Set<string>()
       try {
@@ -504,8 +506,17 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         },
       })
 
-      // 对采集到的卡片进行严格的简历职业方向、时间新鲜度、企业黑名单、薪资地点过滤
+      // 本页实际渲染出的卡片总数（含已投递过的），用于判断“这一页是否已经挖干净、该翻页了”
+      const pageCardTotal = adapter.parseJobCardsFromSearchPage().length
+      const excludedOnPage = Math.max(0, pageCardTotal - rawJobs.length)
+
+      // 对采集到的卡片进行过滤。
+      // 关键策略：只有「硬条件」（黑名单、无关行业、时间/薪资等）才直接丢弃；
+      // 「职业方向不匹配」降级为软过滤 —— 先记下来，严格通过的不够时再用它补足名额。
+      // 否则方向白名单会一刀切掉 80%+ 的候选，AI 匹配分根本没机会参与判断，
+      // 表现为「抓了 60 个岗位却只入队 1 个」的长期空转。
       const filteredJobs: JobCard[] = []
+      const softMatchedJobs: JobCard[] = []
       let filteredByCareer = 0
       let filteredByTime = 0
       let filteredByBlacklist = 0
@@ -517,13 +528,26 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           blacklist: blacklistSet,
         })
         if (!evalRes.pass) {
-          if (evalRes.reason?.includes('职业方向')) filteredByCareer++
-          else if (evalRes.reason?.includes('活跃度') || evalRes.reason?.includes('时间')) filteredByTime++
+          if (evalRes.reason?.includes('职业方向')) {
+            filteredByCareer++
+            if (evalRes.soft) {
+              softMatchedJobs.push(job)
+            }
+          } else if (evalRes.reason?.includes('活跃度') || evalRes.reason?.includes('时间')) filteredByTime++
           else if (evalRes.reason?.includes('黑名单')) filteredByBlacklist++
           continue
         }
         filteredJobs.push(job)
         if (filteredJobs.length >= maxJobs) break
+      }
+
+      // 严格通过的不够时，用「方向不匹配但其他硬条件都合格」的岗位补足名额，
+      // 最终是否投递仍由 AI 匹配分决定（不相关岗位会被低分自然淘汰）。
+      if (filteredJobs.length < maxJobs && softMatchedJobs.length > 0) {
+        for (const job of softMatchedJobs) {
+          if (filteredJobs.length >= maxJobs) break
+          filteredJobs.push(job)
+        }
       }
 
       const tasks = filteredJobs.map((j) => ({
@@ -549,12 +573,28 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         filteredByCareer,
         filteredByTime,
         filteredByBlacklist,
+        pageCardTotal,
+        excludedOnPage,
       })
     })().catch((err) => {
       sendResponse({ success: false, error: String(err) })
     })
     return true
   }
+  // 页面级登录态探测：cookie 名被平台改名后，用真实渲染结果复核一次
+  if (message.type === 'CHECK_PLATFORM_LOGIN') {
+    ;(async () => {
+      try {
+        if (!adapter) adapter = await getActivePlatform()
+        const state = adapter?.detectLoginState?.() ?? 'unknown'
+        sendResponse({ success: true, state, platform: adapter?.id ?? null })
+      } catch (err) {
+        sendResponse({ success: false, state: 'unknown', error: String(err) })
+      }
+    })()
+    return true
+  }
+
   if (message.type === 'GET_PAGE_INFO') {
     const pageType = adapter.detectPageType()
     sendResponse({
@@ -1047,8 +1087,17 @@ async function startApply(mode: 'batch' | 'recommend', filters?: ApplyFilters): 
       }
 
       const match = await matchResumeToJob(defaultResume, job)
+      // 本地规则分与 AI 语义分不在同一量纲：本地分普遍偏低（常见 20-45 分），
+      // 若直接套用 AI 的 60 分门槛，会把几乎所有岗位判为不合格 → 一个都投不出去。
+      // 因此 AI 未启用时按比例折算门槛，保证纯本地模式仍能正常推进。
+      const aiMatchEnabled = await getSetting<boolean>('aiEnabled', false)
+      const effectiveThreshold = filters
+        ? (aiMatchEnabled
+            ? filters.minMatchScore
+            : Math.max(25, Math.round(filters.minMatchScore * 0.55)))
+        : 60
       const isRecommended = filters
-        ? match.score >= filters.minMatchScore
+        ? match.score >= effectiveThreshold
         : match.isRecommended
       evaluatedMatch = { ...match, isRecommended }
 

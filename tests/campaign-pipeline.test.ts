@@ -283,7 +283,8 @@ describe('Campaign LifeCycle and Stats', () => {
   })
 
   it('detects when campaign is finished', async () => {
-    const cmp = await createNewCampaign({ boss: 1 })
+    // 只启用 boss 且配额为 1，投完即达成
+    const cmp = await createNewCampaign({ boss: 1 }, ['boss'])
     expect(isCampaignFinished(cmp)).toBe(false)
 
     await appendTasksToCampaign([
@@ -294,6 +295,20 @@ describe('Campaign LifeCycle and Stats', () => {
 
     const updated = await getCampaign()
     expect(isCampaignFinished(updated!)).toBe(true)
+  })
+
+  it('does not declare finished when the queue is empty but quota remains', async () => {
+    // 回归：队列被跳过清空、但配额远未投满时，绝不能判定活动完成
+    const cmp = await createNewCampaign({ boss: 5 }, ['boss'])
+    await appendTasksToCampaign([
+      { id: 'boss:1', platform: 'boss', jobId: '1', jobTitle: 'T1', company: 'C1', jobUrl: 'u1' },
+    ])
+    await claimNextTask()
+    await updateTaskResult('boss:1', { status: 'skipped' })
+
+    const updated = await getCampaign()
+    expect(updated?.tasks.every((t) => t.status !== 'pending')).toBe(true)
+    expect(isCampaignFinished(updated!)).toBe(false)
   })
 })
 

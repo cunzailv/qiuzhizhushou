@@ -53,7 +53,16 @@ function getSearchCardElements(): Element[] {
   const outerCards = Array.from(document.querySelectorAll(
     'li.job-card-box, .job-card-wrapper, .recommend-job-card, .job-list-box > li',
   ))
-  if (outerCards.length > 0) return outerCards
+  if (outerCards.length > 0) {
+    // 该选择器组是「并集」：`li.job-card-box` 与其内部的 `.job-card-wrapper`
+    // 会同时命中同一张卡片，导致同一岗位被解析两次（重复入队、重复 AI 评分）。
+    // 必须剔除被其他候选包含的嵌套元素。
+    return outerCards.filter((candidate, index) =>
+      !outerCards.some((other, otherIndex) =>
+        otherIndex !== index && other !== candidate && other.contains(candidate),
+      ),
+    )
+  }
 
   return Array.from(document.querySelectorAll(
     '[class*="job-card"], [class*="jobCard"]',

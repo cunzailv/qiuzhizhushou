@@ -12,7 +12,16 @@ import { getSetting } from '../db/settings-store'
  * A2 接入：匹配前先用 jd-analyzer 结构化岗位要求（本地解析 + AI 补全），
  * 让学历/年限硬门槛与「与 JD 对齐」的年限/学历评分在运行时真正生效。
  */
-export async function matchResumeToJob(resume: Resume, job: JobCard): Promise<MatchResult> {
+export async function matchResumeToJob(
+  resume: Resume,
+  job: JobCard,
+  opts?: { forceLocal?: boolean },
+): Promise<MatchResult> {
+  // 极速模式：跳过 JD 结构化与 AI 语义评分，只做本地规则计算（毫秒级）
+  if (opts?.forceLocal) {
+    return computeLocalMatch(resume, job)
+  }
+
   if (!job.requirements) {
     job.requirements = await analyzeJd(job)
   }
