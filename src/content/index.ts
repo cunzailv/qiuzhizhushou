@@ -4,6 +4,13 @@ import type { PlatformAdapter } from '../shared/platform/types'
 import { resolvePanelPresence } from '../shared/assistant-entry'
 import { executeCampaignTask } from './task-runner'
 import { appendTasksToCampaign } from '../shared/agent/queue-store'
+import {
+  collectApplyPageTexts,
+  decideApplyVerification,
+  hasNewCommunicationUi,
+  isChatPageUrl,
+  type ApplyVerification,
+} from '../shared/agent/apply-verification'
 import { setPlatformName } from './inject-ui'
 import { setLiepinResumeMode, fetchJobDetailDescription, prefilterLiepinJob } from '../shared/platform/liepin'
 import {
@@ -1278,6 +1285,38 @@ async function waitForJobDescription(
   return best
 }
 
+/**
+ * 点击了按钮但没有拿到平台确认时，绝不落盘、不加入去重。
+ * 浮窗明确告知 + 诊断中心留痕，让用户能去平台聊天列表核对。
+ */
+function reportUnverifiedApply(job: JobCard, verification: ApplyVerification, path: string): void {
+  const prefix = verification.level === 'blocked' ? '平台未受理' : '未确认'
+  updatePanelContent(panelHost!, {
+    mode: currentMode,
+    status: 'applying',
+    message: `${prefix}：${job.title} 未记为投递成功\n${verification.reason}\n请到平台聊天列表核对`,
+    filters: currentFilters, resumeMode: liepinResumeMode,
+  })
+  try {
+    chrome.runtime.sendMessage({
+      type: 'RECORD_ERROR',
+      payload: {
+        source: `content.apply.${path}`,
+        message: `投递未确认: ${job.title} @ ${job.companyName} (${verification.reason})`,
+        context: JSON.stringify({
+          jobId: job.id,
+          jobUrl: job.url,
+          level: verification.level,
+          signals: verification.signals,
+          blockers: verification.blockers,
+          currentUrl: window.location.href,
+        }),
+      },
+    })
+  } catch { /* 留痕失败不影响业务 */ }
+  logWarn(MOD, path, `Apply not confirmed: ${job.title} - ${verification.reason}`)
+}
+
 async function applyToJob(job: JobCard, match: MatchResult, preOpenedDetail?: HTMLElement | null): Promise<boolean> {
   log(MOD, 'applyToJob', `Applying: ${job.title} @ ${job.companyName} (score=${match.score})`)
 
@@ -1310,10 +1349,19 @@ async function applyToJob(job: JobCard, match: MatchResult, preOpenedDetail?: HT
 
   // Click apply button
   const communicationUiBeforeClick = adapter.snapshotCommunicationUi()
+  const baselineTexts = collectApplyPageTexts(jobDetail)
+  const urlBeforeClick = window.location.href
   const applied = await adapter.clickApplyButton(jobDetail)
   if (applied) {
-    // Boss 点"立即沟通"后通常自动发送默认问候语，不需要手动填 textarea。
-    // fillGreetingMessage 是 best-effort：有 textarea 就填自定义语，没有也不阻断。
+    // 点击后先采一次：话术窗口稍后可能被 fillGreetingMessage 关闭，证据会丢
+    const postClickTexts = collectApplyPageTexts(jobDetail)
+    const communicationUiChanged = hasNewCommunicationUi(
+      communicationUiBeforeClick,
+      adapter.snapshotCommunicationUi(),
+    )
+
+    // Boss 点"立即沟通"后通常自动发送默认问候语，但「没有 textarea」不再等于成功：
+    // 必须另有平台侧状态变化，否则一律记为未确认。
     const name = defaultResume?.structuredData?.name || '求职者'
     const greeting = adapter.getJobSpecificGreeting(name, job, match)
     const greetingSent = await adapter.fillGreetingMessage(greeting, communicationUiBeforeClick)
@@ -1321,6 +1369,21 @@ async function applyToJob(job: JobCard, match: MatchResult, preOpenedDetail?: HT
       log(MOD, 'applyToJob', `Greeting fill skipped (Boss auto-sent or no textarea): ${job.title}`)
     }
     await randomDelay(500, 1000)
+
+    const verification = decideApplyVerification({
+      clicked: applied,
+      greetingSent,
+      baselineTexts,
+      postClickTexts,
+      pageTexts: collectApplyPageTexts(jobDetail),
+      communicationUiChanged,
+      navigatedToChat:
+        window.location.href !== urlBeforeClick && isChatPageUrl(window.location.href),
+    })
+    if (verification.level !== 'confirmed') {
+      reportUnverifiedApply(job, verification, 'batch')
+      return false
+    }
 
     const saved = await saveApplication(job, match)
     if (!saved) {
@@ -1330,7 +1393,7 @@ async function applyToJob(job: JobCard, match: MatchResult, preOpenedDetail?: HT
 
     // Track as applied (chrome.storage.local — accessible cross-context)
     await addSharedAppliedJobId(job.id)
-    log(MOD, 'applyToJob', `Applied & tracked: ${job.title} @ ${job.companyName}`)
+    log(MOD, 'applyToJob', `Applied & tracked: ${job.title} @ ${job.companyName} (${verification.reason})`)
     return true
   } else {
     // Show button texts in panel so user can see what's available
@@ -1425,6 +1488,8 @@ async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolea
 
   // Goal 2: 点击沟通/发简历
   const commUiBefore = adapter.snapshotCommunicationUi()
+  const baselineTexts = collectApplyPageTexts(detailEl ?? document)
+  const urlBeforeClick = window.location.href
   const fixedClick = await adapter.clickApplyButton(detailEl || job as any)
   if (fixedClick) {
     await track({ type: 'CHAT_CLICKED' }, { verified: true })
@@ -1463,6 +1528,12 @@ async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolea
     }
     log(MOD, 'agentApplyToJob', `Agent clicked chat in ${r2.attempts} steps (cached=${r2.usedCachedSkill})`)
   }
+  // 点击后的平台侧证据：话术窗口稍后会被关闭，先采一次
+  const postClickTexts = collectApplyPageTexts(detailEl ?? document)
+  const communicationUiChanged = hasNewCommunicationUi(
+    commUiBefore,
+    adapter.snapshotCommunicationUi(),
+  )
   await randomDelay(500, 1000)
 
   // Goal 3: 发送问候语（best effort）
@@ -1472,8 +1543,23 @@ async function agentApplyToJob(job: JobCard, match: MatchResult): Promise<boolea
   if (!greetingSent) {
     log(MOD, 'agentApplyToJob', `Greeting fill skipped (auto-sent or no textarea)`)
   }
-  await track({ type: 'GREETING_SENT' }, { verified: true })
+  await track({ type: 'GREETING_SENT' }, { verified: greetingSent })
   await randomDelay(500, 1000)
+
+  const verification = decideApplyVerification({
+    clicked: true,
+    greetingSent,
+    baselineTexts,
+    postClickTexts,
+    pageTexts: collectApplyPageTexts(detailEl ?? document),
+    communicationUiChanged,
+    navigatedToChat:
+      window.location.href !== urlBeforeClick && isChatPageUrl(window.location.href),
+  })
+  if (verification.level !== 'confirmed') {
+    reportUnverifiedApply(job, verification, 'agent')
+    return false
+  }
 
   // 保存
   const saved = await saveApplication(job, match)

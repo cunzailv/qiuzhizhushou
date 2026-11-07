@@ -70,6 +70,10 @@ export interface PlatformCampaignQuota {
 export interface CampaignLog {
   id: string
   time: string
+  /** YYYY-MM-DD；跨天回看时才知道是哪天发生 */
+  date?: string
+  /** 归属的 campaign，便于区分「上一轮」和「本轮」 */
+  campaignId?: string
   level: 'info' | 'success' | 'warn' | 'error'
   message: string
 }
@@ -91,6 +95,21 @@ export interface Campaign {
 }
 
 const STORAGE_KEY_CAMPAIGN = 'apply_campaign_v1'
+/** 独立于 campaign 的日志归档：新开一轮 / 清空队列都不会抹掉历史动作 */
+const STORAGE_KEY_LOG_HISTORY = 'campaign_log_history_v1'
+const MAX_CAMPAIGN_LOGS = 500
+const MAX_LOG_HISTORY = 2000
+
+function formatLogStamp(now: Date): { date: string; time: string } {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return {
+    date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
+    time: `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`,
+  }
+}
+
+/** 日志写入串行链：所有 get-modify-set 排队执行，避免并发覆盖吞掉历史 */
+let logWriteChain: Promise<unknown> = Promise.resolve()
 
 /** 获取当前活动的 Campaign，若无或格式损坏则返回 null */
 export async function getCampaign(): Promise<Campaign | null> {
@@ -175,11 +194,20 @@ export async function createNewCampaign(
   }
 
   const now = new Date()
-  const initialTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
+  const stamp = formatLogStamp(now)
+  const campaignId = `cmp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+  const initLog: CampaignLog = {
+    id: `init_${Date.now()}`,
+    date: stamp.date,
+    time: stamp.time,
+    campaignId,
+    level: 'info',
+    message: '🚀 AIbot 初始化完成，准备就绪',
+  }
 
   const campaign: Campaign = {
-    id: `cmp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-    createdAt: new Date().toISOString(),
+    id: campaignId,
+    createdAt: now.toISOString(),
     status: 'running',
     tasks: [],
     quotas,
@@ -187,45 +215,93 @@ export async function createNewCampaign(
     intervalConfig,
     aiBudgetUsed: 0,
     consecutiveRestCounter: 0,
-    logs: [
-      {
-        id: `init_${Date.now()}`,
-        time: initialTime,
-        level: 'info',
-        message: '🚀 AIbot 初始化完成，准备就绪',
-      },
-    ],
+    logs: [initLog],
   }
 
-  await saveCampaign(campaign)
+  // 初始日志同样进串行链，避免和紧随其后的 appendCampaignLog 互相覆盖
+  const task = logWriteChain.then(async () => {
+    await saveCampaign(campaign)
+    await archiveLogEntry(initLog)
+  })
+  logWriteChain = task.catch(() => {})
+  await task
   return campaign
 }
 
-/** 追加一条行为流水日志 */
-export async function appendCampaignLog(
+/**
+ * 追加一条行为流水日志。
+ *
+ * 修复两个「看不到之前干了什么」的根因：
+ * 1) 旧版只留 120 条且新一轮 campaign 会清空 logs；
+ * 2) 多条异步日志并发 get-modify-set 会互相覆盖，写进去的条目凭空消失。
+ * 现在统一走串行链，同时写当前 campaign 与跨轮次归档。
+ */
+export function appendCampaignLog(
   message: string,
   level: CampaignLog['level'] = 'info',
+): Promise<void> {
+  const task = logWriteChain.then(() => appendCampaignLogInternal(message, level))
+  logWriteChain = task.catch(() => {})
+  return task
+}
+
+async function appendCampaignLogInternal(
+  message: string,
+  level: CampaignLog['level'],
 ): Promise<void> {
   const campaign = await getCampaign()
   if (!campaign) return
 
-  const now = new Date()
-  const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`
-
-  if (!campaign.logs) campaign.logs = []
-  campaign.logs.push({
+  const stamp = formatLogStamp(new Date())
+  const entry: CampaignLog = {
     id: `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-    time,
+    date: stamp.date,
+    time: stamp.time,
+    campaignId: campaign.id,
     level,
     message,
-  })
-
-  // 最多保留最近 120 条日志
-  if (campaign.logs.length > 120) {
-    campaign.logs = campaign.logs.slice(-120)
   }
 
+  if (!campaign.logs) campaign.logs = []
+  campaign.logs.push(entry)
+  if (campaign.logs.length > MAX_CAMPAIGN_LOGS) {
+    campaign.logs = campaign.logs.slice(-MAX_CAMPAIGN_LOGS)
+  }
   await saveCampaign(campaign)
+
+  await archiveLogEntry(entry)
+}
+
+/** 把单条日志追加到跨轮次归档（必须在 logWriteChain 内调用） */
+async function archiveLogEntry(entry: CampaignLog): Promise<void> {
+  try {
+    const stored = await chrome.storage.local.get(STORAGE_KEY_LOG_HISTORY)
+    const history: CampaignLog[] = Array.isArray(stored[STORAGE_KEY_LOG_HISTORY])
+      ? stored[STORAGE_KEY_LOG_HISTORY] as CampaignLog[]
+      : []
+    history.push(entry)
+    await chrome.storage.local.set({
+      [STORAGE_KEY_LOG_HISTORY]: history.slice(-MAX_LOG_HISTORY),
+    })
+  } catch {
+    // 忽略归档写入异常，主链路照常
+  }
+}
+
+/** 读取跨 campaign 的完整行为日志归档（按时间正序） */
+export async function getCampaignLogHistory(): Promise<CampaignLog[]> {
+  try {
+    const stored = await chrome.storage.local.get(STORAGE_KEY_LOG_HISTORY)
+    const history = stored[STORAGE_KEY_LOG_HISTORY]
+    return Array.isArray(history) ? history as CampaignLog[] : []
+  } catch {
+    return []
+  }
+}
+
+/** 手动清空归档（仅由诊断中心的「清空历史」调用） */
+export async function clearCampaignLogHistory(): Promise<void> {
+  await chrome.storage.local.remove(STORAGE_KEY_LOG_HISTORY)
 }
 
 /** 动态切换某个平台的开启/关闭状态 */

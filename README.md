@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1044%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1071%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -154,6 +154,28 @@
 | **防丢与防刷屏** | 共享队列的 get-modify-set 用进程内串行链排队，避免同一次降级并发写互相覆盖；`dedupeWindowMs` 60 秒同因去重，AI 失败不会刷爆列表 |
 | **可见性** | 对话台异常统一以 `butler.agent` / `butler.tool` / `butler.ui` 落库，诊断中心新增「对话台」筛选与来源徽章；日志只记工具名和错误摘要，**不写 API Key、简历正文或工具参数** |
 
+### ✅ 投递确认 · 不再虚报成功（2026-11）
+「日志显示投递成功，但手机里的聊天列表和投递记录都没有」的根因：三条投递链路都把 `clickApplyButton() === true` 直接当成平台确认（自愈点击的 Tier 3/4 还可能点中相似按钮），随即写投递记录、加入去重、计入配额并输出「投递成功」。半自动链路更宽松——连招呼语输入框都没出现也不阻断。
+
+| 层 | 说明 |
+|---|---|
+| **确认层** | 新增 `src/shared/agent/apply-verification.ts` 的 `decideApplyVerification()` 纯函数，把「点了按钮」与「平台确认」严格分开。**点击本身不算任何证据** |
+| **平台侧证据** | 只有出现**新增**确认文案（「继续沟通 / 已投递 / 投递成功」等）、新的沟通窗口或输入框、确实填入话术并点击发送、或跳进平台聊天页，才判 `confirmed`。点击前文案作为基线，避免「这个岗位之前投过」被重复记成功 |
+| **阻断优先** | 「请先登录 / 请完成安全验证 / 操作过于频繁 / 今日沟通次数已用完 / 职位已下线」等平台提示一律判 `blocked`，优先级高于确认信号 |
+| **诚实降级** | 拿不到证据判 `unverified`：**不写投递记录、不加入去重、不计入配额、不写 L3「已投递」事件**，并在日志、浮窗与诊断中心明确提示去平台聊天列表核对 |
+| **三条链路全覆盖** | 全自动 AIbot（`content/task-runner.ts`）、半自动批量沟通与 AI 自动确认（`content/index.ts`）都接入；后台 `campaign-service.ts` 只有 `done` 才写 L3 事件，连续 3 次未确认单独告警，提示检查登录态 / 风控 / 页面改版 |
+| **回归测试** | `tests/apply-verification.test.ts`（21 例）：点击无变化 → 未确认、基线旧文案不算证据、阻断优先、四种确认信号、页面文案采集跳过隐藏节点、三条链路「先确认再落盘」静态契约 |
+
+### 📜 行为日志 · 可回看全部历史（2026-11）
+「实时记录不能滑动、不知道之前干了什么」的根因：日志每 2 秒被无条件拉回底部、只保留本轮最近 120 条、新一轮 campaign 直接清空、条目只有 `HH:mm:ss` 没有日期，且并发写入互相覆盖。
+
+| 改动 | 说明 |
+|---|---|
+| **滚动不被抢** | 日志容器 `h-36 → h-64`；`onScroll` 检测是否贴底，往上翻看历史时自动暂停跟随，并提供「回到最新」一键回底 |
+| **跨轮次历史** | 新增 `campaign_log_history_v1` 归档（上限 2000 条）与本轮 500 条上限，日志终端可切「全部历史 / 只看本轮」，新一轮开跑不再丢失旧流水 |
+| **条目可追溯** | 每条带 `date` 与 `campaignId`，跨天 / 跨轮次能分辨是哪一次跑的；写入走串行链，避免并发 `get-modify-set` 覆盖 |
+| **回归测试** | `tests/campaign-log-history.test.ts`（6 例）：日期与轮次、归档上限、跨轮次保留、清空隔离、并发写入不丢 |
+
 ---
 
 ## 📸 界面预览（浅色主题）
@@ -274,7 +296,7 @@ npm run build
 | 样式 | Tailwind CSS 3 + shadow DOM 注入 |
 | 数据 | Dexie (IndexedDB) + chrome.storage |
 | AI | OpenAI / DeepSeek / 自定义兼容接口 + 本地语义精筛 + AI SDK 7 tool-calling 循环 |
-| 测试 | Vitest（1044 用例 / 76 文件）+ Playwright（E2E） |
+| 测试 | Vitest（1071 用例 / 78 文件）+ Playwright（E2E） |
 | UI 组件 | Lucide React + Recharts + react-markdown / remark-gfm |
 
 ## 📁 项目结构
@@ -322,8 +344,8 @@ docs/EXTERNAL_AI.md     # 外部 AI 接入完整指南
 ## 🧪 测试与验收
 
 ```bash
-npm test                                       # tsc -b + vite build + 全部 1044 个测试用例
-npx vitest run                                  # 全量单测/E2E：76 文件 / 1044 用例
+npm test                                       # tsc -b + vite build + 全部 1071 个测试用例
+npx vitest run                                  # 全量单测/E2E：78 文件 / 1071 用例
 npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用例（基线 110 + 新增 36）
 ```
 
@@ -336,6 +358,7 @@ npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用�
 
 | 版本 | 内容 |
 |------|------|
+| `未发布` | ✅ 投递确认层：点击按钮不再等于平台确认，未确认不落盘 / 不去重 / 不计配额；行为日志可滚动回看全部历史、带日期与轮次。新增 27 例回归测试 |
 | `未发布` | 🧭 点击插件图标不再弹独立整页面板：一律落到招聘网站右侧整高侧栏，动态注入改轮询等待，新增 6 例入口契约测试 |
 | `未发布` | 🗂️ 信息架构分层收纳：首屏只留「现在做什么 / 现在怎么样了」，低频设置进 Disclosure，功能一个不删；新增 17 例信息架构契约测试 |
 | `未发布` | 🎨 按 unslop 完成全量界面收敛：石墨中性底座 + 单一压暗橙 accent、去掉渐变/发光/毛玻璃/emoji 图标/循环动效、落地队列进度刻度线签名，新增 8 例设计契约测试 |

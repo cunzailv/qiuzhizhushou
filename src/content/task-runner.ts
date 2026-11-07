@@ -14,6 +14,13 @@ import { dismissUnexpectedModals } from '../shared/platform/boss/action-simulato
 import { log, logWarn, logError } from '../shared/utils/logger'
 import { getSetting } from '../shared/db/settings-store'
 import { loadSharedApplyFilters } from '../shared/agent/filter-config'
+import {
+  collectApplyPageTexts,
+  decideApplyVerification,
+  hasNewCommunicationUi,
+  isChatPageUrl,
+  type ApplyVerification,
+} from '../shared/agent/apply-verification'
 
 const MOD = 'TaskRunner'
 
@@ -97,6 +104,8 @@ export interface TaskExecutionResponse {
   riskDetected?: 'captcha' | 'rate' | 'block'
   failReason?: string
   appliedAt?: string
+  /** 平台侧确认证据；只有 level=confirmed 才允许记 done */
+  verification?: ApplyVerification
 }
 
 function notifyLog(message: string, level: 'info' | 'success' | 'warn' | 'error' = 'info') {
@@ -456,6 +465,9 @@ export async function executeCampaignTask(
     }
 
     const commSnapshot = adapter.snapshotCommunicationUi()
+    // 点击前的基线：排除「这个岗位之前就沟通过、按钮本来就是继续沟通」的旧状态
+    const baselineTexts = collectApplyPageTexts(detailEl)
+    const urlBeforeClick = typeof window !== 'undefined' ? window.location.href : ''
     const clicked = await adapter.clickApplyButton(detailEl)
 
     if (!clicked) {
@@ -484,9 +496,15 @@ export async function executeCampaignTask(
 
     await randomDelay(600, 1200)
 
-    // 7. 发送问候语
+    // 6.1 点击后的平台侧证据：先采一次，避免稍后话术窗口被关闭导致证据丢失
+    const postClickTexts = collectApplyPageTexts(detailEl)
+    const commAfterClick = adapter.snapshotCommunicationUi()
+    const communicationUiChanged = hasNewCommunicationUi(commSnapshot, commAfterClick)
+
+    // 7. 发送问候语（返回值 = 是否真的出现了新输入框并点了发送）
+    let greetingSent = false
     if (greeting) {
-      await adapter.fillGreetingMessage(greeting, commSnapshot)
+      greetingSent = await adapter.fillGreetingMessage(greeting, commSnapshot)
     }
 
     await randomDelay(500, 1000)
@@ -497,13 +515,61 @@ export async function executeCampaignTask(
       return result
     }
 
-    // 8. 投递成功，记录落盘与去重
+    const pageTexts = collectApplyPageTexts(detailEl)
+    const urlAfterClick = typeof window !== 'undefined' ? window.location.href : ''
+    const verification = decideApplyVerification({
+      clicked,
+      greetingSent,
+      baselineTexts,
+      postClickTexts,
+      pageTexts,
+      communicationUiChanged,
+      navigatedToChat: urlAfterClick !== urlBeforeClick && isChatPageUrl(urlAfterClick),
+    })
+
+    // 8. 只有平台侧确认才允许落盘。点击成功不等于沟通成立。
+    if (verification.level !== 'confirmed') {
+      const prefix = verification.level === 'blocked' ? '平台未受理' : '未确认'
+      const failReason = `${prefix}：${verification.reason}`
+      notifyCampaignLog(
+        `[${task.platform}] ${task.company} - ${task.jobTitle} 未记为投递成功。${failReason}（不落盘、不去重、不计配额，请到平台聊天列表核对）`,
+        'warn',
+      )
+      callbacks?.onProgress?.(`${prefix}，不记为成功: ${task.jobTitle}`)
+      reportRunnerError({
+        source: `runner.${task.platform}`,
+        message: `投递未确认: [${task.platform}] ${task.jobTitle} @ ${task.company} (${verification.reason})`,
+        context: JSON.stringify({
+          jobUrl: task.jobUrl,
+          jobId: task.jobId,
+          platform: task.platform,
+          level: verification.level,
+          signals: verification.signals,
+          blockers: verification.blockers,
+          clicked,
+          greetingSent,
+          communicationUiChanged,
+          currentUrl: urlAfterClick,
+        }),
+      })
+      result = {
+        taskId: task.id,
+        status: 'failed',
+        matchScore,
+        matchReason,
+        greeting,
+        failReason,
+        verification,
+      }
+      return result
+    }
+
     await saveApplicationRecord(jobCard, matchResult, activeResume.id, adapter.id)
     await addSharedAppliedJobId(task.jobId)
     // 有产出即恢复用户设定的门槛，避免长期停留在放宽状态
     await resetThresholdRelax()
 
-    callbacks?.onProgress?.(`投递成功: ${task.jobTitle}`)
+    callbacks?.onProgress?.(`平台已确认投递: ${task.jobTitle}`)
     result = {
       taskId: task.id,
       status: 'done',
@@ -511,6 +577,7 @@ export async function executeCampaignTask(
       matchReason,
       greeting,
       appliedAt: new Date().toISOString(),
+      verification,
     }
     return result
   } catch (err) {

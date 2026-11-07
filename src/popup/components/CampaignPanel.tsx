@@ -62,6 +62,7 @@ import {
   type AssistantRuntimeState,
 } from '../../shared/runtime-state'
 import { Disclosure } from '../../components/ui/disclosure'
+import { getCampaignLogHistory, type CampaignLog } from '../../shared/agent/queue-store'
 
 const PLATFORM_INFOS: Array<{ id: PlatformId; name: string }> = [
   { id: 'boss', name: 'Boss直聘' },
@@ -170,6 +171,10 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
   const cancelQuotaEditRef = useRef(false)
 
   const [logExpanded, setLogExpanded] = useState(true)
+  /** 用户往上翻看历史时暂停自动跟随，不再每 2 秒被强行拉回底部 */
+  const [logAutoFollow, setLogAutoFollow] = useState(true)
+  const [showLogHistory, setShowLogHistory] = useState(false)
+  const [historyLogs, setHistoryLogs] = useState<CampaignLog[]>([])
   const logContainerRef = useRef<HTMLDivElement>(null)
 
   // 检查各平台登录授权状态
@@ -281,12 +286,34 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
     return () => clearInterval(timer)
   }, [fetchStats])
 
-  // 3. 自动滚动日志到最新底部
+  // 3. 只在「用户本来就贴着底部」时跟随最新日志；往上看历史时不再抢滚动条
   useEffect(() => {
+    if (!logAutoFollow || !logExpanded) return
     if (logContainerRef.current) {
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight
     }
-  }, [stats?.logs])
+  }, [stats?.logs, historyLogs, showLogHistory, logAutoFollow, logExpanded])
+
+  // 切到「全部历史」时拉取跨 campaign 归档
+  useEffect(() => {
+    if (!showLogHistory) return
+    void getCampaignLogHistory().then(setHistoryLogs).catch(() => setHistoryLogs([]))
+  }, [showLogHistory, stats?.logs?.length])
+
+  const handleLogScroll = () => {
+    const el = logContainerRef.current
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 24
+    setLogAutoFollow(nearBottom)
+  }
+
+  const jumpToLatest = () => {
+    setShowLogHistory(false)
+    setLogAutoFollow(true)
+    if (logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight
+    }
+  }
 
   // 切换平台开关
   const handleTogglePlatform = async (platform: PlatformId) => {
@@ -648,6 +675,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
   const isRunning = stats?.status === 'running'
   const isPaused = stats?.status === 'paused'
   const isCaptchaPaused = isPaused && stats?.pausedReason === 'captcha'
+  const displayLogs: CampaignLog[] = showLogHistory ? historyLogs : (stats?.logs ?? [])
 
   return (
     <div className="bg-surface-darkest rounded-xl border border-surface-hairline shadow-sm overflow-hidden text-text-primary space-y-3.5 p-3.5">
@@ -1106,12 +1134,30 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
               每时每刻行为日志
             </span>
             <span className="text-xs text-text-muted">
-              ({stats?.logs?.length || 0} 条)
+              ({displayLogs.length} 条{showLogHistory ? ' · 全部历史' : ''})
             </span>
           </div>
 
           <div className="flex items-center gap-1 text-text-muted">
-            {isRunning && <span className="text-xs text-emerald-400">实时监听中</span>}
+            {isRunning && !showLogHistory && <span className="text-xs text-emerald-400">实时监听中</span>}
+            {!logAutoFollow && (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); jumpToLatest() }}
+                className="px-1.5 py-0.5 rounded border border-slate-600 text-xs text-slate-200 hover:bg-slate-700 transition-colors"
+                title="回到本轮最新日志"
+              >
+                回到最新
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); setShowLogHistory((v) => !v) }}
+              className="px-1.5 py-0.5 rounded border border-slate-600 text-xs text-slate-200 hover:bg-slate-700 transition-colors"
+              title="查看跨轮次归档的全部动作，或只看本轮"
+            >
+              {showLogHistory ? '只看本轮' : '全部历史'}
+            </button>
             {logExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </div>
         </div>
@@ -1119,10 +1165,11 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         {logExpanded && (
           <div
             ref={logContainerRef}
-            className="p-2.5 h-36 overflow-y-auto space-y-1.5 font-mono text-xs leading-relaxed select-text"
+            onScroll={handleLogScroll}
+            className="p-2.5 h-64 overflow-y-auto space-y-1.5 font-mono text-xs leading-relaxed select-text"
           >
-            {stats?.logs && stats.logs.length > 0 ? (
-              stats.logs.map((item) => {
+            {displayLogs.length > 0 ? (
+              displayLogs.map((item) => {
                 let badgeClass = 'text-sky-400'
                 if (item.level === 'success') badgeClass = 'text-emerald-400 font-medium'
                 if (item.level === 'warn') badgeClass = 'text-amber-400'
@@ -1131,7 +1178,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
                 return (
                   <div key={item.id} className="flex items-start gap-1.5 hover:bg-slate-800/40 rounded px-1">
                     <span className="text-text-secondary shrink-0 select-none text-xs">
-                      [{item.time}]
+                      [{item.date ? `${item.date} ` : ''}{item.time}]
                     </span>
                     <span className={`${badgeClass} break-all flex-1`}>
                       {item.message}

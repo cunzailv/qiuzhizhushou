@@ -10,6 +10,7 @@ import {
   savePlatformQuotas,
 } from '../shared/agent/quota'
 import type { Campaign, ApplyTask } from '../shared/agent/queue-store'
+import type { ApplyVerification } from '../shared/agent/apply-verification'
 import {
   getCampaign,
   claimNextTask,
@@ -67,6 +68,9 @@ const PLATFORM_NAMES: Record<PlatformId, string> = {
 let isTicking = false
 let scheduledTimer: ReturnType<typeof setTimeout> | null = null
 const consecutiveNotFoundMap: Partial<Record<PlatformId, number>> = {}
+/** 连续「点了按钮但平台没确认」的次数，用于提示用户检查登录态 / 风控 / 页面结构 */
+const consecutiveUnverifiedMap: Partial<Record<PlatformId, number>> = {}
+const UNVERIFIED_ALERT_THRESHOLD = 3
 
 /**
  * 连续因“职业方向”过滤导致零新增的轮次。
@@ -204,6 +208,8 @@ export interface ExecuteTaskResult {
   riskDetected?: 'captcha' | 'rate' | 'block'
   failReason?: string
   appliedAt?: string
+  /** 平台侧确认证据；只有 level=confirmed 的任务才会走到 done */
+  verification?: ApplyVerification
 }
 
 /** Content Script 采集岗位后回传的统计结果 */
@@ -976,6 +982,7 @@ async function handleTaskExecutionResult(task: ApplyTask, result: ExecuteTaskRes
 
   if (result.status === 'done') {
     consecutiveNotFoundMap[task.platform] = 0
+    consecutiveUnverifiedMap[task.platform] = 0
     log(MOD, 'handleTaskExecutionResult', `Successfully applied: ${task.jobTitle} @ ${task.company}`)
     // L3 结果回流：记录「哪个搜索方向投出去的」，后续 HR 回复才能按方向算真实回复率
     await recordOutcomeEvent({
@@ -986,8 +993,9 @@ async function handleTaskExecutionResult(task: ApplyTask, result: ExecuteTaskRes
       platform: task.platform,
       direction: task.searchKeyword,
     })
+    const evidence = result.verification?.reason || '平台侧状态已确认'
     await appendCampaignLog(
-      `✅ 投递成功！已向 [${task.platform}]「${task.company} - ${task.jobTitle}」发起沟通并发送个性化话术`,
+      `✅ 投递成功：已向 [${task.platform}]「${task.company} - ${task.jobTitle}」发起沟通（${evidence}）`,
       'success',
     )
   } else if (result.status === 'skipped') {
@@ -996,26 +1004,52 @@ async function handleTaskExecutionResult(task: ApplyTask, result: ExecuteTaskRes
       'info',
     )
   } else if (result.status === 'failed') {
-    await recordError({
-      source: `campaign.${task.platform}`,
-      message: `投递未完成: [${task.platform}] ${task.jobTitle} @ ${task.company} (原因: ${result.failReason || '未知'})`,
-      context: JSON.stringify({
-        taskId: task.id,
-        jobId: task.jobId,
-        jobUrl: task.jobUrl,
-        platform: task.platform,
-        failReason: result.failReason,
-      }),
-    })
-    await appendCampaignLog(
-      `❌ 投递未完成：[${task.platform}] ${task.jobTitle} (原因: ${result.failReason || '未知'})`,
-      'warn',
-    )
+    const unverified = !!result.verification && result.verification.level !== 'confirmed'
+
+    if (unverified) {
+      // 「点了按钮但平台没确认」不能虚报成功，也不能虚报为普通失败。
+      // content 侧已写诊断留痕，这里只做可见日志与连续告警。
+      consecutiveUnverifiedMap[task.platform] = (consecutiveUnverifiedMap[task.platform] || 0) + 1
+      await appendCampaignLog(
+        `⚠️ 未记为投递成功：[${task.platform}] ${task.jobTitle} — ${result.verification!.reason}（不落盘、不去重、不计配额，请到平台聊天列表核对）`,
+        'warn',
+      )
+      const streak = consecutiveUnverifiedMap[task.platform] || 0
+      if (streak === UNVERIFIED_ALERT_THRESHOLD) {
+        await appendCampaignLog(
+          `⚠️ [${task.platform}] 已连续 ${streak} 个岗位「点了按钮但平台没确认」。多半是登录态失效、被风控拦截或平台改版导致按钮点错；请到平台页面人工核对一次。AIbot 会继续尝试其他岗位，但不会虚报成功`,
+          'error',
+        )
+        sendNotification(
+          '未记为投递成功',
+          `[${task.platform}] 连续 ${streak} 次未拿到平台确认，请检查登录态与聊天列表。`,
+          2,
+        )
+      }
+    } else {
+      consecutiveUnverifiedMap[task.platform] = 0
+      await recordError({
+        source: `campaign.${task.platform}`,
+        message: `投递未完成: [${task.platform}] ${task.jobTitle} @ ${task.company} (原因: ${result.failReason || '未知'})`,
+        context: JSON.stringify({
+          taskId: task.id,
+          jobId: task.jobId,
+          jobUrl: task.jobUrl,
+          platform: task.platform,
+          failReason: result.failReason,
+        }),
+      })
+      await appendCampaignLog(
+        `❌ 投递未完成：[${task.platform}] ${task.jobTitle} (原因: ${result.failReason || '未知'})`,
+        'warn',
+      )
+    }
 
     // 核心自动感知：若连续找不到卡片/无法展开（说明用户切换了搜索关键词、城市、翻页或刷新页面，待投缓存已脱节）
-    const isCardNotFound =
+    const isCardNotFound = !unverified && (
       result.failReason?.includes('未找到对应岗位卡片') ||
       result.failReason?.includes('详情无法展开')
+    )
 
     if (isCardNotFound) {
       const currentCount = (consecutiveNotFoundMap[task.platform] || 0) + 1

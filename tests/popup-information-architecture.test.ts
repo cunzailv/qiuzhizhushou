@@ -155,7 +155,7 @@ describe('AIbot 面板 · 首屏只留关键动作', () => {
 
   it('行为日志默认展开，实时流水仍可读取', () => {
     expect(src).toMatch(/const \[logExpanded, setLogExpanded\] = useState\(true\)/)
-    expect(src).toContain('h-36 overflow-y-auto')
+    expect(src).toContain('h-64 overflow-y-auto')
     expect(src).toContain('font-mono text-xs leading-relaxed')
   })
 })
