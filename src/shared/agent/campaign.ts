@@ -44,6 +44,8 @@ export interface CampaignStats {
   isWithinWindow: boolean
   intervalConfig: IntervalConfig
   restUntil?: number
+  /** 「N 小时投满 M 份」目标产能（含 startedAt），面板据此算进度与可达性 */
+  capacityGoal?: Campaign['capacityGoal']
   logs: CampaignLog[]
 }
 
@@ -95,6 +97,7 @@ export function aggregateCampaignStats(campaign: Campaign): CampaignStats {
     isWithinWindow: isWithinWindow(campaign.windows),
     intervalConfig: campaign.intervalConfig || DEFAULT_INTERVAL_CONFIG,
     restUntil: campaign.restUntil,
+    capacityGoal: campaign.capacityGoal,
     logs: campaign.logs || [],
   }
 }

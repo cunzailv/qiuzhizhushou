@@ -536,6 +536,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
 
+  // 设定「N 小时投满 M 份」目标产能
+  if (message.type === 'SET_CAPACITY_GOAL') {
+    campaignService.setCapacityGoal(message.payload?.goal)
+      .then((goal) => sendResponse({ success: true, data: goal }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
   // 用户点「立即继续」跳过模拟休息，或关掉休息开关：立刻恢复投递
   if (message.type === 'SKIP_REST') {
     campaignService.skipRest()

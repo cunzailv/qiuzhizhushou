@@ -2,6 +2,7 @@
 // 基于 chrome.storage.local，实现跨 Service Worker 重启、跨标签页的可靠调度
 
 import type { PlatformId, TimeWindow, IntervalConfig } from './quota'
+import type { CapacityGoal } from './capacity-goal'
 import {
   DEFAULT_PLATFORM_CONFIGS,
   getSavedTimeWindows,
@@ -93,6 +94,8 @@ export interface Campaign {
   restUntil?: number             // 强制休息到期时间戳
   /** 本批休息阈值，必须落盘；否则每轮 tick 重新随机会导致行为不可复现 */
   restThreshold?: number
+  /** 「N 小时投满 M 份」目标产能；startedAt 随 campaign 持久化，暂停重启不重置倒计时 */
+  capacityGoal?: CapacityGoal & { startedAt: number }
   logs: CampaignLog[]            // 每时每刻行为日志流水
 }
 
@@ -285,6 +288,34 @@ async function persistRestStateInternal(patch: RestStatePatch): Promise<Campaign
 
 export function persistRestState(patch: RestStatePatch): Promise<Campaign | null> {
   const task = logWriteChain.then(() => persistRestStateInternal(patch))
+  logWriteChain = task.catch(() => {})
+  return task
+}
+
+/**
+ * 写入目标产能。参数不变则沿用原 startedAt（暂停 / 重启不重置倒计时），
+ * 参数被用户改过则重新计时，避免「改了目标却按旧截止算」。
+ */
+async function persistCapacityGoalInternal(goal: CapacityGoal | null): Promise<Campaign | null> {
+  const campaign = await getCampaign()
+  if (!campaign) return null
+  if (!goal || !goal.enabled) {
+    delete campaign.capacityGoal
+  } else {
+    const prev = campaign.capacityGoal
+    const unchanged =
+      prev && prev.hours === goal.hours && prev.targetJobs === goal.targetJobs
+    campaign.capacityGoal = {
+      ...goal,
+      startedAt: unchanged ? prev.startedAt : Date.now(),
+    }
+  }
+  await saveCampaign(campaign)
+  return campaign
+}
+
+export function persistCapacityGoal(goal: CapacityGoal | null): Promise<Campaign | null> {
+  const task = logWriteChain.then(() => persistCapacityGoalInternal(goal))
   logWriteChain = task.catch(() => {})
   return task
 }

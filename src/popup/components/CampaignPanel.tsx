@@ -1,6 +1,6 @@
 // AIbot 全自动投递控制面板与每时每刻行为日志终端
 
-import React, { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import {
   Play,
   Pause,
@@ -70,7 +70,20 @@ import {
 import {
   DEFAULT_REST_ENABLED,
   REST_ENABLED_KEY,
+  resolveRestPolicy,
 } from '../../shared/agent/rest-policy'
+import {
+  CAPACITY_GOAL_KEY,
+  DEFAULT_CAPACITY_GOAL,
+  MAX_CAPACITY_HOURS,
+  MAX_CAPACITY_TARGET,
+  MIN_CAPACITY_HOURS,
+  MIN_CAPACITY_TARGET,
+  describeCapacityStatus,
+  evaluateCapacityGoal,
+  normalizeCapacityGoal,
+  type CapacityGoal,
+} from '../../shared/agent/capacity-goal'
 
 const PLATFORM_INFOS: Array<{ id: PlatformId; name: string }> = [
   { id: 'boss', name: 'Boss直聘' },
@@ -182,6 +195,11 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
   const [foregroundMode, setForegroundMode] = useState(DEFAULT_FOREGROUND_MODE)
   // 模拟真人作息休息：默认开启防风控；嫌慢可关掉，海投策略下批次更长、休息更短
   const [restEnabled, setRestEnabled] = useState(DEFAULT_REST_ENABLED)
+  // 目标产能：N 小时内投满 M 份
+  const [capacityGoal, setCapacityGoal] = useState<CapacityGoal>(DEFAULT_CAPACITY_GOAL)
+  const [capacityHoursInput, setCapacityHoursInput] = useState(String(DEFAULT_CAPACITY_GOAL.hours))
+  const [capacityJobsInput, setCapacityJobsInput] = useState(String(DEFAULT_CAPACITY_GOAL.targetJobs))
+  const [capacitySaving, setCapacitySaving] = useState(false)
 
   const [logExpanded, setLogExpanded] = useState(true)
   /** 用户往上翻看历史时暂停自动跟随，不再每 2 秒被强行拉回底部 */
@@ -256,6 +274,12 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         setRestEnabled(
           (await getSetting<boolean>(REST_ENABLED_KEY, DEFAULT_REST_ENABLED)) !== false,
         )
+        const savedGoal = normalizeCapacityGoal(
+          await getSetting<unknown>(CAPACITY_GOAL_KEY, DEFAULT_CAPACITY_GOAL),
+        )
+        setCapacityGoal(savedGoal)
+        setCapacityHoursInput(String(savedGoal.hours))
+        setCapacityJobsInput(String(savedGoal.targetJobs))
 
         const savedQuotas = await getSavedPlatformQuotas()
         setPlatformQuotas(savedQuotas)
@@ -351,6 +375,49 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
       )
     } catch {
       onNotify?.('运行模式保存失败，请重试', 'error')
+    }
+  }
+
+  /** 保存「N 小时投满 M 份」；后台同时写设置与本轮 campaign，运行中立刻生效 */
+  const handleSaveCapacityGoal = async (enabled: boolean) => {
+    const hours = Number(capacityHoursInput)
+    const jobs = Number(capacityJobsInput)
+    if (
+      !Number.isFinite(hours) || hours < MIN_CAPACITY_HOURS || hours > MAX_CAPACITY_HOURS ||
+      !Number.isFinite(jobs) || jobs < MIN_CAPACITY_TARGET || jobs > MAX_CAPACITY_TARGET
+    ) {
+      onNotify?.(
+        `请填写 ${MIN_CAPACITY_HOURS}-${MAX_CAPACITY_HOURS} 小时、${MIN_CAPACITY_TARGET}-${MAX_CAPACITY_TARGET} 份`,
+        'warning',
+      )
+      return
+    }
+    setCapacitySaving(true)
+    try {
+      const next: CapacityGoal = { enabled, hours, targetJobs: Math.round(jobs) }
+      const res = (await chrome.runtime.sendMessage({
+        type: 'SET_CAPACITY_GOAL',
+        payload: { goal: next },
+      })) as { success?: boolean; data?: CapacityGoal; error?: string }
+      if (res?.success) {
+        const applied = normalizeCapacityGoal(res.data || next)
+        setCapacityGoal(applied)
+        setCapacityHoursInput(String(applied.hours))
+        setCapacityJobsInput(String(applied.targetJobs))
+        onNotify?.(
+          applied.enabled
+            ? `已设定：${applied.hours} 小时内投满 ${applied.targetJobs} 份，AIbot 会自动调速`
+            : '已关闭目标产能，恢复常规节奏',
+          'success',
+        )
+        await fetchStats()
+      } else {
+        onNotify?.(`目标产能保存失败：${res?.error || '后台暂不可达'}`, 'warning')
+      }
+    } catch {
+      onNotify?.('目标产能保存失败：后台暂不可达', 'warning')
+    } finally {
+      setCapacitySaving(false)
     }
   }
 
@@ -760,6 +827,23 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         .reduce((sum, pid) => sum + (stats.platformBreakdown[pid]?.quota || 0), 0)
     : 0
 
+  /** 目标产能实时可达性：面板与后台用同一套纯函数，文案不会漂移 */
+  const capacityEvaluation = useMemo(() => {
+    const stored = stats?.capacityGoal
+    if (!stored?.enabled) return null
+    const iv = stats?.intervalConfig || DEFAULT_INTERVAL_CONFIG
+    return evaluateCapacityGoal({
+      goal: stored,
+      now: Date.now(),
+      startedAt: stored.startedAt,
+      applied: stats?.done ?? 0,
+      totalQuota,
+      baseIntervalMs: ((iv.minSeconds + iv.maxSeconds) / 2) * 1000,
+      policy: resolveRestPolicy(strategy),
+      restEnabled,
+    })
+  }, [stats, totalQuota, strategy, restEnabled])
+
   return (
     <div className="bg-surface-darkest rounded-xl border border-surface-hairline shadow-sm overflow-hidden text-text-primary space-y-3.5 p-3.5">
       {/* 头部：品牌与状态指示 */}
@@ -838,6 +922,39 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
           >
             立即继续
           </button>
+        </div>
+      )}
+
+      {/* 目标产能：设定后常驻显示进度与可达性，赶不上会明确说明原因 */}
+      {capacityEvaluation && (
+        <div className="bg-surface-dark border border-surface-hairline rounded-lg p-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-text-secondary">
+              目标产能 · {capacityGoal.hours} 小时投满 {capacityGoal.targetJobs} 份
+            </span>
+            <span
+              className={`text-xs font-medium ${
+                capacityEvaluation.status === 'at-risk' || capacityEvaluation.status === 'missed'
+                  ? 'text-warning'
+                  : capacityEvaluation.status === 'achieved' ? 'text-success' : 'text-text-primary'
+              }`}
+            >
+              {describeCapacityStatus(capacityEvaluation, capacityGoal)}
+            </span>
+          </div>
+          <div className="queue-rule mt-2">
+            <div
+              className="queue-rule-fill"
+              style={{ width: `${capacityEvaluation.progressPercent}%` }}
+            />
+          </div>
+          <div className="text-xs text-text-muted mt-1.5 leading-relaxed">
+            已确认投递 {stats?.done ?? 0}/{capacityEvaluation.targetJobs} · 距截止约{' '}
+            {Math.round(capacityEvaluation.remainingMs / 60_000)} 分钟
+            {capacityEvaluation.remainingJobs > 0 &&
+              ` · 每份最多 ${Math.max(8, Math.round(capacityEvaluation.requiredIntervalMs / 1000))} 秒`}
+            {capacityEvaluation.advice && ` · ${capacityEvaluation.advice}`}
+          </div>
         </div>
       )}
 
@@ -1006,6 +1123,59 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             </span>
           </span>
         </label>
+
+        {/* 目标产能：N 小时投满 M 份 */}
+        <div className="mt-2 rounded-md border border-surface-hairline bg-surface-dark px-2.5 py-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-text-secondary">目标产能（按时限自动调速）</span>
+            <span className="text-xs text-text-muted">{capacityGoal.enabled ? '已开启' : '未开启'}</span>
+          </div>
+          <div className="mt-2 flex items-center gap-1.5">
+            <input
+              type="number"
+              min={MIN_CAPACITY_HOURS}
+              max={MAX_CAPACITY_HOURS}
+              step={0.5}
+              value={capacityHoursInput}
+              onChange={(event) => setCapacityHoursInput(event.target.value)}
+              aria-label="目标小时数"
+              className="w-16 rounded-md border border-surface-hairline bg-surface-darkest px-2 py-1 text-xs text-text-primary"
+            />
+            <span className="text-xs text-text-muted">小时内投满</span>
+            <input
+              type="number"
+              min={MIN_CAPACITY_TARGET}
+              max={MAX_CAPACITY_TARGET}
+              value={capacityJobsInput}
+              onChange={(event) => setCapacityJobsInput(event.target.value)}
+              aria-label="目标份数"
+              className="w-16 rounded-md border border-surface-hairline bg-surface-darkest px-2 py-1 text-xs text-text-primary"
+            />
+            <span className="text-xs text-text-muted">份</span>
+          </div>
+          <div className="mt-2 grid grid-cols-2 gap-1.5">
+            <button
+              type="button"
+              onClick={() => void handleSaveCapacityGoal(true)}
+              disabled={capacitySaving}
+              className={MAINTENANCE_BUTTON}
+            >
+              {capacitySaving ? '保存中...' : '保存并启用'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSaveCapacityGoal(false)}
+              disabled={capacitySaving || !capacityGoal.enabled}
+              className={MAINTENANCE_BUTTON}
+            >
+              关闭目标
+            </button>
+          </div>
+          <p className="text-xs text-text-muted mt-1.5 leading-relaxed">
+            按剩余时间自动压缩间隔（最低 8 秒防风控）、进度落后时跳过模拟休息；赶不上会预警，到点未达成给诊断。
+            岗位供给与平台风控不可控，系统不会凭空承诺达标。目标超过已开启平台配额合计时，请先在「平台与配额」调高数量。
+          </p>
+        </div>
       </Disclosure>
 
       {/* 全自主无人值守队列说明：补仓按钮已收进「复盘与维护工具」 */}

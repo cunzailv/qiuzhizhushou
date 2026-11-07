@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1141%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1165%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -217,9 +217,23 @@
 | **到期即投** | 休息结束返回 `resume`，清状态后**本轮立刻继续领任务**，不再空跑一整轮；休息中的日志按 10 分钟节流，5 分钟切片不刷屏 |
 | **用户出口** | 「复盘与维护工具」里可关闭「模拟真人作息休息」；休息提示条新增「立即继续」按钮（`SKIP_REST`），关开关时也会自动唤醒，不用干等十几分钟 |
 | **进度可见** | 首屏「已成功投递」下方显示已启用平台的合计目标（如 `目标 80`）；休息 / 休眠 / 空转诊断日志都写明「今日已确认投递 X/Y，还差 Z 份」及「未计入配额的失败尝试 N 次」，并提示去平台聊天列表核对未确认投递 |
-| **回归测试** | `tests/campaign-rest-policy.test.ts`（25 例）：用深拷贝 storage **真实复现旧死锁**、原子落盘与并发写入、阈值/时长边界、状态机六种决策、静态契约 |
+| **回归测试** | `tests/campaign-rest-policy.test.ts`（26 例）：用深拷贝 storage **真实复现旧死锁**、原子落盘与并发写入、阈值/时长边界、状态机六种决策、升级迁移、静态契约 |
 
 > 说明：配额只统计「平台侧已确认」的投递（`done`）。点了按钮但平台没确认的任务不计入配额，这是防虚报的刻意设计；日志会明确标为「未记为投递成功」。
+
+### 🎯 目标产能 · 设定「N 小时投满 M 份」（2026-11）
+在 AIbot →「复盘与维护工具」里设定小时数（1-24，支持 0.5 步进）与目标份数（1-500），点「保存并启用」。设定后首屏出现常驻进度条，显示已投 / 目标、距截止剩余时间、每份最多能花多少秒。
+
+| 层 | 说明 |
+|---|---|
+| **可达性预判** | 新增 `src/shared/agent/capacity-goal.ts` 的 `evaluateCapacityGoal()`，按剩余时间 / 剩余份数算 `requiredIntervalMs`，结合当前策略与休息开销预测完成时刻，输出 `on-track` / `at-risk` / `achieved` / `missed` |
+| **自动调速** | 进度需要时把拟人间隔压缩到 `resolvePacingInterval()`，但**最低不低于 8 秒**防风控；`at-risk` 时自动跳过模拟真人休息，把时间还给投递 |
+| **倒计时持久化** | 目标与 `startedAt` 写进本轮 campaign（`persistCapacityGoal`，与日志共用串行写入链）；参数不变则暂停 / Service Worker 重启不重置倒计时，改参数才重新计时 |
+| **预警与诊断** | 赶不上时每 10 分钟给一次可操作建议（放宽岗位名称 / 多开平台 / 下调目标，或提示目标超过配额合计）；到点未达成只通知一次，指引去查「未记为投递成功」「没有发现新岗位」与登录态日志 |
+| **运行中改目标** | `SET_CAPACITY_GOAL` 路由即时写设置 + campaign + 日志，并唤醒下一轮调度，不用重启 AIbot |
+| **回归测试** | `tests/capacity-goal.test.ts`（23 例）：归一化边界、五种状态、预测与调速下限、倒计时持久化、并发写入、静态契约 |
+
+> 诚实边界：这是**截止节奏管理**，不是「保证达标」。岗位供给、登录态、平台风控都不可控，系统只做可达性预判、自动调速与到点诊断，不会为了数字好看把「点了按钮但平台没确认」算成投递成功。
 
 ---
 
@@ -341,7 +355,7 @@ npm run build
 | 样式 | Tailwind CSS 3 + shadow DOM 注入 |
 | 数据 | Dexie (IndexedDB) + chrome.storage |
 | AI | OpenAI / DeepSeek / 自定义兼容接口 + 本地语义精筛 + AI SDK 7 tool-calling 循环 |
-| 测试 | Vitest（1141 用例 / 81 文件）+ Playwright（E2E） |
+| 测试 | Vitest（1165 用例 / 82 文件）+ Playwright（E2E） |
 | UI 组件 | Lucide React + Recharts + react-markdown / remark-gfm |
 
 ## 📁 项目结构
@@ -389,8 +403,8 @@ docs/EXTERNAL_AI.md     # 外部 AI 接入完整指南
 ## 🧪 测试与验收
 
 ```bash
-npm test                                       # tsc -b + vite build + 全部 1141 个测试用例
-npx vitest run                                  # 全量单测/E2E：81 文件 / 1141 用例
+npm test                                       # tsc -b + vite build + 全部 1165 个测试用例
+npx vitest run                                  # 全量单测/E2E：82 文件 / 1165 用例
 npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用例（基线 110 + 新增 36）
 ```
 

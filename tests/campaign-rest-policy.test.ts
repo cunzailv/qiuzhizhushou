@@ -279,7 +279,16 @@ describe('调用链静态契约 · 休息不再卡死产能', () => {
   it('阈值一次生成并持久化，不再每个 tick 重新随机', () => {
     expect(service).not.toContain('15 + Math.floor(Math.random() * 10)')
     expect(service).toContain('restThreshold: campaign.restThreshold')
-    expect(service).toContain('persistRestState({ restThreshold: restDecision.restThreshold })')
+    expect(service).toContain('restThreshold: restDecision.restThreshold')
+  })
+
+  it('升级迁移：补写阈值时把死锁期间累积的连投计数一并归零', () => {
+    const block = service.slice(
+      service.indexOf('} else if (restDecision.restThreshold !== undefined)'),
+      service.indexOf('// 3.5 自主重规划'),
+    )
+    expect(block).toContain('restThreshold: restDecision.restThreshold')
+    expect(block).toContain('consecutiveRestCounter: 0')
   })
 
   it('休息节奏跟随精投/海投策略，且可由用户关闭', () => {

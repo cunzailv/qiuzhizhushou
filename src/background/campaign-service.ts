@@ -8,6 +8,7 @@ import {
   formatTimeWindows,
   saveIntervalConfig,
   savePlatformQuotas,
+  DEFAULT_INTERVAL_CONFIG,
 } from '../shared/agent/quota'
 import type { Campaign, ApplyTask } from '../shared/agent/queue-store'
 import type { ApplyVerification } from '../shared/agent/apply-verification'
@@ -23,6 +24,7 @@ import {
   updateCampaignQuotas,
   clearPendingTasks,
   persistRestState,
+  persistCapacityGoal,
 } from '../shared/agent/queue-store'
 import {
   startCampaign as startAgentCampaign,
@@ -66,7 +68,18 @@ import {
   decideRest,
   pickInitialRestThreshold,
   resolveRestPolicy,
+  type RestPolicy,
 } from '../shared/agent/rest-policy'
+import {
+  CAPACITY_GOAL_KEY,
+  DEFAULT_CAPACITY_GOAL,
+  describeCapacityStatus,
+  evaluateCapacityGoal,
+  normalizeCapacityGoal,
+  resolvePacingInterval,
+  type CapacityEvaluation,
+  type CapacityGoal,
+} from '../shared/agent/capacity-goal'
 import { log, logWarn, logError } from '../shared/utils/logger'
 
 const MOD = 'CampaignService'
@@ -283,6 +296,10 @@ const MAX_SLEEP_CHUNK_MS = 5 * 60_000
 let lastWindowSleepLogAt = 0
 /** 上次输出“休息中”日志的时间；5 分钟切片轮询时不重复刷屏 */
 let lastRestNoticeAt = 0
+/** 目标产能预警节流，避免每个 tick 都刷同一句 */
+let lastCapacityNoticeAt = 0
+/** 到点未达成只通知一次，按 campaignId 去重 */
+let capacityMissedNotifiedFor = ''
 
 /** 汇总已启用平台的今日配额进度，让「投不满」时用户能一眼看到卡在哪 */
 function summarizeQuotaProgress(campaign: Campaign): {
@@ -299,6 +316,32 @@ function summarizeQuotaProgress(campaign: Campaign): {
     applied += q.applied
   }
   return { applied, quota, remaining: Math.max(0, quota - applied) }
+}
+
+/**
+ * 「N 小时投满 M 份」的可达性评估。campaign.capacityGoal 是单一真源，
+ * startedAt 随 campaign 持久化，Service Worker 重启 / 暂停都不会重置倒计时。
+ */
+function readCapacityEvaluation(
+  campaign: Campaign,
+  policy: RestPolicy,
+  restEnabled: boolean,
+): CapacityEvaluation | null {
+  const stored = campaign.capacityGoal
+  if (!stored?.enabled) return null
+  const progress = summarizeQuotaProgress(campaign)
+  const interval = campaign.intervalConfig || DEFAULT_INTERVAL_CONFIG
+  const baseIntervalMs = ((interval.minSeconds + interval.maxSeconds) / 2) * 1000
+  return evaluateCapacityGoal({
+    goal: stored,
+    now: Date.now(),
+    startedAt: stored.startedAt,
+    applied: progress.applied,
+    totalQuota: progress.quota,
+    baseIntervalMs,
+    policy,
+    restEnabled,
+  })
 }
 
 /** 设定下一次 tick 触发（结合 setTimeout 与 Alarm 机制双重保险） */
@@ -457,7 +500,10 @@ export async function runCampaignTick(): Promise<void> {
     // 现在所有状态变化都走 persistRestState() 串行链，且阈值一次生成后固定。
     const strategy = await getDeliveryStrategy()
     const restPolicy = resolveRestPolicy(strategy)
-    const restEnabled = (await getSetting<boolean>(REST_ENABLED_KEY, DEFAULT_REST_ENABLED)) === true
+    const userRestEnabled = (await getSetting<boolean>(REST_ENABLED_KEY, DEFAULT_REST_ENABLED)) === true
+    const capacity = readCapacityEvaluation(campaign, restPolicy, userRestEnabled)
+    // 目标产能进度落后时自动跳过模拟休息，把时间还给投递
+    const restEnabled = userRestEnabled && !capacity?.shouldSkipRest
     const restDecision = decideRest({
       now,
       restUntil: campaign.restUntil,
@@ -468,6 +514,19 @@ export async function runCampaignTick(): Promise<void> {
       enabled: restEnabled,
     })
     const progress = summarizeQuotaProgress(campaign)
+
+    // 目标产能：到点未达成一次性诊断；赶不上时每 10 分钟给一次可操作建议
+    if (capacity?.status === 'missed' && capacityMissedNotifiedFor !== campaign.id) {
+      capacityMissedNotifiedFor = campaign.id
+      await appendCampaignLog(`⚠️ 目标产能未达成：${capacity.advice}`, 'warn')
+      sendNotification('目标产能未达成', capacity.advice, 2)
+    } else if (capacity?.status === 'at-risk' && Date.now() - lastCapacityNoticeAt > 10 * 60_000) {
+      lastCapacityNoticeAt = Date.now()
+      await appendCampaignLog(
+        `🎯 目标产能预警：${describeCapacityStatus(capacity, campaign.capacityGoal!)}。${capacity.advice}`,
+        'warn',
+      )
+    }
 
     if (restDecision.kind === 'resume') {
       // 休息到期 / 用户关掉休息：清状态，并且本轮立刻继续投递，不再空跑一整轮
@@ -514,8 +573,13 @@ export async function runCampaignTick(): Promise<void> {
       scheduleNextTick(restDecision.durationMs)
       return
     } else if (restDecision.restThreshold !== undefined) {
-      // 旧 campaign 没有持久化阈值：补写一次，之后每轮共用，不再每 tick 重随机
-      await persistRestState({ restThreshold: restDecision.restThreshold })
+      // 旧 campaign 没有持久化阈值：补写一次，之后每轮共用，不再每 tick 重随机。
+      // 同时把历史累积的连投计数归零 —— 死锁期间它可能已经涨到几十，
+      // 不归零的话升级后第一次 tick 会立刻又触发一次十几分钟的休息。
+      await persistRestState({
+        restThreshold: restDecision.restThreshold,
+        consecutiveRestCounter: 0,
+      })
     }
 
     // 3.5 自主重规划：按真实复盘 + 经验记忆调整今日策略（失败静默降级，不影响原流水线）
@@ -669,11 +733,19 @@ export async function runCampaignTick(): Promise<void> {
       }
     }
 
-    // 9. 计算拟人随机延迟，安排下一轮调度
-    const nextInterval = getRandomInterval(task.platform, undefined, campaign.intervalConfig)
+    // 9. 计算拟人随机延迟；设了目标产能且进度偏紧时自动压缩（不低于防风控下限）
+    const rawInterval = getRandomInterval(task.platform, undefined, campaign.intervalConfig)
+    const nextInterval = capacity ? resolvePacingInterval(rawInterval, capacity) : rawInterval
+    const paced = nextInterval < rawInterval
     const nextSeconds = Math.round(nextInterval / 1000)
     log(MOD, 'runCampaignTick', `Task executed. Next tick in ${nextSeconds}s`)
-    await appendCampaignLog(`⏳ 触发拟人安全间隔，随机等待 ${nextSeconds} 秒后处理下一个岗位...`, 'info')
+    await appendCampaignLog(
+      `⏳ 触发拟人安全间隔，随机等待 ${nextSeconds} 秒后处理下一个岗位...` +
+        (paced && capacity
+          ? `（目标产能 ${capacity.targetJobs} 份 / ${campaign.capacityGoal?.hours} 小时：已按剩余时间压缩间隔，最低不低于 8 秒）`
+          : ''),
+      'info',
+    )
     scheduleNextTick(nextInterval)
   } catch (err) {
     logError(MOD, 'runCampaignTick', err, 'Tick loop error')
@@ -1211,6 +1283,17 @@ export const campaignService = {
     windows?: TimeWindow[],
   ) => {
     const cmp = await startAgentCampaign(customQuotas, enabledPlatforms, windows)
+    // 把「N 小时投满 M 份」写进本轮 campaign（参数不变则沿用原倒计时）
+    const savedGoal = normalizeCapacityGoal(
+      await getSetting<unknown>(CAPACITY_GOAL_KEY, DEFAULT_CAPACITY_GOAL),
+    )
+    await persistCapacityGoal(savedGoal)
+    if (savedGoal.enabled) {
+      await appendCampaignLog(
+        `🎯 目标产能已设定：${savedGoal.hours} 小时内投满 ${savedGoal.targetJobs} 份；AIbot 会按剩余时间自动压缩间隔，赶不上时明确预警`,
+        'info',
+      )
+    }
     // 启动即说明运行模式，避免用户以为插件又要把浏览器抢回前台
     await appendCampaignLog(
       (await isForegroundMode())
@@ -1252,6 +1335,23 @@ export const campaignService = {
       await appendCampaignLog(`🧹 已回收 ${closed} 个 AIbot 专用后台标签页`, 'info')
     }
     return cmp
+  },
+  /** 用户在面板设定 / 修改「N 小时投满 M 份」：设置与 campaign 一起落盘 */
+  setCapacityGoal: async (raw: unknown): Promise<CapacityGoal> => {
+    const goal = normalizeCapacityGoal(raw)
+    await setSetting(CAPACITY_GOAL_KEY, goal)
+    await persistCapacityGoal(goal)
+    lastCapacityNoticeAt = 0
+    capacityMissedNotifiedFor = ''
+    await appendCampaignLog(
+      goal.enabled
+        ? `🎯 目标产能已更新：${goal.hours} 小时内投满 ${goal.targetJobs} 份（重新计时，AIbot 会自动调速）`
+        : '🎯 已关闭目标产能，恢复常规拟人节奏',
+      'info',
+    )
+    const current = await getCampaign()
+    if (current?.status === 'running') scheduleNextTick(1000)
+    return goal
   },
   /** 用户点「立即继续」/ 关掉休息开关：立刻清掉休息状态并唤醒下一轮投递 */
   skipRest: async () => {
