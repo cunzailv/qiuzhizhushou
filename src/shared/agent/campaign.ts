@@ -42,6 +42,8 @@ export interface CampaignStats {
   >
   aiBudgetUsed: number
   isWithinWindow: boolean
+  /** 当前 campaign 实际生效的投递时段；UI 目标产能可达性必须与后台用同一份 */
+  windows: TimeWindow[]
   intervalConfig: IntervalConfig
   restUntil?: number
   /** 「N 小时投满 M 份」目标产能（含 startedAt），面板据此算进度与可达性 */
@@ -95,6 +97,7 @@ export function aggregateCampaignStats(campaign: Campaign): CampaignStats {
     platformBreakdown: campaign.quotas,
     aiBudgetUsed: campaign.aiBudgetUsed,
     isWithinWindow: isWithinWindow(campaign.windows),
+    windows: campaign.windows || [],
     intervalConfig: campaign.intervalConfig || DEFAULT_INTERVAL_CONFIG,
     restUntil: campaign.restUntil,
     capacityGoal: campaign.capacityGoal,

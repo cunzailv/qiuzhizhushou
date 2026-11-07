@@ -9,6 +9,8 @@ import {
   saveIntervalConfig,
   savePlatformQuotas,
   DEFAULT_INTERVAL_CONFIG,
+  DEFAULT_WINDOWS,
+  countUsableMinutesUntil,
 } from '../shared/agent/quota'
 import type { Campaign, ApplyTask } from '../shared/agent/queue-store'
 import type { ApplyVerification } from '../shared/agent/apply-verification'
@@ -25,6 +27,8 @@ import {
   clearPendingTasks,
   persistRestState,
   persistCapacityGoal,
+  isRecyclableTask,
+  TASK_RETRY_COOLDOWN_MS,
 } from '../shared/agent/queue-store'
 import {
   startCampaign as startAgentCampaign,
@@ -77,6 +81,8 @@ import {
   evaluateCapacityGoal,
   normalizeCapacityGoal,
   resolvePacingInterval,
+  isCapacityUrgent,
+  checkCapacityWindowFit,
   type CapacityEvaluation,
   type CapacityGoal,
 } from '../shared/agent/capacity-goal'
@@ -145,6 +151,18 @@ export async function setSearchPageCursor(pageKey: string, page: number): Promis
   } catch {
     // 持久化失败时退化为本轮内存行为，不影响采集
   }
+}
+
+/**
+ * 本页没有新增岗位就翻页。
+ *
+ * 旧版只在 `collected === 0 && excludedOnPage > 0`（整页全是已投岗位）时翻页，
+ * 而现场日志是「抓到 75 张卡、语义对口 35 个、added=0」——卡片还在、只是都
+ * 被历史去重键挡住了，于是页码永远停在第 1 页，关键词轮转也只是在重复扫同一批卡片。
+ * 这是「设了目标产能却一个都投不出去」的直接供给死锁。
+ */
+export function nextSearchPage(currentPage: number, maxPage = MAX_SEARCH_PAGE): number {
+  return currentPage >= maxPage ? 1 : currentPage + 1
 }
 
 /** 方向诊断日志去重签名，避免每轮补仓重复刷同一条 */
@@ -251,7 +269,16 @@ interface CollectJobsResult {
   filteredByTime?: number
   filteredByBlacklist?: number
   pageCardTotal?: number
+  /** 本页因「已在队列 / 已投过」被跳过的卡片数（真实去重数） */
   excludedOnPage?: number
+  /** 本页因采集上限被截断、根本没参与筛选的卡片数 */
+  truncatedByCap?: number
+  /** 通过采集层全部硬筛、真正提交入队的任务数 */
+  tasksProduced?: number
+  /** tasksProduced 里被队列去重挡下的数量（added = tasksProduced - duplicatesAtAppend） */
+  duplicatesAtAppend?: number
+  /** 其他硬条件（薪资 / 学历 / 未归类）筛掉的卡片数 */
+  filteredOther?: number
   /** 与搜索关键词字符串命中的卡片数；-1 表示未传关键词（旧口径，仅用于对比） */
   keywordHits?: number
   /** L2 语义复核后真正对口的卡片数；-1 表示未传关键词 */
@@ -292,8 +319,30 @@ function sendNotification(title: string, message: string, priority = 1) {
  */
 const MAX_SLEEP_CHUNK_MS = 5 * 60_000
 
-/** 上次输出“不在投递时段”日志的时间，用于分片轮询时的日志去重 */
-let lastWindowSleepLogAt = 0
+/**
+ * 「不在投递时段」日志的去重时间戳必须持久化。
+ * 旧版用模块级内存变量，MV3 Service Worker 每次被回收后重置，
+ * 5 分钟切片一醒就重复打一条一模一样的休眠日志。
+ */
+const WINDOW_SLEEP_LOG_KEY = 'aibot_last_window_sleep_log_at'
+
+async function readWindowSleepLogAt(): Promise<number> {
+  try {
+    const res = await chrome.storage.local.get(WINDOW_SLEEP_LOG_KEY)
+    const value = Number(res?.[WINDOW_SLEEP_LOG_KEY] ?? 0)
+    return Number.isFinite(value) ? value : 0
+  } catch {
+    return 0
+  }
+}
+
+async function markWindowSleepLogAt(at: number): Promise<void> {
+  try {
+    await chrome.storage.local.set({ [WINDOW_SLEEP_LOG_KEY]: at })
+  } catch {
+    // 去重标记写不进去最多多打一条日志，不影响业务
+  }
+}
 /** 上次输出“休息中”日志的时间；5 分钟切片轮询时不重复刷屏 */
 let lastRestNoticeAt = 0
 /** 目标产能预警节流，避免每个 tick 都刷同一句 */
@@ -332,15 +381,20 @@ function readCapacityEvaluation(
   const progress = summarizeQuotaProgress(campaign)
   const interval = campaign.intervalConfig || DEFAULT_INTERVAL_CONFIG
   const baseIntervalMs = ((interval.minSeconds + interval.maxSeconds) / 2) * 1000
+  const now = Date.now()
+  const deadlineMs = Math.max(0, stored.startedAt + stored.hours * 60 * 60_000 - now)
+  // 只算真正落在工作时段内的分钟；否则 21:00 后设的「2 小时目标」会被误判成进度正常
+  const usableMinutes = countUsableMinutesUntil(campaign.windows, new Date(now), deadlineMs)
   return evaluateCapacityGoal({
     goal: stored,
-    now: Date.now(),
+    now,
     startedAt: stored.startedAt,
     applied: progress.applied,
     totalQuota: progress.quota,
     baseIntervalMs,
     policy,
     restEnabled,
+    usableMinutes,
   })
 }
 
@@ -475,13 +529,22 @@ export async function runCampaignTick(): Promise<void> {
       const waitMs = getDelayUntilNextWindow(campaign.windows)
       const waitMins = Math.max(1, Math.round(waitMs / 60_000))
       log(MOD, 'runCampaignTick', `Outside window. Sleeping for ${waitMins} minutes`)
-      // 分片轮询会频繁命中这里，日志每 30 分钟最多提示一次，避免刷屏
-      if (Date.now() - lastWindowSleepLogAt > 30 * 60_000) {
-        lastWindowSleepLogAt = Date.now()
+      // 分片轮询会频繁命中这里，日志每 30 分钟最多提示一次；标记持久化，SW 重启也不刷屏
+      if (Date.now() - (await readWindowSleepLogAt()) > 30 * 60_000) {
+        await markWindowSleepLogAt(Date.now())
         const sleepProgress = summarizeQuotaProgress(campaign)
+        const goal = campaign.capacityGoal
+        let goalNote = ''
+        if (goal?.enabled) {
+          const goalDeadlineMs = Math.max(0, goal.startedAt + goal.hours * 60 * 60_000 - now)
+          const usable = countUsableMinutesUntil(campaign.windows, new Date(now), goalDeadlineMs)
+          goalNote = usable <= 0
+            ? ` ⚠️ 目标产能【${goal.hours} 小时投满 ${goal.targetJobs} 份】与工作时段完全冲突：目标剩余 ${Math.ceil(goalDeadlineMs / 60_000)} 分钟内 0 分钟可投，而 AIbot 要休眠约 ${waitMins} 分钟，目标无法按时达成。请立即把【工作时段】设为「24小时不限」`
+            : ` 目标产能剩余 ${Math.ceil(goalDeadlineMs / 60_000)} 分钟，其中仅 ${usable} 分钟落在允许时段；不想中断就把【工作时段】设为「24小时不限」`
+        }
         await appendCampaignLog(
-          `🌙 当前不在投递时段内 (允许时段: ${formatTimeWindows(campaign.windows)})，AIbot 进入静默休眠；今日已确认投递 ${sleepProgress.applied}/${sleepProgress.quota}，还差 ${sleepProgress.remaining} 份。您可点击底部【工作时段】随时修改或一键设为【24小时不限】立即唤醒`,
-          'info',
+          `🌙 当前不在投递时段内 (允许时段: ${formatTimeWindows(campaign.windows)})，AIbot 进入静默休眠；今日已确认投递 ${sleepProgress.applied}/${sleepProgress.quota}，还差 ${sleepProgress.remaining} 份。目标产能按墙钟计时，休眠期间倒计时不会暂停。要立刻继续，请在首屏目标产能卡片点【解除时段限制并继续】，或点底部【工作时段】→ 选【24小时不限】→ 点【保存时段】。${goalNote}`,
+          goalNote.includes('完全冲突') ? 'warn' : 'info',
         )
       }
       // 切片等待：到点后最多 5 分钟内自动醒来，不再依赖单个长延时 alarm
@@ -489,8 +552,9 @@ export async function runCampaignTick(): Promise<void> {
       return
     }
 
-    // 已进入允许时段，重置休眠日志去重标记，便于下次休眠时再次提示
-    lastWindowSleepLogAt = 0
+    // 已进入允许时段：清掉持久化的休眠日志标记，下次真正休眠时能立刻再提示一次。
+    // 不清的话，30 分钟内「休眠→唤醒→再休眠」会被去重吞掉第二条提示。
+    if ((await readWindowSleepLogAt()) !== 0) await markWindowSleepLogAt(0)
 
     // 3. 模拟真人作息休息（状态机 + 原子落盘）
     //
@@ -502,6 +566,12 @@ export async function runCampaignTick(): Promise<void> {
     const restPolicy = resolveRestPolicy(strategy)
     const userRestEnabled = (await getSetting<boolean>(REST_ENABLED_KEY, DEFAULT_REST_ENABLED)) === true
     const capacity = readCapacityEvaluation(campaign, restPolicy, userRestEnabled)
+    /**
+     * 「产能优先」是整条流水线的统一开关：补仓不降频、跳过历史去重冷却、
+     * 执行层放宽匹配分门槛。旧版只在某几个分支里各算一次，
+     * 结果目标产能只改了间隔、没改供给与门槛，目标自然实现不了。
+     */
+    const capacityUrgent = isCapacityUrgent(capacity?.status)
     // 目标产能进度落后时自动跳过模拟休息，把时间还给投递
     const restEnabled = userRestEnabled && !capacity?.shouldSkipRest
     const restDecision = decideRest({
@@ -520,10 +590,12 @@ export async function runCampaignTick(): Promise<void> {
       capacityMissedNotifiedFor = campaign.id
       await appendCampaignLog(`⚠️ 目标产能未达成：${capacity.advice}`, 'warn')
       sendNotification('目标产能未达成', capacity.advice, 2)
-    } else if (capacity?.status === 'at-risk' && Date.now() - lastCapacityNoticeAt > 10 * 60_000) {
+    } else if (
+      capacityUrgent && Date.now() - lastCapacityNoticeAt > 10 * 60_000
+    ) {
       lastCapacityNoticeAt = Date.now()
       await appendCampaignLog(
-        `🎯 目标产能预警：${describeCapacityStatus(capacity, campaign.capacityGoal!)}。${capacity.advice}`,
+        `🎯 目标产能预警：${describeCapacityStatus(capacity!, campaign.capacityGoal!)}。${capacity!.advice}；已启用产能优先（锁定高频补仓、回收历史跳过岗位、放宽匹配分门槛）`,
         'warn',
       )
     }
@@ -616,15 +688,20 @@ export async function runCampaignTick(): Promise<void> {
       }
 
       // 全自动巡检已开启的招聘平台并抓取全新岗位入队
-      const hasAdded = await autoCollectJobsForCampaign(campaign, activePlatforms)
+      const hasAdded = await autoCollectJobsForCampaign(campaign, activePlatforms, {
+        capacityUrgent,
+        managePageCursor: true,
+      })
       if (hasAdded) {
         emptyDiscoveryStreak = 0
         scheduleNextTick(1000) // 抓取入队成功，1 秒后立即执行新入队任务！
       } else {
         emptyDiscoveryStreak++
-        // 空转退避：没有新岗位时逐步拉长巡检间隔，避免每 30 秒扫同一批页面白耗
-        const nextMs =
-          emptyDiscoveryStreak <= 2 ? 30_000
+        // 目标产能未达成时绝不降频：队列空 + 进度落后还把巡检拉到 5 分钟一轮，
+        // 等于主动放弃目标。旧版这里完全没接管目标产能，是「设了目标却没实现」的直接原因之一。
+        const nextMs = capacityUrgent
+          ? 30_000
+          : emptyDiscoveryStreak <= 2 ? 30_000
             : emptyDiscoveryStreak <= 5 ? 2 * 60_000
             : 5 * 60_000
 
@@ -640,6 +717,9 @@ export async function runCampaignTick(): Promise<void> {
           const tips: string[] = []
           if (offline.length > 0) tips.push(`登录失效：${offline.join('、')}`)
           tips.push('可将「活跃时间」放宽到本月，或在「岗位名称」里补充更多短职位词')
+          if (capacityUrgent) {
+            tips.push('目标产能未达成，已锁定每 30 秒高频巡检补仓（不再降频到 5 分钟）')
+          }
           // 「投了一天还没投满」时，必须让用户看到数字卡在哪一层，而不是只看到一句空转提示
           const progress = summarizeQuotaProgress(campaign)
           const failedAttempts = campaign.tasks.filter((t) => t.status === 'failed').length
@@ -650,8 +730,11 @@ export async function runCampaignTick(): Promise<void> {
             tips.push('若日志出现「未记为投递成功」，先到平台聊天列表核对，再检查登录态 / 风控')
           }
 
+          const cadence = capacityUrgent
+            ? '目标产能未达成，保持每 30 秒高频巡检补仓'
+            : `自动降频为每 ${Math.max(1, Math.round(nextMs / 60_000))} 分钟巡检一次（一有新岗位立即恢复高频）`
           await appendCampaignLog(
-            `💤 已连续 ${emptyDiscoveryStreak} 轮没有发现新岗位，自动降频为每 ${Math.round(nextMs / 60_000)} 分钟巡检一次（一有新岗位立即恢复高频）。诊断建议：${tips.join('；')}`,
+            `💤 已连续 ${emptyDiscoveryStreak} 轮没有发现新岗位，${cadence}。诊断建议：${tips.join('；')}`,
             'info',
           )
         }
@@ -687,7 +770,8 @@ export async function runCampaignTick(): Promise<void> {
         tab.id,
         {
           type: 'EXECUTE_CAMPAIGN_TASK',
-          payload: { task },
+          // 产能优先必须随任务一起下发到页面执行层，否则评分门槛还是会把对口岗位全跳过
+          payload: { task, capacityUrgent },
         },
         3,
       )
@@ -729,7 +813,7 @@ export async function runCampaignTick(): Promise<void> {
         return q && q.enabled !== false && !q.exhausted && q.applied < q.quota
       })
       if (activePlatforms.length > 0) {
-        autoCollectJobsForCampaign(campaign, activePlatforms).catch(() => {})
+        autoCollectJobsForCampaign(campaign, activePlatforms, { capacityUrgent }).catch(() => {})
       }
     }
 
@@ -739,11 +823,13 @@ export async function runCampaignTick(): Promise<void> {
     const paced = nextInterval < rawInterval
     const nextSeconds = Math.round(nextInterval / 1000)
     log(MOD, 'runCampaignTick', `Task executed. Next tick in ${nextSeconds}s`)
+    const capacityNote = !capacity
+      ? ''
+      : paced
+        ? `（目标产能 ${capacity.targetJobs} 份 / ${campaign.capacityGoal?.hours} 小时：已从 ${Math.round(rawInterval / 1000)} 秒压缩到 ${nextSeconds} 秒，最低不低于 8 秒）`
+        : `（目标产能 ${capacity.progressPercent}%，还差 ${capacity.remainingJobs} 份；当前 ${nextSeconds} 秒/份已在目标允许节奏内，无需再压缩。真正卡住产出的是岗位供给与投递门槛，不是间隔）`
     await appendCampaignLog(
-      `⏳ 触发拟人安全间隔，随机等待 ${nextSeconds} 秒后处理下一个岗位...` +
-        (paced && capacity
-          ? `（目标产能 ${capacity.targetJobs} 份 / ${campaign.capacityGoal?.hours} 小时：已按剩余时间压缩间隔，最低不低于 8 秒）`
-          : ''),
+      `⏳ 触发拟人安全间隔，随机等待 ${nextSeconds} 秒后处理下一个岗位...${capacityNote}`,
       'info',
     )
     scheduleNextTick(nextInterval)
@@ -761,16 +847,34 @@ export async function runCampaignTick(): Promise<void> {
   }
 }
 
+interface CollectJobsOptions {
+  /** 目标产能落后：跳过历史回收冷却、锁定高频补仓、放宽匹配分门槛 */
+  capacityUrgent?: boolean
+  /** 只有「队列空」的主补仓路径可以推进页码；步骤 8 的机会性预取不该抢游标 */
+  managePageCursor?: boolean
+}
+
 /** 自动为队列中无可用任务的平台巡检并抓取新岗位 */
 async function autoCollectJobsForCampaign(
   campaign: Campaign,
   activePlatforms: PlatformId[],
+  opts: CollectJobsOptions = {},
 ): Promise<boolean> {
+  // 产能落后时不等 30 分钟冷却，立刻把「因门槛被跳过」的同栈岗位拿回来重评；
+  // 常规节奏仍保留冷却，避免在少量候选里反复打转。
+  const retryCooldownMs = opts.capacityUrgent ? 0 : TASK_RETRY_COOLDOWN_MS
+  // 只把「真占位」的任务传给 content 做采集去重。
+  // 过冷却期的 skipped 记录会在 appendTasksToCampaign 里回收，
+  // 若这里仍把它们当已存在排除，页面侧就根本不会把岗位交回来，回收形同虚设。
+  const nowForDedupe = Date.now()
+  const blockingTasks = campaign.tasks.filter(
+    (t) => !isRecyclableTask(t, nowForDedupe, retryCooldownMs),
+  )
   const existingJobIds = Array.from(new Set([
-    ...campaign.tasks.map((t) => t.id),
-    ...campaign.tasks.filter((t) => t.jobId).map((t) => t.jobId),
-    ...campaign.tasks.filter((t) => t.company && t.jobTitle).map((t) => `${t.company.trim()}:${t.jobTitle.trim()}`),
-    ...campaign.tasks.filter((t) => t.company && t.jobTitle).map((t) => `${t.platform}:${t.company.trim()}:${t.jobTitle.trim()}`),
+    ...blockingTasks.map((t) => t.id),
+    ...blockingTasks.filter((t) => t.jobId).map((t) => t.jobId),
+    ...blockingTasks.filter((t) => t.company && t.jobTitle).map((t) => `${t.company.trim()}:${t.jobTitle.trim()}`),
+    ...blockingTasks.filter((t) => t.company && t.jobTitle).map((t) => `${t.platform}:${t.company.trim()}:${t.jobTitle.trim()}`),
   ]))
 
   // 1. 获取默认简历与用户筛选偏好（与概览共用同一份配置，不再硬编码评分开关/最低分）
@@ -916,6 +1020,7 @@ async function autoCollectJobsForCampaign(
             relaxCareerFilter,
             keyword: primaryCareerKeyword,
             filters,
+            retryCooldownMs,
           },
         },
         3,
@@ -947,6 +1052,7 @@ async function autoCollectJobsForCampaign(
               relaxCareerFilter: true,
               keyword: primaryCareerKeyword,
               filters,
+              retryCooldownMs,
             },
           },
           3,
@@ -1016,17 +1122,10 @@ async function autoCollectJobsForCampaign(
         const excludedOnPage = collectRes?.excludedOnPage ?? 0
         const pageCardTotal = collectRes?.pageCardTotal ?? 0
 
-        // 本页卡片全部是被排除的已投岗位 → 这一页挖尽了，必须翻页，否则会永远原地空转
-        if (collected === 0 && excludedOnPage > 0) {
-          const nextPage = currentPage >= MAX_SEARCH_PAGE ? 1 : currentPage + 1
-          await setSearchPageCursor(pageKey, nextPage)
-          careerFilterMissStreak = 0 // 这不是方向过滤问题，不计入放宽计数
-          await appendCampaignLog(
-            `📄 【${pName}】关键词【${primaryCareerKeyword}】第 ${currentPage} 页的 ${pageCardTotal} 个岗位全部已投过，本页挖尽，下次自动${nextPage === 1 ? '回到第 1 页（关键词轮转）' : `翻到第 ${nextPage} 页`}`,
-            'info',
-          )
-          continue
-        }
+        const truncatedByCap = collectRes?.truncatedByCap ?? 0
+        const tasksProduced = collectRes?.tasksProduced ?? 0
+        const duplicatesAtAppend = collectRes?.duplicatesAtAppend ?? 0
+        const filteredOther = collectRes?.filteredOther ?? 0
 
         // 搜索关键词零命中：这批卡片与目标方向完全无关，通常意味着搜索页没生效
         //（被重定向到推荐流 / 未登录降级）。继续按方向过滤只会无限空转，
@@ -1051,19 +1150,37 @@ async function autoCollectJobsForCampaign(
         const relevanceNote = typeof collectRes?.relevantHits === 'number' && collectRes.relevantHits >= 0
           ? `、语义复核判定对口 ${collectRes.relevantHits} 个（${collectRes.relevanceSource === 'ai' ? 'AI' : '本地规则'}，剔除不对口 ${collectRes.filteredByRelevance ?? 0} 个）`
           : ''
+        // 诊断必须说清「到底卡在哪一层」：0 个岗位产出 = 筛选问题；
+        // 有岗位产出却 added=0 = 队列去重 / 历史跳过占位问题。
+        // 旧版把 maxJobs*2 的截断数当成「已投过」，日志会凭空写出「其中 5 个已投过」。
         const detail = pageCardTotal === 0
           ? '页面未解析到任何岗位卡片（搜索结果为空或页面未加载完成）'
-          : `抓到 ${collected + excludedOnPage} 个卡片（其中 ${excludedOnPage} 个已投过），职业方向筛掉 ${byCareer} 个、活跃时间筛掉 ${byTime} 个、黑名单筛掉 ${byBlacklist} 个${relevanceNote}`
+          : `本页 ${pageCardTotal} 张卡片，去重跳过 ${excludedOnPage} 张、采集上限截断 ${truncatedByCap} 张，实际筛选 ${collected} 张；职业方向筛掉 ${byCareer} 个、活跃时间筛掉 ${byTime} 个、黑名单筛掉 ${byBlacklist} 个、其他条件筛掉 ${filteredOther} 个${relevanceNote}；通过全部筛选可入队 ${tasksProduced} 个，其中 ${duplicatesAtAppend} 个是历史已处理岗位被去重挡下`
         await appendCampaignLog(
           `ℹ️ 【${pName}】本轮未新增岗位：${detail}。目标【${careerLabel} · ${freshnessLabel} · 来源：${careerSourceLabel}】${relaxCareerFilter ? '（本轮已放宽方向限制）' : ''}`,
           'info',
         )
+
         // 统计“被职业方向砍到零产出”的连续轮次，用于自动放宽
         if (collected > 0 && byCareer > 0 && (collectRes?.added ?? 0) === 0) {
           careerFilterMissStreak++
         } else if (collected > 0 && byCareer === 0) {
           // 放宽后已无方向过滤仍无新增：说明确实没新岗位，不必继续加码
           careerFilterMissStreak = 0
+        }
+
+        // 本页零新增 = 这一页已经挖尽，必须翻页。
+        // 旧版只在「整页全是已投岗位」时翻页，现场日志 35 个对口岗位全部被
+        // 历史 skipped 去重键挡住却 collected>0，于是永远停在第 1 页无限空转。
+        if (opts.managePageCursor && collectRes?.success && pageCardTotal > 0) {
+          const nextPage = nextSearchPage(currentPage)
+          await setSearchPageCursor(pageKey, nextPage)
+          // 不清 careerFilterMissStreak：连续多页都因方向白名单过窄零产出时，
+          // 原有的「自动放宽方向」机制仍要能累计生效
+          await appendCampaignLog(
+            `📄 【${pName}】关键词【${primaryCareerKeyword}】第 ${currentPage} 页本轮 0 新增，本页挖尽；下次自动${nextPage === 1 ? '回到第 1 页并换关键词轮转' : `翻到第 ${nextPage} 页`}${retryCooldownMs === 0 ? '（产能优先：已同时解除历史跳过岗位的回收冷却）' : ''}`,
+            'info',
+          )
         }
       }
     } catch (err) {
@@ -1350,6 +1467,29 @@ export const campaignService = {
       'info',
     )
     const current = await getCampaign()
+
+    // 设定时立刻做「有效工时」预检：墙钟 2 小时不代表有 120 分钟能投。
+    // 现场案例：19:15 设 2 小时目标，工作时段 09:00-21:00，21:00 之后 AIbot
+    // 静默休眠，目标被宣告完成不了，用户到 21:15 才从日志里发现。
+    if (goal.enabled && current) {
+      const now = Date.now()
+      const usableMinutes = countUsableMinutesUntil(
+        current.windows || DEFAULT_WINDOWS,
+        new Date(now),
+        goal.hours * 60 * 60_000,
+      )
+      const fit = checkCapacityWindowFit({ hours: goal.hours, usableMinutes, now })
+      if (fit.conflict) {
+        await appendCampaignLog(`🎯 目标产能可达性预检：${fit.advice}`, 'warn')
+        sendNotification('目标产能与工作时段冲突', fit.advice, 2)
+      } else {
+        await appendCampaignLog(
+          `🎯 目标产能可达性预检：未来 ${fit.wallMinutes} 分钟全部落在允许投递时段内`,
+          'info',
+        )
+      }
+    }
+
     if (current?.status === 'running') scheduleNextTick(1000)
     return goal
   },

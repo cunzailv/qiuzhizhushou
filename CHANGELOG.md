@@ -1,9 +1,13 @@
 # Changelog
 
-## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用、智能中控对话台 Tool-Calling Agent、异常留痕跨上下文统一、unslop 界面设计体系、信息架构分层收纳、图标入口直达右侧侧栏、投递确认层与行为日志历史回看、搜索方向生效与技术栈硬约束、后台静默运行不抢焦点、休息状态机与产能修复、目标产能设定
+## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用、智能中控对话台 Tool-Calling Agent、异常留痕跨上下文统一、unslop 界面设计体系、信息架构分层收纳、图标入口直达右侧侧栏、投递确认层与行为日志历史回看、搜索方向生效与技术栈硬约束、后台静默运行不抢焦点、休息状态机与产能修复、目标产能设定、目标产能闭环修复（供给死锁 / 产能优先 / 时段冲突）
 
 ### Added
 
+- **目标产能闭环（现场日志「设了目标却一个都投不出去」）**：`capacityUrgent` 成为贯穿调度、补仓、执行层的统一开关，`isCapacityUrgent()` / `CAPACITY_PRIORITY_THRESHOLD` / `hasWindowConflict()` / `checkCapacityWindowFit()` / `countUsableMinutesUntil()` 均为可单测纯函数；`blocked` 状态表示「墙钟还有时间、实际 0 分钟可投」
+- **设定时预检 + 一键放行**：`setCapacityGoal` 立即算目标窗口内的有效工时，冲突就日志 + 通知告警；首屏目标产能卡片提供「解除时段限制并继续」，直接写 `saveTimeWindows` + `UPDATE_CAMPAIGN_WINDOWS` + 唤醒后台（折叠组里的「24小时不限」仍只是填表单，文案不再谎称一键生效）
+- **诊断口径归真**：采集层回传 `dedupedOnPage` / `truncatedByCap` / `tasksProduced` / `duplicatesAtAppend` / `filteredOther`，「本轮未新增岗位」日志能区分「筛选没过」与「过了筛选但被历史去重挡下」；`CampaignStats` 透传 `windows`，面板与后台用同一份时段算可达性
+- **回归测试**：新增 `tests/capacity-delivery-loop.test.ts`（24 例）。测试总量 1165 → 1189（82 → 83 文件）
 - **目标产能「N 小时投满 M 份」**：新增 `src/shared/agent/capacity-goal.ts`（`evaluateCapacityGoal` / `resolvePacingInterval` / `describeCapacityStatus`）。可设 1-24 小时（0.5 步进）与 1-500 份；首屏常驻进度条显示已投/目标、距截止剩余时间、每份最多可花秒数
 - **自动调速**：按剩余时间/剩余份数压缩拟人间隔（**最低 8 秒**防风控）；`at-risk` 时自动跳过模拟真人休息。赶不上时每 10 分钟给可操作建议，到点未达成一次性诊断通知，不会静默
 - **倒计时持久化**：目标与 `startedAt` 写进本轮 campaign（`persistCapacityGoal`，与日志共用串行链）；参数不变则暂停 / SW 重启不重置，改参数才重新计时。`SET_CAPACITY_GOAL` 路由支持运行中即时修改
@@ -95,6 +99,12 @@
 
 ### Fixed
 
+- **「设了目标产能却一个都投不出去」· 页码游标死锁**：`autoCollectJobsForCampaign` 旧版只在 `collected === 0 && excludedOnPage > 0` 时翻页；现场「抓到 75 张卡、语义对口 35 个、added=0」永远停在第 1 页。现在主补仓路径零新增即翻页（1→5 循环回第 1 页），步骤 8 的机会性预取不抢游标
+- **「设了目标产能却一个都投不出去」· 历史任务永久占去重键**：`appendTasksToCampaign` 只回收过冷却期的 `skipped`，`failed` 一律不回收（可能已在平台侧建立沟通，重试会造成重复打招呼）；`isRecyclableTask` 带 `MAX_TASK_RECYCLES=3` 上限并透传 `attempts`。目标产能落后时后台把冷却设为 0 立即重评
+- **「设了目标产能却一个都投不出去」· 本地评分量纲误杀**：「高级php工程师」30 分被 33 分门槛（60×0.55）跳过。产能优先时门槛降到 20 分下限，`capacityUrgent` 经 `EXECUTE_CAMPAIGN_TASK` 下发到 `task-runner` 并留痕；投递成功后降档只回退一档，不再清零造成门槛震荡
+- **「不在投递时段」日志重复两次**：去重标记从模块内存迁到 `aibot_last_window_sleep_log_at`（`chrome.storage.local`），Service Worker 回收后不再每个 5 分钟切片重复打一条；进入允许时段时清标记，下次休眠仍能立刻提示
+- **目标产能与工作时段冲突被静默吞掉**：新增 `blocked` 状态与 `countUsableMinutesUntil()`（只算允许时段内的分钟），设定目标时立即预检并告警；面板与统计层共用 `CampaignStats.windows`。休眠日志不再谎称「一键设为【24小时不限】立即唤醒」
+- **误导性日志与空转降频**：`at-risk` / `blocked` 锁定 30 秒高频补仓不再退避到 5 分钟；间隔未被压缩时不再声称「已按剩余时间压缩间隔」，改为写明「真正卡住产出的是岗位供给与投递门槛」；零新增诊断把 `maxJobs*2` 截断数与真实去重数分开
 - **「模拟真人作息休息 12 分钟，投了一天还没投满 80」（P0 死锁）**：休息分支只在内存写 `campaign.restUntil` / `consecutiveRestCounter = 0`，随后 `appendCampaignLog()` 从 storage 读旧副本整份写回，状态修改被覆盖 —— `restUntil` 从未落盘、连投计数从未清零。结果每个 5 分钟切片 tick 都重新触发一次休息，AIbot 永久卡在休息循环里，配额永远投不满。现全部走 `persistRestState()` 原子落盘；同时修掉阈值每 tick 重随机、休息节奏与精投/海投脱钩（海投投 10 分钟却休 14 分钟）、休息日志刷屏、到期后还要空跑一整轮、用户没有「立刻继续」出口
 - **「打开别的软件 / 切换页面 / 下滑，Chrome 都被拉回招聘网站」**：`ensurePlatformTab()` 每个投递任务与每轮补仓都无条件 `tabs.update({active:true})` + `windows.update({focused:true})`，还优先复用**当前活跃标签页**并导航到搜索 URL。现默认后台静默：排除所有窗口的活跃页、只操作专用后台 tab；激活 / 聚焦调用全部收进 `if (foreground)` 分支，`openPlatformLoginTab()` 同步改为后台打开
 - **「岗位名称写了 php 后台开发 / AI 全栈开发却没效果」**：长词组没被拆开、简历技能没参与提取、脉脉搜索 URL 忽略关键词，三层叠加导致平台搜不到结果并降级成推荐流。现按空格拆词 + 简历技能参与 + 五平台都带 query

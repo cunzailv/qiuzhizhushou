@@ -229,6 +229,28 @@ export function getDelayUntilNextWindow(windows: TimeWindow[] = DEFAULT_WINDOWS,
   return minDeltaMinutes * 60 * 1000
 }
 
+/**
+ * 统计从 now 到 deadline 之间，真正落在「允许投递时段」内的分钟数。
+ *
+ * 目标产能必须用它算可达性：墙钟还剩 2 小时，但工作时段 21:00 就结束，
+ * 实际可投时长可能是 0。旧版只看墙钟时间，会给出假的「进度正常」，
+ * 用户设了「2 小时投满 80 份」却在 21:00 被直接休眠到第二天早上。
+ */
+export function countUsableMinutesUntil(
+  windows: TimeWindow[] = DEFAULT_WINDOWS,
+  now = new Date(),
+  deadlineMs = 0,
+): number {
+  const wallMinutes = Math.max(0, Math.ceil(deadlineMs / 60_000))
+  if (!windows || windows.length === 0) return wallMinutes
+  const totalMinutes = Math.min(24 * 60, wallMinutes)
+  let usable = 0
+  for (let minute = 0; minute < totalMinutes; minute++) {
+    if (isWithinWindow(windows, new Date(now.getTime() + minute * 60_000))) usable++
+  }
+  return usable
+}
+
 /** 生成指定平台的拟人随机延迟（毫秒），支持传入用户自定义秒级间歇配置 */
 export function getRandomInterval(
   platform: PlatformId,

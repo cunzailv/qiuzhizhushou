@@ -425,6 +425,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
       campaignTaskCancelled = false
       const result = await executeCampaignTask(task, adapter, defaultResume, {
+        // 目标产能落后时放宽匹配分门槛，别让本地评分量纲把已过硬筛的对口岗位全否掉
+        capacityUrgent: message.payload?.capacityUrgent === true,
         shouldCancel: () => isAssistantTaskCancelled(assistantState, campaignTaskCancelled),
         onProgress: (msg) => {
           updatePanelContent(panelHost!, {
@@ -461,6 +463,25 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const maxJobs = message.payload?.maxJobs || 25
     const existingJobIdsList: string[] = message.payload?.existingJobIds || []
     const excludeJobIds = new Set<string>(existingJobIdsList)
+    // 目标产能落后时后台会把冷却期设为 0，让「因门槛被跳过」的同栈岗位立刻回来重评
+    const retryCooldownMs = Number(message.payload?.retryCooldownMs)
+    const appendOptions = Number.isFinite(retryCooldownMs) && retryCooldownMs >= 0
+      ? { retryCooldownMs }
+      : {}
+    /** 与 collectJobCards 一致的去重口径，用于把「已投过」和「上限截断」分开统计 */
+    const isExcludedOnPage = (job: { id?: string; companyName?: string; title?: string }) => {
+      const id = job.id || ''
+      const company = (job.companyName || '').trim()
+      const title = (job.title || '').trim()
+      const platformId = adapter?.id || 'boss'
+      const keys = [
+        id,
+        `${platformId}:${id}`,
+        company && title ? `${company}:${title}` : '',
+        company && title ? `${platformId}:${company}:${title}` : '',
+      ].filter(Boolean)
+      return keys.some((k) => excludeJobIds.has(k))
+    }
 
     ;(async () => {
       if (!adapter) adapter = await getActivePlatform()
@@ -543,9 +564,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         },
       })
 
-      // 本页实际渲染出的卡片总数（含已投递过的），用于判断“这一页是否已经挖干净、该翻页了”
-      const pageCardTotal = adapter.parseJobCardsFromSearchPage().length
-      const excludedOnPage = Math.max(0, pageCardTotal - rawJobs.length)
+      // 本页实际渲染出的卡片总数（含已投递过的），用于判断“这一页是否已经挖干净、该翻页了”。
+      // 旧版直接拿 pageCardTotal - rawJobs.length 当「已投过数量」，但 rawJobs 还受
+      // maxJobs*2 上限截断，日志会凭空写出「其中 5 个已投过」这种假数字。
+      const finalCards = adapter.parseJobCardsFromSearchPage()
+      const pageCardTotal = finalCards.length
+      const excludedOnPage = finalCards.filter(isExcludedOnPage).length
+      const truncatedByCap = Math.max(0, pageCardTotal - excludedOnPage - rawJobs.length)
 
       // 采集有效性校验：这批卡片里有没有与当前搜索关键词相关的岗位。
       // 全部不相关往往意味着搜索没生效（被重定向到推荐流 / 未登录降级），
@@ -598,6 +623,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       let filteredByBlacklist = 0
       let filteredByRelevance = 0
       let filteredByStack = 0
+      let filteredOther = 0
 
       for (const job of rawJobs) {
         // 语义复核判定为「不是这个方向的岗位」→ 直接丢弃，不再进队列浪费投递额度
@@ -622,6 +648,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
             }
           } else if (evalRes.reason?.includes('活跃度') || evalRes.reason?.includes('时间')) filteredByTime++
           else if (evalRes.reason?.includes('黑名单')) filteredByBlacklist++
+          else filteredOther++
           continue
         }
         filteredJobs.push(job)
@@ -655,11 +682,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         // 投递成功后才能按方向统计真实回复率，而不是只按岗位名事后瞎猜。
         searchKeyword: searchKeyword || undefined,
       }))
-      const added = await appendTasksToCampaign(tasks)
+      const added = await appendTasksToCampaign(tasks, appendOptions)
       sendResponse({
         success: true,
         collected: rawJobs.length,
         added,
+        tasksProduced: tasks.length,
+        duplicatesAtAppend: Math.max(0, tasks.length - added),
+        filteredOther,
         filteredByCareer,
         filteredByTime,
         filteredByBlacklist,
@@ -668,6 +698,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         targetStackLabels: targetStacks.map((s) => STACK_LABELS[s]),
         pageCardTotal,
         excludedOnPage,
+        truncatedByCap,
         keywordHits,
         relevantHits: searchKeyword ? relevance.hits : -1,
         relevanceSource: relevance.source,

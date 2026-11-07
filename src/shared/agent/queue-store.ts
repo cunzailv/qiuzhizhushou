@@ -449,26 +449,99 @@ export async function updateCampaignInterval(interval: IntervalConfig): Promise<
 }
 
 /** 批量添加任务到队列中（双重去重：ID + 平台/公司/职位名指纹） */
-export async function appendTasksToCampaign(tasks: Omit<ApplyTask, 'status' | 'attempts' | 'createdAt'>[]): Promise<number> {
+/** 历史 skipped 记录多久之后允许重新入队评估 */
+export const TASK_RETRY_COOLDOWN_MS = 30 * 60_000
+/**
+ * 同一个岗位最多被回收 3 次。
+ * 没有上限时，一个永远不达标的岗位会在「跳过 → 回收 → 再跳过」里无限循环，
+ * 把目标产能的时间全部耗在同一张卡片上。
+ */
+export const MAX_TASK_RECYCLES = 3
+
+export interface AppendTasksOptions {
+  /** 覆盖回收冷却期；目标产能落后时传 0 立即重新评估 */
+  retryCooldownMs?: number
+}
+
+/**
+ * 只回收 `skipped`（匹配分 / 方向不达标）的历史任务。
+ *
+ * **绝不回收 `failed`**：failed 包含「平台未确认投递」，而「未确认」有可能其实已经
+ * 在平台侧建立了沟通，只是 DOM 没采到证据；重新入队会造成对同一岗位重复打招呼。
+ * done / pending / running / paused 同样占位不动。
+ */
+export function isRecyclableTask(
+  task: Pick<ApplyTask, 'status' | 'createdAt' | 'attempts'>,
+  now: number,
+  cooldownMs: number = TASK_RETRY_COOLDOWN_MS,
+  maxRecycles: number = MAX_TASK_RECYCLES,
+): boolean {
+  if (task.status !== 'skipped') return false
+  if ((Number(task.attempts) || 0) >= maxRecycles) return false
+  const createdAt = Number(task.createdAt) || 0
+  return now - createdAt >= cooldownMs
+}
+
+export async function appendTasksToCampaign(
+  tasks: Omit<ApplyTask, 'status' | 'attempts' | 'createdAt'>[],
+  opts: AppendTasksOptions = {},
+): Promise<number> {
   const campaign = await getCampaign()
   if (!campaign) return 0
 
-  const existingIds = new Set(campaign.tasks.map((t) => t.id))
-  const existingJobKeys = new Set(
-    campaign.tasks
-      .filter((t) => t.company && t.jobTitle)
-      .map((t) => `${t.platform}:${t.company.trim()}:${t.jobTitle.trim()}`)
-  )
-  let addedCount = 0
+  const now = Date.now()
+  const cooldownMs = Math.max(0, opts.retryCooldownMs ?? TASK_RETRY_COOLDOWN_MS)
 
+  // 旧版把 **所有** 历史任务（含 skipped / failed）都当成永久去重键。
+  // 结果：被门槛跳过的岗位永远占着 company:title，同一页再采时
+  // 35 个对口岗位全部「已存在」→ added=0 → 队列只减不增 → AIbot 无限空转，
+  // 用户设了目标产能也一个都投不出去。
+  // 现在：done / pending / running / paused / failed 仍占位；skipped 过冷却期后回收，
+  // 并且把已尝试次数带过去，超过 MAX_TASK_RECYCLES 就永久占位。
+  const existingIds = new Set<string>()
+  const existingJobKeys = new Set<string>()
+  const recyclableIds = new Set<string>()
+  /** 回收任务的「已尝试次数」，按同一批去重键映射给重新入队的任务 */
+  const recycledAttempts = new Map<string, number>()
+
+  for (const t of campaign.tasks) {
+    const key = t.company && t.jobTitle
+      ? `${t.platform}:${t.company.trim()}:${t.jobTitle.trim()}`
+      : ''
+    if (isRecyclableTask(t, now, cooldownMs)) {
+      recyclableIds.add(t.id)
+      const carried = (Number(t.attempts) || 0) + 1
+      for (const idKey of [t.id, t.jobId, key]) {
+        if (!idKey) continue
+        recycledAttempts.set(idKey, Math.max(recycledAttempts.get(idKey) || 0, carried))
+      }
+      continue
+    }
+    existingIds.add(t.id)
+    if (key) existingJobKeys.add(key)
+  }
+
+  let recycled = 0
+  if (recyclableIds.size > 0) {
+    const before = campaign.tasks.length
+    campaign.tasks = campaign.tasks.filter((t) => !recyclableIds.has(t.id))
+    recycled = before - campaign.tasks.length
+  }
+
+  let addedCount = 0
   for (const t of tasks) {
     const key = t.company && t.jobTitle ? `${t.platform}:${t.company.trim()}:${t.jobTitle.trim()}` : ''
     if (!existingIds.has(t.id) && (!key || !existingJobKeys.has(key))) {
+      const carried = Math.max(
+        recycledAttempts.get(t.id) || 0,
+        (t.jobId && recycledAttempts.get(t.jobId)) || 0,
+        (key && recycledAttempts.get(key)) || 0,
+      )
       campaign.tasks.push({
         ...t,
         status: 'pending',
-        attempts: 0,
-        createdAt: Date.now(),
+        attempts: Math.min(carried, MAX_TASK_RECYCLES),
+        createdAt: now,
       })
       existingIds.add(t.id)
       if (key) existingJobKeys.add(key)
@@ -476,8 +549,14 @@ export async function appendTasksToCampaign(tasks: Omit<ApplyTask, 'status' | 'a
     }
   }
 
-  if (addedCount > 0) {
+  if (addedCount > 0 || recycled > 0) {
     await saveCampaign(campaign)
+  }
+  if (recycled > 0) {
+    await appendCampaignLog(
+      `♻️ 已回收 ${recycled} 条历史跳过岗位记录（冷却 ${Math.round(cooldownMs / 60_000)} 分钟，最多重试 ${MAX_TASK_RECYCLES} 次），按当前门槛与策略重新评估入队（新增 ${addedCount} 个）`,
+      'info',
+    )
   }
   return addedCount
 }

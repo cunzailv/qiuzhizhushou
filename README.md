@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1165%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1189%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -226,14 +226,28 @@
 
 | 层 | 说明 |
 |---|---|
-| **可达性预判** | 新增 `src/shared/agent/capacity-goal.ts` 的 `evaluateCapacityGoal()`，按剩余时间 / 剩余份数算 `requiredIntervalMs`，结合当前策略与休息开销预测完成时刻，输出 `on-track` / `at-risk` / `achieved` / `missed` |
+| **可达性预判** | 新增 `src/shared/agent/capacity-goal.ts` 的 `evaluateCapacityGoal()`，按剩余时间 / 剩余份数算 `requiredIntervalMs`，结合当前策略与休息开销预测完成时刻，输出 `on-track` / `at-risk` / `blocked` / `achieved` / `missed`；可达性一律按「工作时段内真正可投的分钟数」算，而不是墙钟剩余时间 |
 | **自动调速** | 进度需要时把拟人间隔压缩到 `resolvePacingInterval()`，但**最低不低于 8 秒**防风控；`at-risk` 时自动跳过模拟真人休息，把时间还给投递 |
 | **倒计时持久化** | 目标与 `startedAt` 写进本轮 campaign（`persistCapacityGoal`，与日志共用串行写入链）；参数不变则暂停 / Service Worker 重启不重置倒计时，改参数才重新计时 |
 | **预警与诊断** | 赶不上时每 10 分钟给一次可操作建议（放宽岗位名称 / 多开平台 / 下调目标，或提示目标超过配额合计）；到点未达成只通知一次，指引去查「未记为投递成功」「没有发现新岗位」与登录态日志 |
 | **运行中改目标** | `SET_CAPACITY_GOAL` 路由即时写设置 + campaign + 日志，并唤醒下一轮调度，不用重启 AIbot |
-| **回归测试** | `tests/capacity-goal.test.ts`（23 例）：归一化边界、五种状态、预测与调速下限、倒计时持久化、并发写入、静态契约 |
+| **回归测试** | `tests/capacity-goal.test.ts`（23 例：归一化边界、状态机、预测与调速下限、倒计时持久化、并发写入、静态契约）+ `tests/capacity-delivery-loop.test.ts`（24 例：产能闭环） |
 
 > 诚实边界：这是**截止节奏管理**，不是「保证达标」。岗位供给、登录态、平台风控都不可控，系统只做可达性预判、自动调速与到点诊断，不会为了数字好看把「点了按钮但平台没确认」算成投递成功。
+
+#### 产能闭环修复 · 为什么「设了目标却一个都投不出去」（2026-11-07 现场日志）
+
+现场日志暴露的是**三层相互叠加的死锁**，只改调速完全没用：
+
+| 现象 | 根因 | 修复 |
+|---|---|---|
+| 本页 35/45 个语义对口岗位，却「本轮未新增岗位」，无限空转 | ① 页码游标只在「整页全是已投岗位」时推进，卡片还在但都被历史去重键挡住时永远停在第 1 页；② `skipped` / `failed` 任务永久占 `company:title` 去重键；③ 日志把 `maxJobs*2` 的截断数当成「已投过」 | 零新增即翻页（1→5 循环回第 1 页交给关键词轮转）；只回收 `skipped` 且最多 3 次（`failed` 可能已在平台侧建立沟通，**绝不重试**）；回传真实 `dedupedOnPage` / `truncatedByCap` / `tasksProduced` / `duplicatesAtAppend`，日志说清卡在哪一层 |
+| 「高级php工程师」匹配分 30 被 33 分门槛跳过 | 本地规则评分常见 20-45 分，而门槛按 `60×0.55=33` 折算；采集层已完成方向 / 语义 / 技术栈 / 活跃度硬筛，评分这时只该排序，不该再当否决闸门 | 目标产能 `at-risk` / `blocked` 时启用「产能优先」：门槛降到 20 分下限并留痕；`capacityUrgent` 从后台一路下发到页面执行层，同时锁定 30 秒高频补仓、跳过历史回收冷却 |
+| 目标「2 小时投满 80 份」看似还在倒计时，21:00 一到就静默休眠，休眠日志还重复两次 | 墙钟剩余时间 ≠ 可投时间；休眠日志去重标记只在内存，MV3 Service Worker 每次回收后重置 | 新增 `blocked` 状态与 `countUsableMinutesUntil()`；**设定目标时立即预检**有效工时并告警；首屏目标产能卡片在冲突时提供「解除时段限制并继续」（真正落盘 + 唤醒后台，不是只填表单）；去重标记持久化到 `chrome.storage.local` |
+
+同时修正两处误导文案：间隔未被压缩时不再声称「已按剩余时间压缩间隔」，而是明确写出「真正卡住产出的是岗位供给与投递门槛」；休眠提示不再说「一键设为 24小时不限」（折叠组里的预设只是填表单，仍需点保存）。
+
+回归测试见 `tests/capacity-delivery-loop.test.ts`（24 例：页码推进与持久化游标、回收安全边界与真实供给死锁复现、产能优先门槛接线、`blocked` 与有效工时预检、一键放行与日志去重的静态契约）。
 
 ---
 
@@ -355,7 +369,7 @@ npm run build
 | 样式 | Tailwind CSS 3 + shadow DOM 注入 |
 | 数据 | Dexie (IndexedDB) + chrome.storage |
 | AI | OpenAI / DeepSeek / 自定义兼容接口 + 本地语义精筛 + AI SDK 7 tool-calling 循环 |
-| 测试 | Vitest（1165 用例 / 82 文件）+ Playwright（E2E） |
+| 测试 | Vitest（1189 用例 / 83 文件）+ Playwright（E2E） |
 | UI 组件 | Lucide React + Recharts + react-markdown / remark-gfm |
 
 ## 📁 项目结构
@@ -403,8 +417,8 @@ docs/EXTERNAL_AI.md     # 外部 AI 接入完整指南
 ## 🧪 测试与验收
 
 ```bash
-npm test                                       # tsc -b + vite build + 全部 1165 个测试用例
-npx vitest run                                  # 全量单测/E2E：82 文件 / 1165 用例
+npm test                                       # tsc -b + vite build + 全部 1189 个测试用例
+npx vitest run                                  # 全量单测/E2E：83 文件 / 1189 用例
 npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用例（基线 110 + 新增 36）
 ```
 

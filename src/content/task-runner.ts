@@ -14,6 +14,7 @@ import { dismissUnexpectedModals } from '../shared/platform/boss/action-simulato
 import { log, logWarn, logError } from '../shared/utils/logger'
 import { getSetting } from '../shared/db/settings-store'
 import { loadSharedApplyFilters } from '../shared/agent/filter-config'
+import { CAPACITY_PRIORITY_THRESHOLD } from '../shared/agent/capacity-goal'
 import {
   collectApplyPageTexts,
   decideApplyVerification,
@@ -56,9 +57,14 @@ async function getThresholdRelaxLevel(): Promise<number> {
   return Math.min(MAX_RELAX_LEVEL, Math.max(0, await readNumberSetting(THRESHOLD_RELAX_KEY)))
 }
 
-/** 投递成功后恢复门槛与连击计数 */
+/**
+ * 投递成功后只**回退一档**，不清零。
+ * 旧版每次成功都把降档清零，造成「连跳 5 个 → 降档 → 刚投成功 1 个 → 门槛立刻弹回
+ * → 又连跳 5 个」的震荡；在目标产能（要在时限内投满 N 份）下等于反复卡死产出。
+ */
 async function resetThresholdRelax(): Promise<void> {
-  await writeNumberSetting(THRESHOLD_RELAX_KEY, 0)
+  const level = await getThresholdRelaxLevel()
+  await writeNumberSetting(THRESHOLD_RELAX_KEY, Math.max(0, level - 1))
   await writeNumberSetting(THRESHOLD_SKIP_STREAK_KEY, 0)
 }
 
@@ -77,6 +83,8 @@ export interface TaskRunnerCallbacks {
   onProgress?: (message: string) => void
   /** 关闭 AIbot 时置为 true；在各阶段间隙中止当前任务，避免「停止无效」 */
   shouldCancel?: () => boolean
+  /** 目标产能落后：匹配分只作排序，不再当否决闸门（采集层已做方向/技术栈硬筛） */
+  capacityUrgent?: boolean
 }
 
 function reportRunnerError(params: {
@@ -391,7 +399,24 @@ export async function executeCampaignTask(
 
     // 自适应下调：长期零产出时逐级放宽，避免「候选都 30 分、门槛 60」的全跳过死局
     const relaxLevel = await getThresholdRelaxLevel()
-    const matchThreshold = Math.max(MIN_THRESHOLD, rawThreshold - relaxLevel * RELAX_STEP)
+    const adaptiveThreshold = Math.max(MIN_THRESHOLD, rawThreshold - relaxLevel * RELAX_STEP)
+
+    /**
+     * 产能优先：目标产能落后时，采集层已完成职业方向 / 语义 / 技术栈 / 活跃度硬筛，
+     * 这里的本地评分只用来排序。现场案例：PHP 方向的「高级php工程师」本地评分 30 分，
+     * 门槛 33 分（60*0.55），对口岗位被直接跳过，目标产能结构性不可达。
+     * 保留 CAPACITY_PRIORITY_THRESHOLD 下限，仍能挡住评分极低的脏数据卡片。
+     */
+    const capacityUrgent = callbacks?.capacityUrgent === true
+    const matchThreshold = capacityUrgent
+      ? Math.min(adaptiveThreshold, CAPACITY_PRIORITY_THRESHOLD)
+      : adaptiveThreshold
+    if (capacityUrgent && matchThreshold < adaptiveThreshold) {
+      notifyCampaignLog(
+        `🎯 产能优先：本岗位已通过方向/技术栈硬筛，投递门槛临时从 ${adaptiveThreshold} 放宽到 ${matchThreshold} 分（只保留脏数据下限，不再让本地评分量纲卡住目标产能）`,
+        'info',
+      )
+    }
 
     let matchResult: MatchResult
 

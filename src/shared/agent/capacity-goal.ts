@@ -37,6 +37,18 @@ export const MAX_CAPACITY_TARGET = 500
 /** 为了赶进度也不能把间隔压到 0，否则等于秒投，必然触发平台风控 */
 export const MIN_PACING_INTERVAL_MS = 8_000
 
+/**
+ * 目标产能落后时，已通过采集层「方向 / 技术栈 / 语义 / 活跃度」硬筛的岗位，
+ * 不再被本地评分量纲误杀的最低分。
+ *
+ * 现场案例：用户 PHP 方向，岗位「高级php工程师」本地评分只有 30 分
+ * （本地规则分常见 20~45，而门槛按 60*0.55=33 折算），结果对口岗位被跳过、
+ * 目标产能一个都投不出去。采集层已经证明这个岗位是同栈且语义对口的，
+ * 此时匹配分只该用于排序，不该再当否决闸门。
+ * 保留 20 分下限是为了仍拦住「评分极低、明显是脏数据」的卡片。
+ */
+export const CAPACITY_PRIORITY_THRESHOLD = 20
+
 /** 脏数据 / 旧版本值统一收敛，避免 NaN 把调度算成 Infinity */
 export function normalizeCapacityGoal(raw: unknown): CapacityGoal {
   const source = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
@@ -66,18 +78,25 @@ export interface CapacityContext {
   baseIntervalMs: number
   policy: RestPolicy
   restEnabled: boolean
+  /** 目标窗口内实际允许投递的分钟数（由 countUsableMinutesUntil 算）；不给则按墙钟时间 */
+  usableMinutes?: number
 }
 
-export type CapacityStatus = 'off' | 'on-track' | 'at-risk' | 'achieved' | 'missed'
+/** blocked = 目标窗口与工作时段完全错开，墙钟上「还有时间」其实一分钟都投不了 */
+export type CapacityStatus = 'off' | 'on-track' | 'at-risk' | 'blocked' | 'achieved' | 'missed'
 
 export interface CapacityEvaluation {
   status: CapacityStatus
   deadlineAt: number
   elapsedMs: number
   remainingMs: number
+  /** 目标窗口内真正可投的分钟数（扣除时段外时间） */
+  usableMinutes: number
+  /** 可投时长折算成毫秒，所有可达性判断都基于它，而不是墙钟剩余时间 */
+  effectiveRemainingMs: number
   targetJobs: number
   remainingJobs: number
-  /** 剩余时间平摊到剩余份数，每份最多能花多久 */
+  /** 可投时间平摊到剩余份数，每份最多能花多久 */
   requiredIntervalMs: number
   /** 留 15% 余量后的建议间隔，且不低于防风控下限 */
   suggestedIntervalMs: number
@@ -98,7 +117,13 @@ export function evaluateCapacityGoal(input: CapacityContext): CapacityEvaluation
   const targetJobs = goal.targetJobs
   const remainingJobs = Math.max(0, targetJobs - Math.max(0, applied))
   const progressPercent = Math.min(100, Math.round((Math.max(0, applied) / Math.max(1, targetJobs)) * 100))
-  const requiredIntervalMs = remainingJobs > 0 ? remainingMs / remainingJobs : 0
+  const wallMinutes = Math.ceil(remainingMs / 60_000)
+  const usableMinutes = Math.min(
+    wallMinutes,
+    Math.max(0, Math.floor(input.usableMinutes ?? wallMinutes)),
+  )
+  const effectiveRemainingMs = usableMinutes * 60_000
+  const requiredIntervalMs = remainingJobs > 0 ? effectiveRemainingMs / remainingJobs : 0
   const suggestedIntervalMs = Math.max(
     MIN_PACING_INTERVAL_MS,
     Math.min(baseIntervalMs, Math.round(requiredIntervalMs * 0.85)),
@@ -116,6 +141,8 @@ export function evaluateCapacityGoal(input: CapacityContext): CapacityEvaluation
     deadlineAt,
     elapsedMs,
     remainingMs,
+    usableMinutes,
+    effectiveRemainingMs,
     targetJobs,
     remainingJobs,
     requiredIntervalMs,
@@ -148,23 +175,36 @@ export function evaluateCapacityGoal(input: CapacityContext): CapacityEvaluation
   const quotaShort = totalQuota > 0 && targetJobs > totalQuota
     ? `目标 ${targetJobs} 份超过当前已开启平台配额合计 ${totalQuota}，请先在「平台与配额」调高数量；`
     : ''
+  const windowShort = usableMinutes < wallMinutes
+    ? `墙钟还剩 ${wallMinutes} 分钟，但工作时段内只有 ${usableMinutes} 分钟可投；`
+    : ''
 
-  if (projectedFinishAt > deadlineAt) {
+  // 目标窗口与工作时段完全错开：例如 21:15 设「2 小时投满 80 份」，
+  // 而允许时段是 09:00-21:00 —— 不点破的话 AIbot 会静默休眠到第二天早上。
+  if (effectiveRemainingMs <= 0) {
+    return {
+      ...base,
+      status: 'blocked',
+      advice: `${quotaShort}${windowShort}目标窗口内没有任何允许投递的时间，无法按时达成。请到【工作时段】设为「24小时不限」，或把目标时限改到下一个工作时段内`,
+    }
+  }
+
+  if (projectedDurationMs > effectiveRemainingMs) {
     const projectedHours = (projectedDurationMs / HOUR_MS).toFixed(1)
     return {
       ...base,
       status: 'at-risk',
       shouldSkipRest: true,
-      advice: `${quotaShort}按当前节奏预计还要 ${projectedHours} 小时，赶不上 ${goal.hours} 小时目标；已自动压缩间隔并跳过模拟休息，建议放宽「岗位名称」、开启更多平台或下调目标`,
+      advice: `${quotaShort}${windowShort}按当前节奏预计还要 ${projectedHours} 小时，赶不上 ${goal.hours} 小时目标；已自动压缩间隔并跳过模拟休息，建议放宽「岗位名称」、开启更多平台、切到海投或下调目标`,
     }
   }
 
   return {
     ...base,
     status: 'on-track',
-    advice: quotaShort
-      ? quotaShort
-      : `按当前节奏可在截止前完成，剩余约 ${Math.round(remainingMs / 60_000)} 分钟 / ${remainingJobs} 份`,
+    advice: quotaShort || windowShort
+      ? `${quotaShort}${windowShort}按当前节奏仍可在截止前完成，剩余 ${remainingJobs} 份`
+      : `按当前节奏可在截止前完成，剩余约 ${wallMinutes} 分钟 / ${remainingJobs} 份`,
   }
 }
 
@@ -174,11 +214,43 @@ export function resolvePacingInterval(baseIntervalMs: number, evaluation: Capaci
     evaluation.status === 'off' ||
     evaluation.status === 'achieved' ||
     evaluation.status === 'missed' ||
+    evaluation.status === 'blocked' ||
     evaluation.remainingJobs <= 0
   ) {
     return baseIntervalMs
   }
   return Math.max(MIN_PACING_INTERVAL_MS, Math.min(baseIntervalMs, evaluation.suggestedIntervalMs))
+}
+
+/** 目标产能是否需要「产能优先」调度：落后或窗口冲突都要接管补仓与门槛 */
+export function isCapacityUrgent(status: CapacityStatus | null | undefined): boolean {
+  return status === 'at-risk' || status === 'blocked'
+}
+
+/** 目标窗口里有多少分钟被工作时段挡住；UI / 后台 / 预检共用同一套判断 */
+export function hasWindowConflict(evaluation: CapacityEvaluation): boolean {
+  const wallMinutes = Math.ceil(evaluation.remainingMs / 60_000)
+  return evaluation.usableMinutes < wallMinutes
+}
+
+/**
+ * 设定目标时的前置可达性检查：把「墙钟 2 小时，实际只能投 105 分钟」这类
+ * 冲突在用户点保存的那一刻就说清楚，而不是等 21:00 静默休眠后才发现。
+ */
+export function checkCapacityWindowFit(params: {
+  hours: number
+  usableMinutes: number
+  now: number
+}): { wallMinutes: number; usableMinutes: number; conflict: boolean; advice: string } {
+  const wallMinutes = Math.max(0, Math.round(params.hours * 60))
+  const usableMinutes = Math.min(wallMinutes, Math.max(0, Math.floor(params.usableMinutes)))
+  const conflict = usableMinutes < wallMinutes
+  const advice = conflict
+    ? usableMinutes <= 0
+      ? '⚠️ 目标时限完全落在非投递时段，AIbot 会一直休眠，无法达成目标。请先把【工作时段】设为「24小时不限」或改到下一个工作时段'
+      : `⚠️ 目标 ${params.hours} 小时里只有 ${usableMinutes} 分钟落在当前【工作时段】内，其余 ${wallMinutes - usableMinutes} 分钟 AIbot 会休眠；要按时达标请解除时段限制或延长目标时限`
+    : ''
+  return { wallMinutes, usableMinutes, conflict, advice }
 }
 
 /** 一行状态摘要，UI 与日志共用，避免两处文案漂移 */
@@ -190,6 +262,8 @@ export function describeCapacityStatus(evaluation: CapacityEvaluation, goal: Cap
       return `已投满 ${evaluation.targetJobs} 份，目标达成`
     case 'missed':
       return `未达成：${evaluation.targetJobs - evaluation.remainingJobs}/${evaluation.targetJobs} 份`
+    case 'blocked':
+      return '目标与工作时段冲突 · 当前无法投递'
     case 'at-risk':
       return `进度落后 ${evaluation.targetJobs - evaluation.remainingJobs}/${evaluation.targetJobs} · 已自动加速`
     default:

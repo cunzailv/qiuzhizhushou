@@ -37,6 +37,7 @@ import {
   getSavedPlatformQuotas,
   savePlatformQuotas,
   resetPlatformQuotas,
+  countUsableMinutesUntil,
 } from '../../shared/agent/quota'
 import type { PlatformAuthInfo } from '../../shared/platform/auth-checker'
 import { PLATFORM_LOGIN_URLS } from '../../shared/platform/auth-checker'
@@ -82,6 +83,8 @@ import {
   describeCapacityStatus,
   evaluateCapacityGoal,
   normalizeCapacityGoal,
+  hasWindowConflict,
+  checkCapacityWindowFit,
   type CapacityGoal,
 } from '../../shared/agent/capacity-goal'
 
@@ -404,12 +407,27 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         setCapacityGoal(applied)
         setCapacityHoursInput(String(applied.hours))
         setCapacityJobsInput(String(applied.targetJobs))
-        onNotify?.(
-          applied.enabled
-            ? `已设定：${applied.hours} 小时内投满 ${applied.targetJobs} 份，AIbot 会自动调速`
-            : '已关闭目标产能，恢复常规节奏',
-          'success',
-        )
+        if (applied.enabled) {
+          const effectiveWindows = stats && Array.isArray(stats.windows) ? stats.windows : timeWindows
+          const usableMinutes = countUsableMinutesUntil(
+            effectiveWindows,
+            new Date(),
+            applied.hours * 60 * 60_000,
+          )
+          const fit = checkCapacityWindowFit({
+            hours: applied.hours,
+            usableMinutes,
+            now: Date.now(),
+          })
+          onNotify?.(
+            fit.conflict
+              ? `已设定目标，但${fit.advice}`
+              : `已设定：${applied.hours} 小时内投满 ${applied.targetJobs} 份，AIbot 会自动调速`,
+            fit.conflict ? 'warning' : 'success',
+          )
+        } else {
+          onNotify?.('已关闭目标产能，恢复常规节奏', 'success')
+        }
         await fetchStats()
       } else {
         onNotify?.(`目标产能保存失败：${res?.error || '后台暂不可达'}`, 'warning')
@@ -587,6 +605,31 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
       setEnd1('23:59')
       setEnableSecondWindow(false)
     }
+  }
+
+  /**
+   * 目标产能与工作时段冲突时的一键放行。
+   * 折叠组里的「24小时不限」只是**填表单**，仍需点「保存时段」；旧版日志却写
+   * 「一键设为 24小时不限 立即唤醒」，用户点了没反应。这里才是真正落盘并唤醒后台。
+   */
+  const handleReleaseWindowLimit = async () => {
+    const windows: TimeWindow[] = [{ startHour: 0, startMin: 0, endHour: 23, endMin: 59 }]
+    setTimeWindows(windows)
+    setStart1('00:00')
+    setEnd1('23:59')
+    setEnableSecondWindow(false)
+    await saveTimeWindows(windows)
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'UPDATE_CAMPAIGN_WINDOWS',
+        payload: { windows },
+      })
+      await fetchStats()
+    } catch {
+      // 后台暂不可达时本地设置已保存，下一轮 tick 会读到
+    }
+    setShowTimeEditor(false)
+    onNotify?.('已解除工作时段限制，AIbot 立即恢复投递（全天可投，风控风险请自行确认）', 'success')
   }
 
   // 拟人间歇预设
@@ -832,17 +875,24 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
     const stored = stats?.capacityGoal
     if (!stored?.enabled) return null
     const iv = stats?.intervalConfig || DEFAULT_INTERVAL_CONFIG
+    const now = Date.now()
+    const deadlineMs = Math.max(0, stored.startedAt + stored.hours * 60 * 60_000 - now)
+    // 面板必须与后台用同一套「有效工时」口径，否则 21:00 之后仍显示进度正常。
+    // 优先读 campaign 真正生效的时段（空数组 = 24 小时不限），表单状态只作兜底。
+    const effectiveWindows = stats && Array.isArray(stats.windows) ? stats.windows : timeWindows
+    const usableMinutes = countUsableMinutesUntil(effectiveWindows, new Date(now), deadlineMs)
     return evaluateCapacityGoal({
       goal: stored,
-      now: Date.now(),
+      now,
       startedAt: stored.startedAt,
       applied: stats?.done ?? 0,
       totalQuota,
       baseIntervalMs: ((iv.minSeconds + iv.maxSeconds) / 2) * 1000,
       policy: resolveRestPolicy(strategy),
       restEnabled,
+      usableMinutes,
     })
-  }, [stats, totalQuota, strategy, restEnabled])
+  }, [stats, totalQuota, strategy, restEnabled, timeWindows])
 
   return (
     <div className="bg-surface-darkest rounded-xl border border-surface-hairline shadow-sm overflow-hidden text-text-primary space-y-3.5 p-3.5">
@@ -934,7 +984,9 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             </span>
             <span
               className={`text-xs font-medium ${
-                capacityEvaluation.status === 'at-risk' || capacityEvaluation.status === 'missed'
+                capacityEvaluation.status === 'at-risk' ||
+                capacityEvaluation.status === 'missed' ||
+                capacityEvaluation.status === 'blocked'
                   ? 'text-warning'
                   : capacityEvaluation.status === 'achieved' ? 'text-success' : 'text-text-primary'
               }`}
@@ -951,10 +1003,26 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
           <div className="text-xs text-text-muted mt-1.5 leading-relaxed">
             已确认投递 {stats?.done ?? 0}/{capacityEvaluation.targetJobs} · 距截止约{' '}
             {Math.round(capacityEvaluation.remainingMs / 60_000)} 分钟
+            {hasWindowConflict(capacityEvaluation) &&
+              `（其中只有 ${capacityEvaluation.usableMinutes} 分钟落在允许时段）`}
             {capacityEvaluation.remainingJobs > 0 &&
               ` · 每份最多 ${Math.max(8, Math.round(capacityEvaluation.requiredIntervalMs / 1000))} 秒`}
             {capacityEvaluation.advice && ` · ${capacityEvaluation.advice}`}
           </div>
+          {capacityEvaluation.remainingJobs > 0 && hasWindowConflict(capacityEvaluation) && (
+            <div className="mt-2 flex items-center gap-2">
+              <span className="text-xs text-warning flex-1">
+                目标按墙钟倒计时，休眠不暂停；当前工作时段会吃掉目标时限
+              </span>
+              <button
+                type="button"
+                onClick={() => void handleReleaseWindowLimit()}
+                className="shrink-0 rounded-md border border-surface-hairline bg-surface-darkest px-2 py-1 text-xs text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+              >
+                解除时段限制并继续
+              </button>
+            </div>
+          )}
         </div>
       )}
 
