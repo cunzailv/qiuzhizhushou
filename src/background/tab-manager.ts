@@ -32,7 +32,8 @@ export function getPlatformSearchUrl(platform: PlatformId, query?: string, page 
     case '51job':
       return `https://we.51job.com/pc/search?keyword=${q}${pageParam ? `&pageNum=${pageParam}` : ''}`
     case 'maimai':
-      return 'https://maimai.cn/jobs'
+      // 旧版忽略 query，脉脉永远停在推荐流，采回来的全是无关岗位
+      return `https://maimai.cn/jobs?query=${q}${pageParam ? `&page=${pageParam}` : ''}`
     default:
       return PLATFORM_HOME_URLS[platform]
   }

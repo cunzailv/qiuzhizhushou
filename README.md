@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1071%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1090%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -166,6 +166,21 @@
 | **三条链路全覆盖** | 全自动 AIbot（`content/task-runner.ts`）、半自动批量沟通与 AI 自动确认（`content/index.ts`）都接入；后台 `campaign-service.ts` 只有 `done` 才写 L3 事件，连续 3 次未确认单独告警，提示检查登录态 / 风控 / 页面改版 |
 | **回归测试** | `tests/apply-verification.test.ts`（21 例）：点击无变化 → 未确认、基线旧文案不算证据、阻断优先、四种确认信号、页面文案采集跳过隐藏节点、三条链路「先确认再落盘」静态契约 |
 
+### 🎯 搜索方向与技术栈约束（2026-11）
+「岗位名称填了 `php 后台开发`、`AI 全栈开发` 却一点效果没有，还投了前端和 Java」的根因是五层叠加：
+
+| 层 | 问题 → 修复 |
+|---|---|
+| **拆词** | `splitKeywordTokens` 原来不按空格切，整串「php 后台开发」扔给平台基本搜不到、页面被降级成推荐流。现按标点 + 空格切成 `php` / `后台开发` / `AI` / `全栈开发` 等可搜短词 |
+| **来源** | `extractSearchKeywords` 原来只读「期望职位 / 工作经历职位 / 文件名」，简历里的 `skills`、项目 `technologies`、画像 `skillLevels` 完全没参与。现全部接入，PHP / Laravel / AI 开发 / 全栈开发 都会变成搜索词 |
+| **兜底** | 一个词都没有时旧版硬编码 `['全栈工程师','前端开发工程师',…]` 替用户猜方向，PHP 后端用户因此真的去搜前端岗位。现返回空并明确提示去「设置 → 岗位名称」填写（如 `php 后台开发, AI 全栈开发`）；**不暂停**，填好下一轮自动恢复 |
+| **搜索页** | 脉脉的搜索 URL 原来忽略 query，永远停在推荐流；现五个平台都把关键词写进 URL |
+| **跨栈硬拦** | 新增 `src/shared/agent/stack-guard.ts`：方向里明确写了 PHP 时，「Java开发」「前端开发」「Golang后端」一律硬否决；通用词「后端开发工程师」不带栈，照常放行交给匹配分。`isCrossStackJob` 在 `evaluateJobCandidate`（硬过滤、不 soft）、`computeLocalRelevance`、AI 审核 prompt、半自动 `filterJobs` 四处一致生效 |
+| **精投闸门** | 旧版本地语义判定「只统计不否决」，`relaxCareerFilter` 又把 `targetCareers` 清空，加上软过滤补足名额，没配 AI Key 的精投等于完全不设防。现放宽模式**仍保留方向白名单**；本地语义在精投下也是硬闸门；语义不相关的岗位不能靠补足名额回到队列 |
+| **可见性** | 日志写明本轮搜索词 + 来源（设置 / 简历技能）+ 目标方向 + 「技术栈约束【PHP】已生效：剔除 N 个不对口岗位」，浮窗扫描文案也显示 `限 PHP`，不再黑盒 |
+
+回归测试 `tests/search-direction.test.ts`（19 例）覆盖拆词、简历技能来源、跨栈否决、精投闸门、五平台搜索 URL 与静态契约。
+
 ### 📜 行为日志 · 可回看全部历史（2026-11）
 「实时记录不能滑动、不知道之前干了什么」的根因：日志每 2 秒被无条件拉回底部、只保留本轮最近 120 条、新一轮 campaign 直接清空、条目只有 `HH:mm:ss` 没有日期，且并发写入互相覆盖。
 
@@ -296,7 +311,7 @@ npm run build
 | 样式 | Tailwind CSS 3 + shadow DOM 注入 |
 | 数据 | Dexie (IndexedDB) + chrome.storage |
 | AI | OpenAI / DeepSeek / 自定义兼容接口 + 本地语义精筛 + AI SDK 7 tool-calling 循环 |
-| 测试 | Vitest（1071 用例 / 78 文件）+ Playwright（E2E） |
+| 测试 | Vitest（1090 用例 / 79 文件）+ Playwright（E2E） |
 | UI 组件 | Lucide React + Recharts + react-markdown / remark-gfm |
 
 ## 📁 项目结构
@@ -344,8 +359,8 @@ docs/EXTERNAL_AI.md     # 外部 AI 接入完整指南
 ## 🧪 测试与验收
 
 ```bash
-npm test                                       # tsc -b + vite build + 全部 1071 个测试用例
-npx vitest run                                  # 全量单测/E2E：78 文件 / 1071 用例
+npm test                                       # tsc -b + vite build + 全部 1090 个测试用例
+npx vitest run                                  # 全量单测/E2E：79 文件 / 1090 用例
 npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用例（基线 110 + 新增 36）
 ```
 
@@ -358,6 +373,7 @@ npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用�
 
 | 版本 | 内容 |
 |------|------|
+| `未发布` | 🎯 搜索方向真正生效：按空格拆词、简历技能参与搜索、删除硬编码前端兜底、五个平台都带 query；新增技术栈硬约束，PHP 方向不再投 Java / 前端，精投本地语义升级为硬闸门。新增 19 例回归测试 |
 | `未发布` | ✅ 投递确认层：点击按钮不再等于平台确认，未确认不落盘 / 不去重 / 不计配额；行为日志可滚动回看全部历史、带日期与轮次。新增 27 例回归测试 |
 | `未发布` | 🧭 点击插件图标不再弹独立整页面板：一律落到招聘网站右侧整高侧栏，动态注入改轮询等待，新增 6 例入口契约测试 |
 | `未发布` | 🗂️ 信息架构分层收纳：首屏只留「现在做什么 / 现在怎么样了」，低频设置进 Disclosure，功能一个不删；新增 17 例信息架构契约测试 |

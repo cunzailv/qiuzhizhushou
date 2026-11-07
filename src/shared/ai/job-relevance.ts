@@ -15,6 +15,11 @@
 // 每次最多送 30 个标题，超出部分沿用本地判定；海投（极速）模式默认只用本地，不花 AI 预算。
 import { chatCompletion } from './api-client'
 import { isJobMatchingCareer, isUnrelatedCareer } from '../agent/job-filter'
+import {
+  isCrossStackJob,
+  describeTargetStacks,
+  type TechStack,
+} from '../agent/stack-guard'
 
 export interface RelevanceJob {
   id: string
@@ -28,6 +33,8 @@ export interface JobRelevanceInput {
   keyword: string
   /** 从简历 / 筛选设置提取的目标职业方向 */
   targetCareers?: string[]
+  /** 用户方向里明确的技术栈；非空时跨栈岗位一律不相关 */
+  targetStacks?: TechStack[]
   jobs: RelevanceJob[]
   platform?: string
 }
@@ -93,6 +100,10 @@ export function computeLocalRelevance(job: RelevanceJob, input: JobRelevanceInpu
   if (!title) return false
   const dirText = dirs.join('')
 
+  // 技术栈硬约束优先于一切同义族谱：
+  // 搜「php 后台开发」时，后端族谱会把其他语言的后端岗当同义词，这里必须先否决。
+  if (isCrossStackJob(job.title || '', input.targetStacks || [])) return false
+
   // 用户自己就在找这类职能时不启用负向词（例如目标方向就是「产品经理」）
   const antiApplies = !NON_TARGET_ROLE_RE.test(dirText)
   if (antiApplies && NON_TARGET_ROLE_RE.test(title)) return false
@@ -142,7 +153,9 @@ function makeResult(
 
 const AI_SYSTEM_PROMPT = [
   '你是招聘搜索结果的相关性审核员。判断「搜索结果里的岗位」是否真的在招目标方向的求职者。',
-  '判定标准：职业性质一致才算相关，技术栈/近义词可以不同（如「后端开发」↔「PHP开发工程师 / 服务端研发 / Java 后台」）。',
+  '判定标准：职业性质一致才算相关；技术栈近义词可以不同，但必须属于用户指定的技术栈。',
+  '若用户方向明确写了某个技术栈（如 PHP），岗位标题明确写了另一个栈（如 Java / 前端 / Go / 移动端）且完全没提目标栈，一律判为不相关。',
+  '岗位标题没写具体技术栈的通用词（如「后端开发工程师」「研发工程师」）按职业性质判断，不要仅因缺少栈字样就否决。',
   '以下一律判为不相关：只含关键词字样但岗位性质不同（如「PHP技术支持」「PHP课程顾问」「招聘PHP培训讲师」）、销售/客服/行政/设计/产品/咨询/心理等其他职能、推荐流里的杂乱岗位、实习生转正文案里的岗位名。',
   '只输出一个 JSON 对象，不要输出任何解释文字或 markdown 代码块：',
   '{"relevant":[相关岗位的编号数组，编号从 1 开始],"confidence":0到1的小数,"reason":"一句话说明本页整体情况"}',
@@ -158,9 +171,10 @@ function buildAiUserPrompt(input: JobRelevanceInput, reviewed: RelevanceJob[]): 
     `平台：${input.platform || '未知'}`,
     `本轮搜索关键词：${input.keyword || '（未指定）'}`,
     `目标职业方向：${dirs.join('、') || '（未指定）'}`,
+    `目标技术栈：${describeTargetStacks(input.targetStacks || []) || '（未限定）'}`,
     `本页共 ${reviewed.length} 个岗位：`,
     ...lines,
-    '请给出 relevant 编号数组（只列真正对口的，不相关的一个都不要列）。',
+    '请给出 relevant 编号数组（只列真正对口的；明确属于其他技术栈的一个都不要列）。',
   ].join('\n')
 }
 
@@ -205,6 +219,7 @@ export function buildRelevanceSignature(input: JobRelevanceInput, reviewed: Rele
     input.platform || '',
     input.keyword || '',
     (input.targetCareers || []).join(','),
+    (input.targetStacks || []).join(','),
     reviewed.map((j) => `${j.id}:${j.title}`).join(';'),
   ].join('|')
   let hash = 5381

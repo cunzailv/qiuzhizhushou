@@ -4,6 +4,11 @@ import type { JobCard } from '../types/job'
 import type { Resume } from '../types/resume'
 import type { ApplyFilters } from '../types/filters'
 import { parseSalaryRange } from '../types/filters'
+import {
+  isCrossStackJob,
+  describeCrossStackReason,
+  type TechStack,
+} from './stack-guard'
 
 /**
  * 从简历或筛选设置中提取期望的岗位职业名称清单
@@ -319,10 +324,12 @@ export function evaluateJobCandidate(
   options: {
     filters?: ApplyFilters | null
     targetCareers?: string[]
+    /** 用户方向里明确的技术栈（PHP / Java / 前端…），用于硬否决跨栈岗位 */
+    targetStacks?: TechStack[]
     blacklist?: Set<string>
   },
 ): { pass: boolean; reason?: string; soft?: boolean } {
-  const { filters, targetCareers = [], blacklist = new Set() } = options
+  const { filters, targetCareers = [], targetStacks = [], blacklist = new Set() } = options
 
   // 1. 黑名单公司检查
   if (job.companyName && blacklist.has(job.companyName.trim())) {
@@ -333,6 +340,16 @@ export function evaluateJobCandidate(
   //     否则一旦放宽方向，销售/客服/行政岗会直接灌进投递队列。
   if (isUnrelatedCareer(job.title, targetCareers)) {
     return { pass: false, reason: `职业方向不匹配（无关行业：${job.title}）` }
+  }
+
+  // 1.6 技术栈硬拦截：目标方向明确写了 PHP 时，「Java开发」「前端开发」不能进队列，
+  //     也绝不允许被后面的软过滤补足名额塞回来（所以不设 soft）。
+  //     通用词「后端开发工程师」不带具体栈，照常放行交给匹配分。
+  if (targetStacks.length > 0 && isCrossStackJob(job.title, targetStacks)) {
+    return {
+      pass: false,
+      reason: `技术栈不符（${describeCrossStackReason(job.title, targetStacks)}）`,
+    }
   }
 
   // 2. 职业方向检查（软过滤：不匹配不等于不可投，交由 AI 匹配分最终把关）

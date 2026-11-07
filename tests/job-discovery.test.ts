@@ -68,10 +68,12 @@ describe('Job Discovery & Auto Queue Feeder (待投队列全自主搜寻采集�
     expect(keywords.length).toBeGreaterThanOrEqual(3)
   })
 
-  it('falls back to default keywords when resume and filters are empty', () => {
+  it('returns no keywords instead of guessing unrelated roles (front-end / full-stack)', () => {
+    // 旧版硬编码兜底 ['全栈工程师', '前端开发工程师', ...] 会让 PHP 后端用户
+    // 真的去搜前端岗位并投递。没有可信来源时必须返回空，由调度层提示用户填写。
     const keywords = extractSearchKeywords(null)
-    expect(keywords.length).toBeGreaterThanOrEqual(1)
-    expect(keywords).toContain('全栈工程师')
+    expect(keywords).toEqual([])
+    expect(keywords).not.toContain('前端开发工程师')
   })
 
   it('rotates keywords predictably across iterations', async () => {

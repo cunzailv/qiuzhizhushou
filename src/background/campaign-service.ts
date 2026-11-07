@@ -121,6 +121,8 @@ export async function setSearchPageCursor(pageKey: string, page: number): Promis
 
 /** 方向诊断日志去重签名，避免每轮补仓重复刷同一条 */
 let careerDiagnosticSig = ''
+/** 技术栈约束可见化日志的去重签名，避免每轮刷屏 */
+let lastStackNoticeSig = ''
 
 /** 已上报过的 AI 失败时间戳，保证同一次失败只提示一次 */
 let lastReportedAiFailureAt = 0
@@ -230,8 +232,12 @@ interface CollectJobsResult {
   relevanceSource?: 'ai' | 'local'
   relevanceConfidence?: number
   relevanceReason?: string
-  /** 被 AI 判定为不对口而剔除的岗位数 */
+  /** 被语义复核判定为不对口而剔除的岗位数 */
   filteredByRelevance?: number
+  /** 被技术栈硬约束剔除的岗位数（如 PHP 方向下的 Java / 前端） */
+  filteredByStack?: number
+  /** 本轮生效的技术栈约束（中文标签），写进日志让用户能看到 */
+  targetStackLabels?: string[]
   error?: string
 }
 
@@ -623,16 +629,30 @@ async function autoCollectJobsForCampaign(
     Object.keys(invalidKeywords),
   )
   if (keywordInfo.exhausted) {
-    await appendCampaignLog(
-      `⛔ ${keywordInfo.allKeywords.length} 个关键词全部搜不到相关岗位，24 小时内已标记为无效。请检查：①平台是否已登录 ②账号是否被降权 ③到设置里换成更通用的职位词（如把「PHP开发」改成「PHP」）`,
-      'error',
-    )
-    await pauseAgentCampaign('no_source')
-    sendNotification(
-      '⚠️ 没有可用的岗位来源',
-      '所有搜索关键词都拿不到相关岗位，AIbot 已暂停。请检查平台登录状态与关键词设置。',
-      2,
-    )
+    if (keywordInfo.reason === 'no_keywords') {
+      // 一个可信关键词都没有时，绝不替用户猜「前端 / 全栈」之类的通用词去乱搜。
+      // 保持 running，让用户填完期望职位后下一轮自动恢复，比直接暂停更不容易让人以为坏了。
+      await appendCampaignLog(
+        '⛔ 没有可用的搜索词：没在「期望职位」里读到职位名，简历技能 / 项目技术栈里也没解析出 PHP、AI 开发、全栈这类词。请到「设置 → 岗位名称」填写，例如「php 后台开发, AI 全栈开发」（用逗号或顿号分隔）。本轮不采集推荐流岗位，填好后下一轮自动恢复',
+        'error',
+      )
+      sendNotification(
+        '需要填写期望职位',
+        '没读到可用的搜索关键词，本轮不采集岗位。请到设置里填写岗位名称，例如「php 后台开发」。',
+        2,
+      )
+    } else {
+      await appendCampaignLog(
+        `⛔ ${keywordInfo.allKeywords.length} 个关键词全部搜不到相关岗位，24 小时内已标记为无效。请检查：①平台是否已登录 ②账号是否被降权 ③到设置里换成更通用的职位词（如把「PHP开发」改成「PHP」）`,
+        'error',
+      )
+      await pauseAgentCampaign('no_source')
+      sendNotification(
+        '⚠️ 没有可用的岗位来源',
+        '所有搜索关键词都拿不到相关岗位，AIbot 已暂停。请检查平台登录状态与关键词设置。',
+        2,
+      )
+    }
     return false
   }
   const targetCareers = extractTargetCareers(defaultResume, filters)
@@ -665,7 +685,7 @@ async function autoCollectJobsForCampaign(
   if (relaxCareerFilter && !careerRelaxAnnounced) {
     careerRelaxAnnounced = true
     await appendCampaignLog(
-      `🔓 已连续 ${careerFilterMissStreak} 轮因职业方向过滤导致零新增，本轮起自动放宽方向限制（改由 AI 匹配分把关），先保证有岗位可投。建议同步检查「期望职位」是否填成了长句`,
+      `🔓 已连续 ${careerFilterMissStreak} 轮因职业方向过滤导致零新增，本轮起放宽同义匹配严格度（方向白名单仍保留，明确跨技术栈岗位继续硬拦），先保证有岗位可投。建议同步检查「期望职位」是否填成了长句`,
       'warn',
     )
   }
@@ -707,9 +727,12 @@ async function autoCollectJobsForCampaign(
     const pageKey = `${platform}:${primaryCareerKeyword}`
     const currentPage = await getSearchPageCursor(pageKey)
 
+    const keywordSourceLabel = (filters.jobTitles || '').trim()
+      ? '设置里的「岗位名称」'
+      : '简历职位 / 技能 / 项目技术栈'
     log(MOD, 'autoCollect', `Connecting to ${platform} for autonomous job collection targeting: ${primaryCareerKeyword} (page ${currentPage})...`)
     await appendCampaignLog(
-      `🔍 待投队列待补充，全自主采集中枢轮转启动关键词【${primaryCareerKeyword}】(${keywordInfo.index + 1}/${keywordInfo.total})，正在连接【${pName}】精准补仓（第 ${currentPage} 页）...`,
+      `🔍 本轮搜索词【${primaryCareerKeyword}】(${keywordInfo.index + 1}/${keywordInfo.total}，来源：${keywordSourceLabel})，目标方向【${careerLabel}】，正在连接【${pName}】精准补仓（第 ${currentPage} 页）...`,
       'info',
     )
 
@@ -787,13 +810,28 @@ async function autoCollectJobsForCampaign(
         const stringHits = collectRes.keywordHits ?? -1
         const dropped = collectRes.filteredByRelevance ?? 0
         const diverged = effectiveRelevantHits >= 0 && stringHits >= 0 && effectiveRelevantHits !== stringHits
-        if (collectRes.relevanceSource === 'ai' && (diverged || effectiveRelevantHits === 0 || dropped > 0)) {
+        // 本地语义闸门（精投）同样会剔除岗位，没配 AI Key 的用户也必须看得到原因
+        const gateActive = collectRes.relevanceSource === 'ai' || dropped > 0
+        if (gateActive && (diverged || effectiveRelevantHits === 0 || dropped > 0)) {
           const reason = (collectRes.relevanceReason || '').slice(0, 120)
+          const sourceLabel = collectRes.relevanceSource === 'ai' ? 'AI 语义复核' : '本地语义复核'
           await appendCampaignLog(
-            `🧠 【${pName}】AI 语义复核【${primaryCareerKeyword}】：本页 ${finalCollected} 个岗位里 ${effectiveRelevantHits} 个真正对口（字符串命中 ${stringHits}），已剔除 ${dropped} 个不对口岗位${reason ? `｜${reason}` : ''}`,
+            `🧠 【${pName}】${sourceLabel}【${primaryCareerKeyword}】：本页 ${finalCollected} 个岗位里 ${effectiveRelevantHits} 个真正对口（字符串命中 ${stringHits}），已剔除 ${dropped} 个不对口岗位${reason ? `｜${reason}` : ''}`,
             effectiveRelevantHits === 0 ? 'warn' : 'info',
           )
         }
+      }
+
+      // 技术栈约束可见化：用户要能确认「PHP 方向确实把 Java / 前端挡在队列外」
+      const stackNames = collectRes?.targetStackLabels || []
+      const stackDropped = collectRes?.filteredByStack ?? 0
+      const stackSig = `${platform}:${primaryCareerKeyword}:${stackNames.join(',')}`
+      if (collectRes?.success && stackNames.length > 0 && stackSig !== lastStackNoticeSig) {
+        lastStackNoticeSig = stackSig
+        await appendCampaignLog(
+          `🎯 【${pName}】技术栈约束【${stackNames.join(' / ')}】已生效：本页剔除 ${stackDropped} 个明确不对口岗位（如 Java / 前端），只保留同栈或通用后端岗位`,
+          'info',
+        )
       }
 
       if (collectRes?.success && (collectRes.added ?? 0) > 0) {

@@ -188,10 +188,11 @@ describe('搜索关键词提取 extractSearchKeywords', () => {
     expect(kws.every((k) => k.length <= 12)).toBe(true)
   })
 
-  it('来源全空时回退标准词库', () => {
+  it('来源全空时不再猜测通用职位词（避免替 PHP 用户去搜前端岗）', () => {
     const kws = extractSearchKeywords(null, undefined, { jobTitles: '' } as any)
-    expect(kws.length).toBeGreaterThan(0)
-    expect(kws).toContain('全栈工程师')
+    expect(kws).toEqual([])
+    expect(kws).not.toContain('全栈工程师')
+    expect(kws).not.toContain('前端开发工程师')
   })
 })
 

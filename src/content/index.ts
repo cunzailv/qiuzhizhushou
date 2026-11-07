@@ -58,6 +58,13 @@ import {
   isJobMatchingCareer,
   isJobMatchingFreshness,
 } from '../shared/agent/job-filter'
+import {
+  extractTargetStacks,
+  isCrossStackJob,
+  describeTargetStacks,
+  STACK_LABELS,
+  type TechStack,
+} from '../shared/agent/stack-guard'
 import { getBlacklist } from '../shared/db/blacklist-store'
 import { getRuntimeState, reportBatchProgress } from '../shared/runtime-state'
 
@@ -468,12 +475,29 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       // 提取目标职业清单与筛选配置
       const defaultResume = await fetchFullResume()
       const effectiveFilters: ApplyFilters = message.payload?.filters || currentFilters
+      // 放宽只能放宽「同义匹配严格度」，绝不能把方向清空：
+      // 旧版 relaxCareerFilter=true 时 targetCareers=[]，isJobMatchingCareer 直接 return true，
+      // 于是推荐流里的前端 / Java 岗位被整页灌进投递队列。
+      const relaxCareerFilter = message.payload?.relaxCareerFilter === true
+      const searchKeyword = String(message.payload?.keyword || '').trim()
       const targetCareers: string[] =
-        message.payload?.relaxCareerFilter === true
-          ? []
-          : message.payload?.targetCareers && message.payload.targetCareers.length > 0
-            ? message.payload.targetCareers
-            : extractTargetCareers(defaultResume, effectiveFilters)
+        message.payload?.targetCareers && message.payload.targetCareers.length > 0
+          ? message.payload.targetCareers
+          : extractTargetCareers(defaultResume, effectiveFilters)
+
+      // 技术栈约束：方向里明确写了 PHP 时，Java / 前端岗位一律硬否决（海投同样生效）。
+      // 技能清单只用于补主语言栈，避免「熟悉 Vue」把前端算成求职方向。
+      const targetStacks: TechStack[] = extractTargetStacks({
+        directions: [effectiveFilters.jobTitles || '', searchKeyword],
+        positions: [defaultResume?.structuredData?.workExperience?.[0]?.position || ''],
+        skills: [
+          ...(defaultResume?.structuredData?.skills || []).slice(0, 20),
+          ...(defaultResume?.structuredData?.projects || []).flatMap((p) => p.technologies || []).slice(0, 12),
+          ...(defaultResume?.profile?.skillLevels || [])
+            .filter((s) => s.level === 'expert' || s.level === 'proficient')
+            .map((s) => s.skill),
+        ],
+      })
 
       let blacklistSet = new Set<string>()
       try {
@@ -483,7 +507,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         // 忽略黑名单读取失败
       }
 
-      const careerLabel = targetCareers.length > 0 ? targetCareers.join(' / ') : '全量职业'
+      const stackLabel = describeTargetStacks(targetStacks)
+      const careerLabel = `${targetCareers.length > 0 ? targetCareers.join(' / ') : '全量职业'}${stackLabel ? ` · 限 ${stackLabel}` : ''}`
       const freshnessLabel =
         effectiveFilters.publishTime === 'today'
           ? '今日活跃'
@@ -525,7 +550,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       // 采集有效性校验：这批卡片里有没有与当前搜索关键词相关的岗位。
       // 全部不相关往往意味着搜索没生效（被重定向到推荐流 / 未登录降级），
       // 此时继续过滤只会一直空转，必须让调度层知道。
-      const searchKeyword = String(message.payload?.keyword || '').trim()
       const keywordHits = searchKeyword
         ? rawJobs.filter((j) => `${j.title} ${(j.tags || []).join(' ')}`.includes(searchKeyword)).length
         : -1
@@ -541,6 +565,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const relevanceInput = {
         keyword: searchKeyword,
         targetCareers,
+        targetStacks,
         jobs: rawJobs,
         platform: adapter.id,
       }
@@ -552,9 +577,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (relevance.source === 'ai' && relevance.confidence < 0.6) {
         relevance = await assessJobRelevance(relevanceInput, { useAi: false })
       }
-      // 只有高置信度的 AI 结论才有权把岗位从队列里剔掉；
-      // 本地语义判定只用于统计与提示，绝不单方面否决岗位。
+      // 精投模式：本地语义结论同样是硬闸门。
+      // 旧版「本地判定只统计、绝不否决」在没配 AI Key 时等于完全不设防，
+      // 推荐流里的前端 / Java 岗位会整页进队列，这正是「精投也乱投」的主因。
       const aiRelevanceGate = relevance.source === 'ai' && relevance.confidence >= 0.6
+      const strictRelevanceGate =
+        !!searchKeyword && !fastModeForRelevance && !relaxCareerFilter
+      const relevanceGate = aiRelevanceGate || strictRelevanceGate
       const irrelevantJobIds = new Set(relevance.irrelevantJobIds)
 
       // 对采集到的卡片进行过滤。
@@ -568,22 +597,27 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       let filteredByTime = 0
       let filteredByBlacklist = 0
       let filteredByRelevance = 0
+      let filteredByStack = 0
 
       for (const job of rawJobs) {
-        // AI 语义复核判定为「不是这个方向的岗位」→ 直接丢弃，不再进队列浪费投递额度
-        if (aiRelevanceGate && irrelevantJobIds.has(job.id)) {
+        // 语义复核判定为「不是这个方向的岗位」→ 直接丢弃，不再进队列浪费投递额度
+        if (relevanceGate && irrelevantJobIds.has(job.id)) {
           filteredByRelevance++
           continue
         }
         const evalRes = evaluateJobCandidate(job, {
           filters: effectiveFilters,
           targetCareers,
+          targetStacks,
           blacklist: blacklistSet,
         })
         if (!evalRes.pass) {
-          if (evalRes.reason?.includes('职业方向')) {
+          if (evalRes.reason?.includes('技术栈')) {
+            filteredByStack++
+          } else if (evalRes.reason?.includes('职业方向')) {
             filteredByCareer++
-            if (evalRes.soft) {
+            // 语义不相关的岗位不能靠软补足偷偷回到队列
+            if (evalRes.soft && !irrelevantJobIds.has(job.id)) {
               softMatchedJobs.push(job)
             }
           } else if (evalRes.reason?.includes('活跃度') || evalRes.reason?.includes('时间')) filteredByTime++
@@ -594,8 +628,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         if (filteredJobs.length >= maxJobs) break
       }
 
-      // 严格通过的不够时，用「方向不匹配但其他硬条件都合格」的岗位补足名额，
-      // 最终是否投递仍由 AI 匹配分决定（不相关岗位会被低分自然淘汰）。
+      // 严格通过的不够时，只用「字符串没对上、但语义确实相关」的岗位补足名额。
+      // 跨栈岗位在 evaluateJobCandidate 里已硬否决，永远进不了这里。
       if (filteredJobs.length < maxJobs && softMatchedJobs.length > 0) {
         for (const job of softMatchedJobs) {
           if (filteredJobs.length >= maxJobs) break
@@ -630,6 +664,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         filteredByTime,
         filteredByBlacklist,
         filteredByRelevance,
+        filteredByStack,
+        targetStackLabels: targetStacks.map((s) => STACK_LABELS[s]),
         pageCardTotal,
         excludedOnPage,
         keywordHits,
@@ -786,9 +822,14 @@ function filterJobs(jobs: JobCard[], filters: ApplyFilters): { passed: JobCard[]
   const titleKeywords = filters.jobTitles.trim().toLowerCase().split(/[,;\s|]+/).filter(Boolean)
   const locationKeywords = filters.locations.trim().toLowerCase().split(/\s+/).filter(Boolean)
   const excludeKeywords = filters.excludeKeywords.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  // 半自动只认用户明确填的岗位名称，不从简历技能推断，避免误伤用户主动打开的页面
+  const filterStacks = extractTargetStacks({ directions: [filters.jobTitles || ''] })
 
   for (const job of jobs) {
     let skip = false
+
+    // 技术栈硬约束：填了「php 后台开发」就不要把 Java / 前端岗位投出去
+    if (!skip && isCrossStackJob(job.title, filterStacks)) skip = true
 
     if (!skip && titleKeywords.length > 0) {
       if (!isJobMatchingCareer(job.title, titleKeywords)) skip = true
