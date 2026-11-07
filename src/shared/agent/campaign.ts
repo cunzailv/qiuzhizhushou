@@ -1,6 +1,7 @@
 // Campaign 生命周期控制与战报聚合
 
 import type { Campaign, CampaignLog } from './queue-store'
+import { isGoalAchieved, isMustAchieve } from './capacity-goal'
 import {
   getCampaign,
   saveCampaign,
@@ -192,10 +193,21 @@ export async function abortCampaign(reason?: string): Promise<Campaign | null> {
 export function isCampaignFinished(campaign: Campaign): boolean {
   if (campaign.status === 'done' || campaign.status === 'aborted') return true
 
-  // 只检查已启用的平台
   const platforms = (Object.keys(campaign.quotas) as PlatformId[]).filter(
     (p) => campaign.quotas[p].enabled !== false,
   )
+
+  /**
+   * 必达模式：只要平台已确认投递数还没到目标，就**永远不算完成**。
+   * 否则「所有启用平台配额打满 / 被标日限」会提前把流水线判成 done，
+   * 用户设的目标就再也没人推进了 —— 这正是「设定了目标必须成功」要堵死的出口。
+   * 达成本身的停机由调度层显式处理（带通知与留痕），不靠这个通用判定。
+   */
+  if (isMustAchieve(campaign.capacityGoal)) {
+    const applied = platforms.reduce((sum, p) => sum + (campaign.quotas[p].applied || 0), 0)
+    if (!isGoalAchieved(campaign.capacityGoal!, applied)) return false
+  }
+
   if (platforms.length === 0) return true
 
   // 只有「所有启用平台的配额达成 / 被平台限流耗尽」才算真正完成。

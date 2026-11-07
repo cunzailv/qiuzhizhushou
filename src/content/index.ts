@@ -4,6 +4,7 @@ import type { PlatformAdapter } from '../shared/platform/types'
 import { resolvePanelPresence } from '../shared/assistant-entry'
 import { executeCampaignTask } from './task-runner'
 import { appendTasksToCampaign } from '../shared/agent/queue-store'
+import { shouldBypassRelevanceGate } from '../shared/agent/must-achieve'
 import {
   collectApplyPageTexts,
   decideApplyVerification,
@@ -427,6 +428,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       const result = await executeCampaignTask(task, adapter, defaultResume, {
         // 目标产能落后时放宽匹配分门槛，别让本地评分量纲把已过硬筛的对口岗位全否掉
         capacityUrgent: message.payload?.capacityUrgent === true,
+        // 必达模式：匹配分只用于排序，彻底不再当否决闸门
+        mustAchieve: message.payload?.mustAchieve === true,
         shouldCancel: () => isAssistantTaskCancelled(assistantState, campaignTaskCancelled),
         onProgress: (msg) => {
           updatePanelContent(panelHost!, {
@@ -460,6 +463,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true
   }
   if (message.type === 'COLLECT_PLATFORM_JOBS') {
+    /** 必达模式：自动放宽可控的采集门槛，但技术栈 / 方向 / 黑名单硬约束继续生效 */
+    const mustAchieve = message.payload?.mustAchieve === true
     const maxJobs = message.payload?.maxJobs || 25
     const existingJobIdsList: string[] = message.payload?.existingJobIds || []
     const excludeJobIds = new Set<string>(existingJobIdsList)
@@ -606,8 +611,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       // 旧版「本地判定只统计、绝不否决」在没配 AI Key 时等于完全不设防，
       // 推荐流里的前端 / Java 岗位会整页进队列，这正是「精投也乱投」的主因。
       const aiRelevanceGate = relevance.source === 'ai' && relevance.confidence >= 0.6
+      /**
+       * 必达模式把「本地语义硬闸门」降级为只统计不否决：供给不足时不能再用
+       * 关键词字面匹配把同栈岗位整页筛光。技术栈硬约束在 evaluateJobCandidate
+       * 里独立生效，前端 / Java 等跨栈岗位依旧被硬拦，不会退回「精投乱投」。
+       */
       const strictRelevanceGate =
-        !!searchKeyword && !fastModeForRelevance && !relaxCareerFilter
+        !!searchKeyword && !fastModeForRelevance && !relaxCareerFilter &&
+        !shouldBypassRelevanceGate(mustAchieve)
       const relevanceGate = aiRelevanceGate || strictRelevanceGate
       const irrelevantJobIds = new Set(relevance.irrelevantJobIds)
 
@@ -699,6 +710,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         pageCardTotal,
         excludedOnPage,
         truncatedByCap,
+        mustAchieve,
         keywordHits,
         relevantHits: searchKeyword ? relevance.hits : -1,
         relevanceSource: relevance.source,

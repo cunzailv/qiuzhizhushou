@@ -85,6 +85,8 @@ import {
   normalizeCapacityGoal,
   hasWindowConflict,
   checkCapacityWindowFit,
+  isMustAchieve,
+  describeMustAchieveTakeover,
   type CapacityGoal,
 } from '../../shared/agent/capacity-goal'
 
@@ -198,10 +200,13 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
   const [foregroundMode, setForegroundMode] = useState(DEFAULT_FOREGROUND_MODE)
   // 模拟真人作息休息：默认开启防风控；嫌慢可关掉，海投策略下批次更长、休息更短
   const [restEnabled, setRestEnabled] = useState(DEFAULT_REST_ENABLED)
-  // 目标产能：N 小时内投满 M 份
+  // 目标产能：N 小时内投满 M 份；必达模式默认开启（设定目标 = 必须达成）
   const [capacityGoal, setCapacityGoal] = useState<CapacityGoal>(DEFAULT_CAPACITY_GOAL)
   const [capacityHoursInput, setCapacityHoursInput] = useState(String(DEFAULT_CAPACITY_GOAL.hours))
   const [capacityJobsInput, setCapacityJobsInput] = useState(String(DEFAULT_CAPACITY_GOAL.targetJobs))
+  const [mustAchieveInput, setMustAchieveInput] = useState(
+    DEFAULT_CAPACITY_GOAL.mustAchieve !== false,
+  )
   const [capacitySaving, setCapacitySaving] = useState(false)
 
   const [logExpanded, setLogExpanded] = useState(true)
@@ -283,6 +288,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         setCapacityGoal(savedGoal)
         setCapacityHoursInput(String(savedGoal.hours))
         setCapacityJobsInput(String(savedGoal.targetJobs))
+        setMustAchieveInput(savedGoal.mustAchieve !== false)
 
         const savedQuotas = await getSavedPlatformQuotas()
         setPlatformQuotas(savedQuotas)
@@ -397,7 +403,12 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
     }
     setCapacitySaving(true)
     try {
-      const next: CapacityGoal = { enabled, hours, targetJobs: Math.round(jobs) }
+      const next: CapacityGoal = {
+        enabled,
+        hours,
+        targetJobs: Math.round(jobs),
+        mustAchieve: mustAchieveInput,
+      }
       const res = (await chrome.runtime.sendMessage({
         type: 'SET_CAPACITY_GOAL',
         payload: { goal: next },
@@ -407,6 +418,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         setCapacityGoal(applied)
         setCapacityHoursInput(String(applied.hours))
         setCapacityJobsInput(String(applied.targetJobs))
+        setMustAchieveInput(applied.mustAchieve !== false)
         if (applied.enabled) {
           const effectiveWindows = stats && Array.isArray(stats.windows) ? stats.windows : timeWindows
           const usableMinutes = countUsableMinutesUntil(
@@ -420,10 +432,12 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             now: Date.now(),
           })
           onNotify?.(
-            fit.conflict
-              ? `已设定目标，但${fit.advice}`
-              : `已设定：${applied.hours} 小时内投满 ${applied.targetJobs} 份，AIbot 会自动调速`,
-            fit.conflict ? 'warning' : 'success',
+            isMustAchieve(applied)
+              ? `目标已设定：${applied.hours} 小时内投满 ${applied.targetJobs} 份（必达）。${describeMustAchieveTakeover()}；只认平台确认投递数`
+              : fit.conflict
+                ? `已设定目标，但${fit.advice}`
+                : `已设定：${applied.hours} 小时内投满 ${applied.targetJobs} 份，AIbot 会自动调速`,
+            'success',
           )
         } else {
           onNotify?.('已关闭目标产能，恢复常规节奏', 'success')
@@ -891,6 +905,8 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
       policy: resolveRestPolicy(strategy),
       restEnabled,
       usableMinutes,
+      // 与后台同口径：必达模式超时不停机，面板不能显示「未达成/missed」
+      mustAchieve: stored.mustAchieve !== false,
     })
   }, [stats, totalQuota, strategy, restEnabled, timeWindows])
 
@@ -981,6 +997,9 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
           <div className="flex items-center justify-between gap-2">
             <span className="text-xs text-text-secondary">
               目标产能 · {capacityGoal.hours} 小时投满 {capacityGoal.targetJobs} 份
+              {isMustAchieve(capacityGoal) && (
+                <span className="ml-1 text-primary">必达 · 未达成不停机</span>
+              )}
             </span>
             <span
               className={`text-xs font-medium ${
@@ -1001,15 +1020,26 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             />
           </div>
           <div className="text-xs text-text-muted mt-1.5 leading-relaxed">
-            已确认投递 {stats?.done ?? 0}/{capacityEvaluation.targetJobs} · 距截止约{' '}
-            {Math.round(capacityEvaluation.remainingMs / 60_000)} 分钟
+            已确认投递 {stats?.done ?? 0}/{capacityEvaluation.targetJobs} ·{' '}
+            {isMustAchieve(capacityGoal) && capacityEvaluation.remainingMs <= 0
+              ? '已超时，必达模式继续投递直到达成'
+              : `距截止约 ${Math.round(capacityEvaluation.remainingMs / 60_000)} 分钟`}
             {hasWindowConflict(capacityEvaluation) &&
-              `（其中只有 ${capacityEvaluation.usableMinutes} 分钟落在允许时段）`}
+              (isMustAchieve(capacityGoal)
+                ? '（工作时段已自动放行）'
+                : `（其中只有 ${capacityEvaluation.usableMinutes} 分钟落在允许时段）`)}
             {capacityEvaluation.remainingJobs > 0 &&
               ` · 每份最多 ${Math.max(8, Math.round(capacityEvaluation.requiredIntervalMs / 1000))} 秒`}
             {capacityEvaluation.advice && ` · ${capacityEvaluation.advice}`}
           </div>
-          {capacityEvaluation.remainingJobs > 0 && hasWindowConflict(capacityEvaluation) && (
+          {capacityEvaluation.remainingJobs > 0 && hasWindowConflict(capacityEvaluation) && isMustAchieve(capacityGoal) && (
+            <div className="mt-2">
+              <span className="text-xs text-text-secondary">
+                必达模式已自动放行原工作时段，不休眠；供给或登录态受阻时会持续换词 / 翻页 / 换平台重试
+              </span>
+            </div>
+          )}
+          {capacityEvaluation.remainingJobs > 0 && hasWindowConflict(capacityEvaluation) && !isMustAchieve(capacityGoal) && (
             <div className="mt-2 flex items-center gap-2">
               <span className="text-xs text-warning flex-1">
                 目标按墙钟倒计时，休眠不暂停；当前工作时段会吃掉目标时限
@@ -1195,8 +1225,12 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         {/* 目标产能：N 小时投满 M 份 */}
         <div className="mt-2 rounded-md border border-surface-hairline bg-surface-dark px-2.5 py-2">
           <div className="flex items-center justify-between gap-2">
-            <span className="text-xs text-text-secondary">目标产能（按时限自动调速）</span>
-            <span className="text-xs text-text-muted">{capacityGoal.enabled ? '已开启' : '未开启'}</span>
+            <span className="text-xs text-text-secondary">目标产能（设定即承诺）</span>
+            <span className="text-xs text-text-muted">
+              {capacityGoal.enabled
+                ? isMustAchieve(capacityGoal) ? '已开启 · 必达' : '已开启 · 尽力而为'
+                : '未开启'}
+            </span>
           </div>
           <div className="mt-2 flex items-center gap-1.5">
             <input
@@ -1221,6 +1255,18 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             />
             <span className="text-xs text-text-muted">份</span>
           </div>
+          <label className="mt-2 flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={mustAchieveInput}
+              onChange={(event) => setMustAchieveInput(event.target.checked)}
+              aria-label="必达模式"
+              className="mt-0.5 shrink-0"
+            />
+            <span className="text-xs text-text-secondary leading-relaxed">
+              必达模式（默认开启）：目标未达成前不停机，系统自动接管可控参数
+            </span>
+          </label>
           <div className="mt-2 grid grid-cols-2 gap-1.5">
             <button
               type="button"
@@ -1240,8 +1286,10 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             </button>
           </div>
           <p className="text-xs text-text-muted mt-1.5 leading-relaxed">
-            按剩余时间自动压缩间隔（最低 8 秒防风控）、进度落后时跳过模拟休息；赶不上会预警，到点未达成给诊断。
-            岗位供给与平台风控不可控，系统不会凭空承诺达标。目标超过已开启平台配额合计时，请先在「平台与配额」调高数量。
+            必达模式：{describeMustAchieveTakeover()}。超时继续投递、不停机，只认平台确认投递数，绝不把点击算成功。
+            间隔压缩仍守 8 秒防风控下限；技术栈 / 岗位方向 / 黑名单硬约束保留，不会乱投前端或 Java。
+            关闭必达后恢复「尽力而为」节奏：赶不上会预警、到点未达成给诊断，但不承诺达标。
+            平台登录失效、风控验证码与账号受限属于平台侧阻断，会明确留痕并持续重试，不会虚报成功。
           </p>
         </div>
       </Disclosure>

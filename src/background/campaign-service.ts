@@ -16,6 +16,7 @@ import type { Campaign, ApplyTask } from '../shared/agent/queue-store'
 import type { ApplyVerification } from '../shared/agent/apply-verification'
 import {
   getCampaign,
+  saveCampaign,
   claimNextTask,
   updateTaskResult,
   markPlatformExhausted,
@@ -28,6 +29,7 @@ import {
   persistRestState,
   persistCapacityGoal,
   isRecyclableTask,
+  clearPlatformExhausted,
   TASK_RETRY_COOLDOWN_MS,
 } from '../shared/agent/queue-store'
 import {
@@ -65,7 +67,7 @@ import {
 import type { ApplyFilters } from '../shared/types/filters'
 import { releaseRunMode } from '../shared/runtime-state'
 import { getSetting, setSetting } from '../shared/db/settings-store'
-import { getDeliveryStrategy } from '../shared/agent/delivery-strategy'
+import { applyDeliveryStrategy, getDeliveryStrategy } from '../shared/agent/delivery-strategy'
 import {
   DEFAULT_REST_ENABLED,
   REST_ENABLED_KEY,
@@ -83,9 +85,21 @@ import {
   resolvePacingInterval,
   isCapacityUrgent,
   checkCapacityWindowFit,
+  isMustAchieve,
+  isGoalAchieved,
+  describeMustAchieveTakeover,
   type CapacityEvaluation,
   type CapacityGoal,
 } from '../shared/agent/capacity-goal'
+import {
+  planMustAchieveQuotas,
+  shouldBypassWorkWindow,
+  relaxFiltersForMustAchieve,
+  shouldKeepCollectingOnNoSource,
+  shouldMarkKeywordInvalid,
+  resolveCollectMaxJobs,
+  MUST_ACHIEVE_EXHAUSTED_COOLDOWN_MS,
+} from '../shared/agent/must-achieve'
 import { log, logWarn, logError } from '../shared/utils/logger'
 
 const MOD = 'CampaignService'
@@ -236,6 +250,19 @@ async function markKeywordInvalid(keyword: string): Promise<void> {
     await chrome.storage.local.set({ [INVALID_KEYWORDS_KEY]: map })
   } catch {
     // 持久化失败不影响本轮
+  }
+}
+
+/**
+ * 必达模式启动时清空 24 小时无效词标记。
+ * 常规模式下这个机制能避免原地打转，但「目标必须达成」时它等于把当天所有词
+ * 一次性锁死（日志会写「全部关键词无效 → AIbot 已暂停」），是明确的自设停机出口。
+ */
+async function clearInvalidKeywords(): Promise<void> {
+  try {
+    await chrome.storage.local.remove(INVALID_KEYWORDS_KEY)
+  } catch {
+    // 清不掉最多下一轮仍读到旧标记，采集层会把它们当作可用词处理
   }
 }
 
@@ -395,7 +422,85 @@ function readCapacityEvaluation(
     policy,
     restEnabled,
     usableMinutes,
+    mustAchieve: isMustAchieve(stored),
   })
+}
+
+// ─────────── 必达模式：自动接管所有可控参数 ───────────
+/** 「全平台日限耗尽」冷却时间戳必须持久化，SW 重启后不能立刻狂点被限流的平台 */
+const MUST_ACHIEVE_EXHAUSTED_KEY = 'aibot_must_achieve_exhausted_at'
+/** 各类提示节流（只是提示，重启后重打一条无副作用） */
+let lastMustAchieveWindowNoteAt = 0
+let lastMustAchieveBlockNoteAt = 0
+let capacityOverrunNotifiedFor = ''
+/** 采集条件自动放宽只播报一次，避免每 30 秒刷同一条日志 */
+let mustAchieveRelaxAnnounced = false
+
+async function readExhaustedResetAt(): Promise<number> {
+  try {
+    const res = await chrome.storage.local.get(MUST_ACHIEVE_EXHAUSTED_KEY)
+    const value = Number(res?.[MUST_ACHIEVE_EXHAUSTED_KEY] ?? 0)
+    return Number.isFinite(value) ? value : 0
+  } catch {
+    return 0
+  }
+}
+
+async function markExhaustedResetAt(at: number): Promise<void> {
+  try {
+    await chrome.storage.local.set({ [MUST_ACHIEVE_EXHAUSTED_KEY]: at })
+  } catch {
+    // 写不进去最多多等一轮，不影响业务
+  }
+}
+
+/**
+ * 设定 / 启动目标时，把「系统自己能改的参数」一次性接管到位：
+ * 切海投、抬配额、开全平台、解除日限标记。全部走各自存储函数，
+ * 不直接改传入的 campaign 内存副本，避免被 appendCampaignLog 的旧副本写回覆盖。
+ */
+async function applyMustAchieveTakeover(
+  campaign: Campaign,
+  goal: CapacityGoal,
+  source: 'start' | 'goal' | 'blocked',
+  opts: { allowRevive?: boolean } = {},
+): Promise<void> {
+  if (!isMustAchieve(goal)) return
+
+  const strategy = await getDeliveryStrategy()
+  if (strategy !== 'volume') {
+    await applyDeliveryStrategy('volume')
+    await appendCampaignLog(
+      `🎯 必达模式：已自动切换为【海投】（原策略：${strategy === 'precision' ? '精投' : '未选择'}）。${describeMustAchieveTakeover()}`,
+      'warn',
+    )
+    sendNotification('目标必达 · 已自动切海投', describeMustAchieveTakeover())
+  }
+
+  const plan = planMustAchieveQuotas(campaign.quotas, goal.targetJobs, {
+    allowRevive: opts.allowRevive,
+  })
+  if (Object.keys(plan.quotas).length > 0) {
+    await savePlatformQuotas(plan.quotas)
+    await updateCampaignQuotas(plan.quotas)
+  }
+  for (const pid of plan.enablePlatforms) {
+    await togglePlatformEnabled(pid, true)
+  }
+  // 配额没变但被标 exhausted 的平台，updateCampaignQuotas 会跳过，这里单独解除
+  const quotaOnly = plan.revivePlatforms.filter((pid) => !(pid in plan.quotas))
+  if (quotaOnly.length > 0) await clearPlatformExhausted(quotaOnly)
+
+  if (plan.changed) {
+    await appendCampaignLog(
+      `🎯 必达模式自动接管（${source}）：${plan.reasons.join('；')}；当前目标 ${goal.targetJobs} 份`,
+      'info',
+    )
+  }
+  // 清掉遗留的休息状态，必达模式全程不休息
+  if (campaign.restUntil) {
+    await persistRestState({ restUntil: null, consecutiveRestCounter: 0 })
+  }
 }
 
 /** 设定下一次 tick 触发（结合 setTimeout 与 Alarm 机制双重保险） */
@@ -501,6 +606,33 @@ export async function runCampaignTick(): Promise<void> {
       return
     }
 
+    const goalNow = campaign.capacityGoal
+    const progressNow = summarizeQuotaProgress(campaign)
+    /** 目标已启用、必达、且平台确认投递数还没到目标 */
+    const mustAchieveActive = isMustAchieve(goalNow) && !isGoalAchieved(goalNow!, progressNow.applied)
+    const goalAchieved = !!goalNow?.enabled && isGoalAchieved(goalNow, progressNow.applied)
+    const bypassWindow = shouldBypassWorkWindow(mustAchieveActive, goalAchieved)
+
+    // 0. 必达目标达成：这是唯一允许「目标模式」主动停机的出口，明确留痕 + 通知
+    if (goalAchieved && isMustAchieve(goalNow)) {
+      await pauseAgentCampaign('user')
+      // pauseAgentCampaign 会把状态写成 paused；必须重新读一份再落 done，
+      // 否则只改内存副本会被 storage 里的旧值整份覆盖，面板会显示「已暂停」。
+      const finished = await getCampaign()
+      if (finished) {
+        finished.status = 'done'
+        finished.pausedReason = undefined
+        await saveCampaign(finished)
+      }
+      await releaseRunMode('autopilot')
+      await appendCampaignLog(
+        `🏆 目标必达：平台已确认投递 ${progressNow.applied}/${goalNow!.targetJobs} 份，达成后自动停机。注意核对平台聊天列表里的实际沟通记录`,
+        'success',
+      )
+      sendNotification('🏆 目标已达成', `平台已确认投递 ${progressNow.applied}/${goalNow!.targetJobs} 份，AIbot 已停机`)
+      return
+    }
+
     // 1. 检查是否整体已完成
     if (isCampaignFinished(campaign)) {
       campaign.status = 'done'
@@ -525,7 +657,17 @@ export async function runCampaignTick(): Promise<void> {
     const now = Date.now()
 
     // 2. 检查工作时间窗
-    if (!isWithinWindow(campaign.windows)) {
+    // 必达模式下工作时段是「系统自己能改的参数」，不能拿它当停机理有：
+    // 设定目标即视为授权临时放行，直到平台确认投递数达标。用户设置本身不被改写。
+    if (bypassWindow && !isWithinWindow(campaign.windows)) {
+      if (Date.now() - lastMustAchieveWindowNoteAt > 30 * 60_000) {
+        lastMustAchieveWindowNoteAt = Date.now()
+        await appendCampaignLog(
+          `🎯 必达模式：当前不在投递时段（${formatTimeWindows(campaign.windows)}），已自动临时放行，不休眠；今日已确认投递 ${progressNow.applied}/${goalNow!.targetJobs}，未达成前持续投递`,
+          'info',
+        )
+      }
+    } else if (!isWithinWindow(campaign.windows)) {
       const waitMs = getDelayUntilNextWindow(campaign.windows)
       const waitMins = Math.max(1, Math.round(waitMs / 60_000))
       log(MOD, 'runCampaignTick', `Outside window. Sleeping for ${waitMins} minutes`)
@@ -568,12 +710,12 @@ export async function runCampaignTick(): Promise<void> {
     const capacity = readCapacityEvaluation(campaign, restPolicy, userRestEnabled)
     /**
      * 「产能优先」是整条流水线的统一开关：补仓不降频、跳过历史去重冷却、
-     * 执行层放宽匹配分门槛。旧版只在某几个分支里各算一次，
-     * 结果目标产能只改了间隔、没改供给与门槛，目标自然实现不了。
+     * 执行层放宽匹配分门槛。必达模式下**全程**开启，不再等状态变成 at-risk。
      */
-    const capacityUrgent = isCapacityUrgent(capacity?.status)
-    // 目标产能进度落后时自动跳过模拟休息，把时间还给投递
-    const restEnabled = userRestEnabled && !capacity?.shouldSkipRest
+    const capacityUrgent = mustAchieveActive || isCapacityUrgent(capacity?.status)
+    // 必达模式全程不休息；常规模式在进度落后时自动跳过休息
+    const restEnabled =
+      userRestEnabled && !mustAchieveActive && !capacity?.shouldSkipRest
     const restDecision = decideRest({
       now,
       restUntil: campaign.restUntil,
@@ -584,6 +726,22 @@ export async function runCampaignTick(): Promise<void> {
       enabled: restEnabled,
     })
     const progress = summarizeQuotaProgress(campaign)
+
+    // 必达模式超过设定时限：只报一次进度事实，绝不「到点放弃」
+    if (
+      mustAchieveActive && capacity && capacity.remainingMs <= 0 &&
+      capacityOverrunNotifiedFor !== campaign.id
+    ) {
+      capacityOverrunNotifiedFor = campaign.id
+      await appendCampaignLog(
+        `⏱ 已超过设定的 ${goalNow!.hours} 小时，当前平台已确认投递 ${progressNow.applied}/${goalNow!.targetJobs}；必达模式继续投递，不设到点放弃，直到达标`,
+        'warn',
+      )
+      sendNotification(
+        '目标必达 · 超时继续',
+        `已超时但不会停机，继续投到 ${goalNow!.targetJobs} 份为止（当前 ${progressNow.applied} 份）`,
+      )
+    }
 
     // 目标产能：到点未达成一次性诊断；赶不上时每 10 分钟给一次可操作建议
     if (capacity?.status === 'missed' && capacityMissedNotifiedFor !== campaign.id) {
@@ -667,6 +825,51 @@ export async function runCampaignTick(): Promise<void> {
         return q && q.enabled !== false && !q.exhausted && q.applied < q.quota
       })
 
+      if (activePlatforms.length === 0 && mustAchieveActive) {
+        /**
+         * 必达模式绝不因为「配额打满 / 平台被标日限」就宣告完成：
+         * 这些都是插件自己能改的参数，改完继续投，直到目标达成。
+         * 只有全平台真的被平台侧日限挡死时，才按冷却节奏重试，而不是退出。
+         */
+        const enabledIds = (Object.keys(campaign.quotas) as PlatformId[]).filter(
+          (p) => campaign.quotas[p].enabled !== false,
+        )
+        const exhaustedPlatforms = enabledIds.filter((p) => campaign.quotas[p].exhausted)
+        const allExhausted = enabledIds.length > 0 && exhaustedPlatforms.length === enabledIds.length
+        const lastReset = await readExhaustedResetAt()
+        const cooldownLeft = MUST_ACHIEVE_EXHAUSTED_COOLDOWN_MS - (Date.now() - lastReset)
+        const coolingDown = allExhausted && cooldownLeft > 0
+
+        if (coolingDown) {
+          const waitMins = Math.max(1, Math.round(cooldownLeft / 60_000))
+          if (Date.now() - lastMustAchieveBlockNoteAt > 10 * 60_000) {
+            lastMustAchieveBlockNoteAt = Date.now()
+            await appendCampaignLog(
+              `⛔ 必达模式受阻：${exhaustedPlatforms.length} 个平台都被平台侧日限挡住（已确认投递 ${progressNow.applied}/${goalNow!.targetJobs}）。这是平台限制，不是插件放弃；约 ${waitMins} 分钟后自动解除标记继续重试。建议同时确认各平台登录态`,
+              'warn',
+            )
+          }
+          scheduleNextTick(Math.min(cooldownLeft, 5 * 60_000))
+          return
+        }
+
+        await applyMustAchieveTakeover(campaign, goalNow!, 'blocked', {
+          allowRevive: cooldownLeft <= 0,
+        })
+        if (exhaustedPlatforms.length > 0 && cooldownLeft <= 0) {
+          await markExhaustedResetAt(Date.now())
+        }
+        if (Date.now() - lastMustAchieveBlockNoteAt > 10 * 60_000) {
+          lastMustAchieveBlockNoteAt = Date.now()
+          await appendCampaignLog(
+            `🔁 必达模式：配额/平台状态已自动接管，未达成 ${progressNow.applied}/${goalNow!.targetJobs} 前不停机，立即继续换平台补仓`,
+            'info',
+          )
+        }
+        scheduleNextTick(30_000)
+        return
+      }
+
       if (activePlatforms.length === 0) {
         log(MOD, 'runCampaignTick', 'All enabled platforms completed their quota')
         await appendCampaignLog('🎉 所有已开启平台的投递配额均已达成！', 'success')
@@ -690,6 +893,7 @@ export async function runCampaignTick(): Promise<void> {
       // 全自动巡检已开启的招聘平台并抓取全新岗位入队
       const hasAdded = await autoCollectJobsForCampaign(campaign, activePlatforms, {
         capacityUrgent,
+        mustAchieve: mustAchieveActive,
         managePageCursor: true,
       })
       if (hasAdded) {
@@ -770,8 +974,9 @@ export async function runCampaignTick(): Promise<void> {
         tab.id,
         {
           type: 'EXECUTE_CAMPAIGN_TASK',
-          // 产能优先必须随任务一起下发到页面执行层，否则评分门槛还是会把对口岗位全跳过
-          payload: { task, capacityUrgent },
+          // 产能优先 / 必达必须随任务一起下发到页面执行层，
+          // 否则评分门槛还是会把已过硬筛的对口岗位全跳过
+          payload: { task, capacityUrgent, mustAchieve: mustAchieveActive },
         },
         3,
       )
@@ -813,7 +1018,10 @@ export async function runCampaignTick(): Promise<void> {
         return q && q.enabled !== false && !q.exhausted && q.applied < q.quota
       })
       if (activePlatforms.length > 0) {
-        autoCollectJobsForCampaign(campaign, activePlatforms, { capacityUrgent }).catch(() => {})
+        autoCollectJobsForCampaign(campaign, activePlatforms, {
+          capacityUrgent,
+          mustAchieve: mustAchieveActive,
+        }).catch(() => {})
       }
     }
 
@@ -850,6 +1058,8 @@ export async function runCampaignTick(): Promise<void> {
 interface CollectJobsOptions {
   /** 目标产能落后：跳过历史回收冷却、锁定高频补仓、放宽匹配分门槛 */
   capacityUrgent?: boolean
+  /** 必达模式：放宽活跃时间 / 语义闸门 / 采集上限，且关键词无效时不停机 */
+  mustAchieve?: boolean
   /** 只有「队列空」的主补仓路径可以推进页码；步骤 8 的机会性预取不该抢游标 */
   managePageCursor?: boolean
 }
@@ -879,16 +1089,31 @@ async function autoCollectJobsForCampaign(
 
   // 1. 获取默认简历与用户筛选偏好（与概览共用同一份配置，不再硬编码评分开关/最低分）
   const defaultResume = await getDefaultResume()
-  const filters: ApplyFilters = await loadSharedApplyFilters()
+  const userFilters: ApplyFilters = await loadSharedApplyFilters()
+  const mustAchieve = opts.mustAchieve === true
+  /**
+   * 必达模式只放宽「下发给采集层的副本」，用户设置本身不改写：
+   * 活跃时间、语义闸门、采集上限都是系统自己能改的参数，不能拿它们当投不满的理由。
+   */
+  const relaxedFilters = relaxFiltersForMustAchieve(userFilters, mustAchieve)
+  const filters = relaxedFilters.filters
+  if (mustAchieve && relaxedFilters.relaxed.length > 0 && !mustAchieveRelaxAnnounced) {
+    mustAchieveRelaxAnnounced = true
+    await appendCampaignLog(
+      `🎯 必达模式自动放宽采集条件：${relaxedFilters.relaxed.join('；')}（仅本轮生效，你的筛选设置保持不变；技术栈 / 方向 / 黑名单硬约束仍保留）`,
+      'info',
+    )
+  }
 
   // 2. 依据简历与筛选偏好提取意向职业清单与轮转关键词 (Feature D)
-  //    自动跳过「24 小时内被判定搜不到相关岗位」的关键词
+  //    常规模式跳过「24 小时内被判定搜不到相关岗位」的关键词；
+  //    必达模式忽略这份标记，否则当天所有词会被自己一次性锁死。
   const invalidKeywords = await loadInvalidKeywords()
   const keywordInfo = await getNextSearchKeyword(
     defaultResume,
     undefined,
     filters,
-    Object.keys(invalidKeywords),
+    shouldMarkKeywordInvalid(mustAchieve) ? Object.keys(invalidKeywords) : [],
   )
   if (keywordInfo.exhausted) {
     if (keywordInfo.reason === 'no_keywords') {
@@ -902,6 +1127,13 @@ async function autoCollectJobsForCampaign(
         '需要填写期望职位',
         '没读到可用的搜索关键词，本轮不采集岗位。请到设置里填写岗位名称，例如「php 后台开发」。',
         2,
+      )
+    } else if (shouldKeepCollectingOnNoSource(mustAchieve)) {
+      // 必达模式：关键词全被标无效属于「系统自己加的锁」，解锁后继续巡检，绝不暂停活动。
+      await clearInvalidKeywords()
+      await appendCampaignLog(
+        `🔁 必达模式：${keywordInfo.allKeywords.length} 个关键词曾被标记为无效，已解除标记并重新启用全部搜索词；目标未达成前不停机，继续换词 / 翻页 / 换平台补仓。若仍零命中，请核对各平台登录态`,
+        'warn',
       )
     } else {
       await appendCampaignLog(
@@ -942,15 +1174,19 @@ async function autoCollectJobsForCampaign(
     }
   }
 
-  // 连续多轮被“职业方向”过滤到零新增时自动放宽，改由 AI 匹配分把关，避免永远补不到货
-  const relaxCareerFilter = careerFilterMissStreak >= CAREER_RELAX_THRESHOLD
-  if (relaxCareerFilter && !careerRelaxAnnounced) {
+  // 连续多轮被“职业方向”过滤到零新增时自动放宽，改由 AI 匹配分把关，避免永远补不到货。
+  // 必达模式直接全程放宽同义匹配严格度（方向白名单与技术栈硬约束仍保留，不清空）。
+  const relaxCareerFilter = mustAchieve || careerFilterMissStreak >= CAREER_RELAX_THRESHOLD
+  if (!mustAchieve && relaxCareerFilter && !careerRelaxAnnounced) {
     careerRelaxAnnounced = true
     await appendCampaignLog(
       `🔓 已连续 ${careerFilterMissStreak} 轮因职业方向过滤导致零新增，本轮起放宽同义匹配严格度（方向白名单仍保留，明确跨技术栈岗位继续硬拦），先保证有岗位可投。建议同步检查「期望职位」是否填成了长句`,
       'warn',
     )
   }
+
+  // 必达模式放大每轮候选池：目标 80 份时，每平台每轮只抓 35 个很容易供给不足
+  const collectMaxJobs = resolveCollectMaxJobs(35, mustAchieve)
 
   // 本轮真正可用的平台数（登录正常），用于区分“没岗位”和“平台都用不了”
   let usablePlatforms = 0
@@ -1014,10 +1250,11 @@ async function autoCollectJobsForCampaign(
         {
           type: 'COLLECT_PLATFORM_JOBS',
           payload: {
-            maxJobs: 35,
+            maxJobs: collectMaxJobs,
             existingJobIds,
             targetCareers,
             relaxCareerFilter,
+            mustAchieve,
             keyword: primaryCareerKeyword,
             filters,
             retryCooldownMs,
@@ -1046,10 +1283,11 @@ async function autoCollectJobsForCampaign(
           {
             type: 'COLLECT_PLATFORM_JOBS',
             payload: {
-              maxJobs: 35,
+              maxJobs: collectMaxJobs,
               existingJobIds,
               targetCareers,
               relaxCareerFilter: true,
+              mustAchieve,
               keyword: primaryCareerKeyword,
               filters,
               retryCooldownMs,
@@ -1130,7 +1368,10 @@ async function autoCollectJobsForCampaign(
         // 搜索关键词零命中：这批卡片与目标方向完全无关，通常意味着搜索页没生效
         //（被重定向到推荐流 / 未登录降级）。继续按方向过滤只会无限空转，
         // 因此把这个词标记为无效（24 小时），让下一轮自动换词，而不是原地打转。
-        if (collected > 0 && primaryCareerKeyword && effectiveRelevantHits === 0) {
+        if (
+          collected > 0 && primaryCareerKeyword && effectiveRelevantHits === 0 &&
+          shouldMarkKeywordInvalid(mustAchieve)
+        ) {
           await markKeywordInvalid(primaryCareerKeyword)
           const verdict = collectRes?.relevanceSource === 'ai' ? 'AI 语义复核判定' : '本地职业族谱判定'
           const reason = (collectRes?.relevanceReason || '').slice(0, 100)
@@ -1228,20 +1469,52 @@ async function autoCollectJobsForCampaign(
 async function handleTaskExecutionResult(task: ApplyTask, result: ExecuteTaskResult) {
   // 1. 验证码挂起处理
   if (result.riskDetected === 'captcha') {
-    logWarn(MOD, 'handleTaskExecutionResult', `Captcha detected on ${task.platform}! Pausing campaign.`)
-    await updateTaskResult(task.id, {
-      status: 'paused',
-      failReason: '命中验证码，等待人工解除',
-    })
-    await pauseAgentCampaign('captcha')
-    await appendCampaignLog(
-      `🚨 [${task.platform}] 检测到安全验证码！AIbot 已紧急挂起，等待人工验证。若页面上看不到验证码，多半是岗位描述/页脚出现「验证码」「安全验证」等字样导致的误判——直接点「继续」或重载扩展即可恢复`,
-      'error',
-    )
-    sendNotification('⚠️ 命中安全验证码', `平台 [${task.platform}] 触发验证码，已自动挂起投递。请在浏览器中解除后点击“继续”。`, 2)
+    const current = await getCampaign()
+    const progress = current ? summarizeQuotaProgress(current) : null
+    const mustAchieveActive =
+      !!current?.capacityGoal &&
+      isMustAchieve(current.capacityGoal) &&
+      !isGoalAchieved(current.capacityGoal, progress?.applied ?? 0)
+    logWarn(MOD, 'handleTaskExecutionResult', `Captcha detected on ${task.platform}!`)
+
+    if (mustAchieveActive) {
+      /**
+       * 必达模式不整体停机：验证码是「这个平台此刻被挡住」，不是「目标可以放弃」。
+       * 把该平台临时标为耗尽（后台 10 分钟冷却后自动解除重试），其他平台继续投；
+       * 任务标 skipped 而不是 paused，冷却过后还能回收重投。
+       */
+      await updateTaskResult(task.id, {
+        status: 'skipped',
+        failReason: '命中验证码，本平台临时冷却，待重试',
+      })
+      await markPlatformExhausted(task.platform)
+      await appendCampaignLog(
+        `🚨 [${task.platform}] 检测到安全验证码！必达模式不整体停机：本平台已临时冷却（约 10 分钟后自动解除并重试），其它平台继续投递；当前平台已确认投递 ${progress?.applied ?? 0}/${current!.capacityGoal!.targetJobs}。请在浏览器中解除验证码。若页面上看不到验证码，多半是岗位描述/页脚字样导致的误判——直接点「继续」或重载扩展即可恢复`,
+        'error',
+      )
+      sendNotification(
+        '⚠️ 命中安全验证码 · 必达继续',
+        `平台 [${task.platform}] 已临时冷却，其余平台继续投递直到达标。请在浏览器里解除验证码。`,
+        2,
+      )
+      scheduleNextTick(30_000)
+    } else {
+      await updateTaskResult(task.id, {
+        status: 'paused',
+        failReason: '命中验证码，等待人工解除',
+      })
+      await pauseAgentCampaign('captcha')
+      await appendCampaignLog(
+        `🚨 [${task.platform}] 检测到安全验证码！AIbot 已紧急挂起，等待人工验证。若页面上看不到验证码，多半是岗位描述/页脚出现「验证码」「安全验证」等字样导致的误判——直接点「继续」或重载扩展即可恢复`,
+        'error',
+      )
+      sendNotification('⚠️ 命中安全验证码', `平台 [${task.platform}] 触发验证码，已自动挂起投递。请在浏览器中解除后点击“继续”。`, 2)
+    }
     sendWebhookNotification({
       title: `🚨 命中安全验证码 (${task.platform})`,
-      content: `⚠️ 平台【${task.platform}】触发图形验证码，AIbot 已安全挂起投递保护账号。\n\n- **当前岗位**：${task.jobTitle} (${task.company})\n- **处理方式**：请在浏览器中完成验证码滑块/点选，然后在插件面板点击“继续”。`,
+      content: mustAchieveActive
+        ? `⚠️ 平台【${task.platform}】触发图形验证码，该平台已临时冷却，其余平台继续投递直到目标达成。\n\n- **当前岗位**：${task.jobTitle} (${task.company})\n- **处理方式**：请在浏览器中完成验证码滑块/点选；冷却结束后会自动重试。`
+        : `⚠️ 平台【${task.platform}】触发图形验证码，AIbot 已安全挂起投递保护账号。\n\n- **当前岗位**：${task.jobTitle} (${task.company})\n- **处理方式**：请在浏览器中完成验证码滑块/点选，然后在插件面板点击“继续”。`,
       type: 'risk_warning',
       extra: { platform: task.platform, taskId: task.id },
     }).catch(() => {})
@@ -1256,7 +1529,10 @@ async function handleTaskExecutionResult(task: ApplyTask, result: ExecuteTaskRes
       failReason: '账号异常/被风控封禁',
     })
     await abortAgentCampaign('blocked')
-    await appendCampaignLog(`🛑 [${task.platform}] 账号受限告警！已紧急终止全平台投递！`, 'error')
+    await appendCampaignLog(
+      `🛑 [${task.platform}] 账号受限告警！已紧急终止全平台投递！这是必达模式下唯一的安全例外：继续点击会加重账号处罚，因此账号安全优先；目标未达成不会记为成功，人工解除账号异常后重新启动会继续按原目标投递`,
+      'error',
+    )
     sendNotification('⛔ 账号受限告警', `平台 [${task.platform}] 检测到账号受限文案，已紧急停止全部投递！`, 2)
     sendWebhookNotification({
       title: `⛔ 账号受限告警 (${task.platform})`,
@@ -1381,7 +1657,11 @@ async function handleTaskExecutionResult(task: ApplyTask, result: ExecuteTaskRes
         if (cleared > 0) {
           const campaign = await getCampaign()
           if (campaign) {
-            await autoCollectJobsForCampaign(campaign, [task.platform])
+            const mustAchieve = isMustAchieve(campaign.capacityGoal)
+            await autoCollectJobsForCampaign(campaign, [task.platform], {
+              mustAchieve,
+              capacityUrgent: mustAchieve,
+            })
             scheduleNextTick(1000)
           }
         }
@@ -1407,9 +1687,19 @@ export const campaignService = {
     await persistCapacityGoal(savedGoal)
     if (savedGoal.enabled) {
       await appendCampaignLog(
-        `🎯 目标产能已设定：${savedGoal.hours} 小时内投满 ${savedGoal.targetJobs} 份；AIbot 会按剩余时间自动压缩间隔，赶不上时明确预警`,
+        isMustAchieve(savedGoal)
+          ? `🎯 目标必达已设定：${savedGoal.hours} 小时内投满 ${savedGoal.targetJobs} 份（只认平台确认投递）。${describeMustAchieveTakeover()}`
+          : `🎯 目标产能已设定：${savedGoal.hours} 小时内投满 ${savedGoal.targetJobs} 份；AIbot 会按剩余时间自动压缩间隔，赶不上时明确预警`,
         'info',
       )
+    }
+    // 设定目标即视为授权自动接管：先把策略 / 配额 / 平台 / 日限标记一次性拉到位，
+    // 再启动调度，避免第一轮 tick 就因为「配额打满」宣告完成。
+    if (isMustAchieve(savedGoal)) {
+      const live = (await getCampaign()) || cmp
+      if (live) await applyMustAchieveTakeover(live, savedGoal, 'start')
+      await clearInvalidKeywords()
+      capacityOverrunNotifiedFor = ''
     }
     // 启动即说明运行模式，避免用户以为插件又要把浏览器抢回前台
     await appendCampaignLog(
@@ -1418,8 +1708,9 @@ export const campaignService = {
         : '🔇 后台静默运行：AIbot 只在专用后台标签页工作，不抢标签页、不聚焦窗口、不改动你正在看的页面',
       'info',
     )
-    // 启动即校验时段：非时段立刻给出明确提示，避免“开了却一直没动静”
-    if (cmp && !isWithinWindow(cmp.windows)) {
+    // 启动即校验时段：非时段立刻给出明确提示，避免“开了却一直没动静”。
+    // 必达模式会自动放行工作时段，这里不能再写「X 分钟后自动开始」误导用户。
+    if (cmp && !isMustAchieve(savedGoal) && !isWithinWindow(cmp.windows)) {
       const waitMins = Math.max(1, Math.round(getDelayUntilNextWindow(cmp.windows) / 60_000))
       const tip = `⏸ AIbot 已启动，但当前不在投递时段（${formatTimeWindows(cmp.windows)}），约 ${waitMins} 分钟后自动开始。如需立刻投递，请点击底部【工作时段】改为「24小时不限」后保存。`
       await appendCampaignLog(tip, 'warn')
@@ -1460,17 +1751,27 @@ export const campaignService = {
     await persistCapacityGoal(goal)
     lastCapacityNoticeAt = 0
     capacityMissedNotifiedFor = ''
+    capacityOverrunNotifiedFor = ''
     await appendCampaignLog(
       goal.enabled
-        ? `🎯 目标产能已更新：${goal.hours} 小时内投满 ${goal.targetJobs} 份（重新计时，AIbot 会自动调速）`
+        ? isMustAchieve(goal)
+          ? `🎯 目标必达已更新：${goal.hours} 小时内投满 ${goal.targetJobs} 份（重新计时）。${describeMustAchieveTakeover()}`
+          : `🎯 目标产能已更新：${goal.hours} 小时内投满 ${goal.targetJobs} 份（重新计时，AIbot 会自动调速）`
         : '🎯 已关闭目标产能，恢复常规拟人节奏',
       'info',
     )
     const current = await getCampaign()
 
+    // 运行中改目标也要立刻接管，不能等下一轮「配额已满」才发现目标被卡住。
+    if (isMustAchieve(goal)) {
+      if (current) await applyMustAchieveTakeover(current, goal, 'goal')
+      await clearInvalidKeywords()
+    }
+
     // 设定时立刻做「有效工时」预检：墙钟 2 小时不代表有 120 分钟能投。
     // 现场案例：19:15 设 2 小时目标，工作时段 09:00-21:00，21:00 之后 AIbot
     // 静默休眠，目标被宣告完成不了，用户到 21:15 才从日志里发现。
+    // 必达模式下工作时段已被自动放行，冲突只作为知情提示，不再报「无法达成」。
     if (goal.enabled && current) {
       const now = Date.now()
       const usableMinutes = countUsableMinutesUntil(
@@ -1479,7 +1780,14 @@ export const campaignService = {
         goal.hours * 60 * 60_000,
       )
       const fit = checkCapacityWindowFit({ hours: goal.hours, usableMinutes, now })
-      if (fit.conflict) {
+      if (isMustAchieve(goal)) {
+        await appendCampaignLog(
+          fit.conflict
+            ? `🎯 目标必达：目标窗口有 ${fit.wallMinutes - fit.usableMinutes} 分钟落在原投递时段外，已自动放行、不休眠，继续投到 ${goal.targetJobs} 份为止`
+            : `🎯 目标必达：未来 ${fit.wallMinutes} 分钟全部落在允许投递时段内，无需额外放行`,
+          'info',
+        )
+      } else if (fit.conflict) {
         await appendCampaignLog(`🎯 目标产能可达性预检：${fit.advice}`, 'warn')
         sendNotification('目标产能与工作时段冲突', fit.advice, 2)
       } else {

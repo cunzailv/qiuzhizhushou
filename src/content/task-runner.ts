@@ -15,6 +15,7 @@ import { log, logWarn, logError } from '../shared/utils/logger'
 import { getSetting } from '../shared/db/settings-store'
 import { loadSharedApplyFilters } from '../shared/agent/filter-config'
 import { CAPACITY_PRIORITY_THRESHOLD } from '../shared/agent/capacity-goal'
+import { resolveMustAchieveMatchThreshold } from '../shared/agent/must-achieve'
 import {
   collectApplyPageTexts,
   decideApplyVerification,
@@ -85,7 +86,12 @@ export interface TaskRunnerCallbacks {
   shouldCancel?: () => boolean
   /** 目标产能落后：匹配分只作排序，不再当否决闸门（采集层已做方向/技术栈硬筛） */
   capacityUrgent?: boolean
+  /** 必达模式：匹配分彻底不否决（门槛 0），只用于排序；方向 / 技术栈硬约束仍在采集层 */
+  mustAchieve?: boolean
 }
+
+/** 门槛放宽每个 content script 生命周期只播报一次，避免每个岗位刷一条日志 */
+let mustAchieveThresholdAnnounced = false
 
 function reportRunnerError(params: {
   source: string
@@ -408,12 +414,21 @@ export async function executeCampaignTask(
      * 保留 CAPACITY_PRIORITY_THRESHOLD 下限，仍能挡住评分极低的脏数据卡片。
      */
     const capacityUrgent = callbacks?.capacityUrgent === true
-    const matchThreshold = capacityUrgent
+    const mustAchieve = callbacks?.mustAchieve === true
+    const baseMatchThreshold = capacityUrgent
       ? Math.min(adaptiveThreshold, CAPACITY_PRIORITY_THRESHOLD)
       : adaptiveThreshold
-    if (capacityUrgent && matchThreshold < adaptiveThreshold) {
+    const matchThreshold = resolveMustAchieveMatchThreshold(baseMatchThreshold, mustAchieve)
+    if (mustAchieve && baseMatchThreshold > 0 && !mustAchieveThresholdAnnounced) {
+      mustAchieveThresholdAnnounced = true
       notifyCampaignLog(
-        `🎯 产能优先：本岗位已通过方向/技术栈硬筛，投递门槛临时从 ${adaptiveThreshold} 放宽到 ${matchThreshold} 分（只保留脏数据下限，不再让本地评分量纲卡住目标产能）`,
+        `🎯 必达模式：本地匹配分门槛从 ${baseMatchThreshold} 降到 ${matchThreshold}，只用于排序、不再否决岗位（采集层的方向 / 技术栈 / 黑名单硬约束仍生效，不虚报投递成功）`,
+        'info',
+      )
+    }
+    if (!mustAchieve && capacityUrgent && baseMatchThreshold < adaptiveThreshold) {
+      notifyCampaignLog(
+        `🎯 产能优先：本岗位已通过方向/技术栈硬筛，投递门槛临时从 ${adaptiveThreshold} 放宽到 ${baseMatchThreshold} 分（只保留脏数据下限，不再让本地评分量纲卡住目标产能）`,
         'info',
       )
     }

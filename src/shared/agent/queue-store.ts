@@ -688,3 +688,25 @@ export async function markPlatformExhausted(platform: PlatformId): Promise<void>
   }
   await saveCampaign(campaign)
 }
+
+/**
+ * 解除指定平台的日限耗尽标记，让它重新参与调度。
+ * 必达模式下「所有平台都 exhausted」不能成为停机理有 —— 冷却一段时间后
+ * 由后台显式调用此函数重试，而不是永远退出。
+ */
+export async function clearPlatformExhausted(platforms: PlatformId[]): Promise<number> {
+  if (!platforms || platforms.length === 0) return 0
+  const ids = new Set(platforms)
+  const campaign = await getCampaign()
+  if (!campaign) return 0
+  let cleared = 0
+  for (const pid of Object.keys(campaign.quotas) as PlatformId[]) {
+    const q = campaign.quotas[pid]
+    if (ids.has(pid) && q?.exhausted) {
+      q.exhausted = false
+      cleared++
+    }
+  }
+  if (cleared > 0) await saveCampaign(campaign)
+  return cleared
+}

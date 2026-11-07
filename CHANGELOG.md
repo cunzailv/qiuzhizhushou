@@ -1,9 +1,16 @@
 # Changelog
 
-## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用、智能中控对话台 Tool-Calling Agent、异常留痕跨上下文统一、unslop 界面设计体系、信息架构分层收纳、图标入口直达右侧侧栏、投递确认层与行为日志历史回看、搜索方向生效与技术栈硬约束、后台静默运行不抢焦点、休息状态机与产能修复、目标产能设定、目标产能闭环修复（供给死锁 / 产能优先 / 时段冲突）
+## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用、智能中控对话台 Tool-Calling Agent、异常留痕跨上下文统一、unslop 界面设计体系、信息架构分层收纳、图标入口直达右侧侧栏、投递确认层与行为日志历史回看、搜索方向生效与技术栈硬约束、后台静默运行不抢焦点、休息状态机与产能修复、目标产能设定、目标产能闭环修复（供给死锁 / 产能优先 / 时段冲突）、目标必达模式（设定即承诺，未达成不停机）
 
 ### Added
 
+- **目标必达模式（产品语义变更：「设定了目标必须要成功，哪怕是海投」）**：`CapacityGoal` 新增 `mustAchieve`，默认开启、老数据缺字段按开启处理；UI 折叠组新增「必达模式」开关，首屏显示「必达 · 未达成不停机」，关闭后回到旧的截止节奏语义。设定目标不再接受「不保证达标」的结论
+- **自动接管所有可控参数**：新增 `src/shared/agent/must-achieve.ts` 纯函数底座（`planMustAchieveQuotas` / `relaxFiltersForMustAchieve` / `shouldBypassWorkWindow` / `resolveMustAchieveMatchThreshold` / `shouldBypassRelevanceGate` / `shouldKeepCollectingOnNoSource` / `shouldMarkKeywordInvalid` / `resolveCollectMaxJobs`）。后台 `applyMustAchieveTakeover()` 在启动与运行中改目标时自动切海投、抬配额（目标 +25% 至少 10 份余量，只升不降）、开启全部平台、解除日限标记、清掉 24 小时无效关键词锁、清掉遗留休息状态
+- **达成才停机**：`isCampaignFinished()` 在必达目标未达成时恒为 `false`；超时只报进度事实、不再返回 `missed`；工作时段自动临时放行（不改写用户设置）；全程跳过模拟休息、锁定 30 秒高频补仓；`activePlatforms=0` 时按 10 分钟持久化冷却解除标记继续换平台。只有平台已确认投递数达标才显式停机 + 通知
+- **执行层门槛彻底放开**：必达模式下本地匹配分门槛降到 0（只排序不否决）、活跃时间临时放宽到「不限时间」、本地语义硬闸门降级、每平台采集上限提到 50；技术栈 / 岗位方向 / 黑名单硬约束仍保留，不为了凑数乱投前端或 Java
+- **风险例外诚实留痕**：验证码不再整体停机 —— 该平台临时标耗尽、其余平台继续投递、任务标 `skipped` 待冷却后回收；账号受限仍保留安全熔断，日志明确写明这是唯一例外且目标不会记为成功
+- **回归测试**：新增 `tests/must-achieve.test.ts`（25 例：配额规划与幂等、上限不压小已有配额、工作时段 / 采集 / 门槛 / 关键词锁、`isCampaignFinished` 真实行为、`clearPlatformExhausted` 落盘、全链路接线静态契约），并更新 `tests/capacity-goal.test.ts`（+6 例必达语义）与 `tests/capacity-delivery-loop.test.ts` 静态契约。测试总量 1189 → 1220（83 → 84 文件），`tsc` 0 error、`eslint` 0 error、全量 E2E 通过
+- **纯函数缺陷修正**：`planMustAchieveQuotas()` 的单平台上限只约束新分摊值，不再把用户已设的更高配额压小（必达是接管加码，不是覆盖配置）
 - **目标产能闭环（现场日志「设了目标却一个都投不出去」）**：`capacityUrgent` 成为贯穿调度、补仓、执行层的统一开关，`isCapacityUrgent()` / `CAPACITY_PRIORITY_THRESHOLD` / `hasWindowConflict()` / `checkCapacityWindowFit()` / `countUsableMinutesUntil()` 均为可单测纯函数；`blocked` 状态表示「墙钟还有时间、实际 0 分钟可投」
 - **设定时预检 + 一键放行**：`setCapacityGoal` 立即算目标窗口内的有效工时，冲突就日志 + 通知告警；首屏目标产能卡片提供「解除时段限制并继续」，直接写 `saveTimeWindows` + `UPDATE_CAMPAIGN_WINDOWS` + 唤醒后台（折叠组里的「24小时不限」仍只是填表单，文案不再谎称一键生效）
 - **诊断口径归真**：采集层回传 `dedupedOnPage` / `truncatedByCap` / `tasksProduced` / `duplicatesAtAppend` / `filteredOther`，「本轮未新增岗位」日志能区分「筛选没过」与「过了筛选但被历史去重挡下」；`CampaignStats` 透传 `windows`，面板与后台用同一份时段算可达性
@@ -11,7 +18,7 @@
 - **目标产能「N 小时投满 M 份」**：新增 `src/shared/agent/capacity-goal.ts`（`evaluateCapacityGoal` / `resolvePacingInterval` / `describeCapacityStatus`）。可设 1-24 小时（0.5 步进）与 1-500 份；首屏常驻进度条显示已投/目标、距截止剩余时间、每份最多可花秒数
 - **自动调速**：按剩余时间/剩余份数压缩拟人间隔（**最低 8 秒**防风控）；`at-risk` 时自动跳过模拟真人休息。赶不上时每 10 分钟给可操作建议，到点未达成一次性诊断通知，不会静默
 - **倒计时持久化**：目标与 `startedAt` 写进本轮 campaign（`persistCapacityGoal`，与日志共用串行链）；参数不变则暂停 / SW 重启不重置，改参数才重新计时。`SET_CAPACITY_GOAL` 路由支持运行中即时修改
-- **诚实边界**：只统计平台已确认投递数，岗位供给与平台风控不可控，因此定位为「截止节奏管理」而非保证达标；目标超过已开启平台配额合计时明确提示先调高配额
+- **旧版诚实边界（已被上方「目标必达模式」取代）**：只统计平台已确认投递数；当时的定位是「截止节奏管理」而非保证达标，目标超过已开启平台配额合计时提示先调高配额。现在配额会被必达模式自动抬高，超时不停机，但「只认平台确认、不虚报成功」这条底线不变
 - **回归测试**：新增 `tests/capacity-goal.test.ts`（23 例：归一化边界、五种状态、预测与调速下限、倒计时持久化、并发写入、静态契约）。测试总量 1142 → 1165（81 → 82 文件）
 - **休息状态机**：新增 `src/shared/agent/rest-policy.ts`（`decideRest` / `resolveRestPolicy` / `pickRestThreshold` / `pickRestDurationMs` / `estimateRemainingMs`）。休息批次与时长跟随投递策略：精投连投 15-25 份休 8-20 分钟，海投连投 30-45 份只休 3-6 分钟；阈值一次生成后持久化，不再每 tick 重随机
 - **原子落盘**：`queue-store.ts` 新增 `persistRestState()`，与 `appendCampaignLog` 共用串行写入链；`Campaign` 新增 `restThreshold`。休息到期返回 `resume` 后**本轮立即继续投递**，休息中日志按 10 分钟节流

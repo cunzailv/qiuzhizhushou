@@ -1,14 +1,17 @@
 /**
- * 目标产能：「N 小时内必须投满 M 份简历」。
+ * 目标产能：「N 小时内投满 M 份简历」，默认开启**必达模式**。
  *
- * 诚实边界：系统不能凭空变出岗位，也无法绕过平台登录态 / 风控 / 岗位供给，
- * 所以这里做的是**可达性预判 + 自动调速 + 到点诊断**，而不是虚假的「保证达标」：
- *  1. 按剩余时间 / 剩余份数算出「每份最多能花多久」，压缩拟人间歇（有防风控下限）；
- *  2. 进度落后时自动跳过模拟真人休息，把时间还给投递；
- *  3. 按当前节奏预测完成时刻，赶不上就明确预警并给出可操作的建议；
- *  4. 到点没完成一次性给诊断，不静默、不刷屏。
+ * 必达模式是产品承诺，不是「尽力而为的节奏建议」：
+ *  1. 设定目标即自动接管所有可控参数（切海投、抬配额、开全平台、放行工作时段、
+ *     关闭模拟休息、压缩间隔但守住防风控下限）；
+ *  2. 目标未达成前**不允许自行停机**：不计超时、不因队列空 / 配额满 / 日限而宣告完成；
+ *     换页、换词、换平台、回收历史跳过岗位，一直跑到平台确认投递数达标；
+ *  3. 只有平台侧物理挡死（登录失效 / 风控 / 全平台日限）才会进入「受阻但持续重试」，
+ *     并明确报出卡在哪一步，绝不虚报成功；
+ *  4. 达成后明确停机 + 通知。
  *
  * 倒计时从**本轮 campaign 启动**开始，参数不变则重启 / 暂停后沿用同一个 startedAt。
+ * 超过设定时限只作为进度参考，不再作为终止条件。
  */
 import type { RestPolicy } from './rest-policy'
 import { estimateRemainingMs } from './rest-policy'
@@ -17,16 +20,23 @@ export const CAPACITY_GOAL_KEY = 'aibotCapacityGoal'
 
 export interface CapacityGoal {
   enabled: boolean
-  /** 时限（小时） */
+  /** 时限（小时）；必达模式下超时不终止，只作进度参考 */
   hours: number
   /** 目标份数（平台已确认投递数） */
   targetJobs: number
+  /**
+   * 必达模式：目标未达成前自动接管策略 / 配额 / 平台 / 时段 / 休息，且不允许自行停机。
+   * 可选字段是为了兼容老数据；**不写就按 true 处理** —— 「设定了目标」本身就意味着要达成。
+   * 只有用户显式关掉（false）才回到「尽力而为的节奏建议」语义。
+   */
+  mustAchieve?: boolean
 }
 
 export const DEFAULT_CAPACITY_GOAL: CapacityGoal = {
   enabled: false,
   hours: 8,
   targetJobs: 80,
+  mustAchieve: true,
 }
 
 export const MIN_CAPACITY_HOURS = 1
@@ -62,7 +72,23 @@ export function normalizeCapacityGoal(raw: unknown): CapacityGoal {
     targetJobs: Number.isFinite(rawTarget)
       ? Math.min(MAX_CAPACITY_TARGET, Math.max(MIN_CAPACITY_TARGET, Math.round(rawTarget)))
       : DEFAULT_CAPACITY_GOAL.targetJobs,
+    mustAchieve: source.mustAchieve !== false,
   }
+}
+
+/** 当前是否处于「未达成就不许停」的必达模式 */
+export function isMustAchieve(goal: CapacityGoal | null | undefined): boolean {
+  return !!goal?.enabled && goal.mustAchieve !== false
+}
+
+/** 只认平台已确认投递数，绝不把「点了按钮但没确认」算进目标 */
+export function isGoalAchieved(goal: CapacityGoal, applied: number): boolean {
+  return Math.max(0, applied) >= goal.targetJobs
+}
+
+/** 一行说明自动接管了什么，UI / 日志 / 通知共用，避免文案漂移 */
+export function describeMustAchieveTakeover(): string {
+  return '自动切海投 · 自动抬配额 · 开启全部平台 · 放行工作时段 · 关闭模拟休息 · 放宽评分门槛（技术栈硬约束仍保留） · 达成前不停机'
 }
 
 export interface CapacityContext {
@@ -80,6 +106,8 @@ export interface CapacityContext {
   restEnabled: boolean
   /** 目标窗口内实际允许投递的分钟数（由 countUsableMinutesUntil 算）；不给则按墙钟时间 */
   usableMinutes?: number
+  /** 必达模式：超过时限继续加速，不返回 missed */
+  mustAchieve?: boolean
 }
 
 /** blocked = 目标窗口与工作时段完全错开，墙钟上「还有时间」其实一分钟都投不了 */
@@ -165,6 +193,16 @@ export function evaluateCapacityGoal(input: CapacityContext): CapacityEvaluation
   }
 
   if (remainingMs <= 0) {
+    if (input.mustAchieve) {
+      return {
+        ...base,
+        // 必达模式没有「到点放弃」这个状态：超时只作为进度参考，
+        // 继续按 at-risk 压缩间隔、跳过休息，直到平台确认投递数达标。
+        status: 'at-risk',
+        shouldSkipRest: true,
+        advice: `已超过 ${goal.hours} 小时时限，当前 ${applied}/${targetJobs}，还差 ${remainingJobs} 份；必达模式不会自行停机，继续换词 / 翻页 / 换平台投递直到达成`,
+      }
+    }
     return {
       ...base,
       status: 'missed',
@@ -265,7 +303,9 @@ export function describeCapacityStatus(evaluation: CapacityEvaluation, goal: Cap
     case 'blocked':
       return '目标与工作时段冲突 · 当前无法投递'
     case 'at-risk':
-      return `进度落后 ${evaluation.targetJobs - evaluation.remainingJobs}/${evaluation.targetJobs} · 已自动加速`
+      return evaluation.remainingMs <= 0
+        ? `已超时 ${evaluation.targetJobs - evaluation.remainingJobs}/${evaluation.targetJobs} · 必达模式继续投递`
+        : `进度落后 ${evaluation.targetJobs - evaluation.remainingJobs}/${evaluation.targetJobs} · 已自动加速`
     default:
       return `${evaluation.targetJobs - evaluation.remainingJobs}/${evaluation.targetJobs} 份 · ${goal.hours} 小时内`
   }

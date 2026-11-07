@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1189%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1220%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -221,8 +221,10 @@
 
 > 说明：配额只统计「平台侧已确认」的投递（`done`）。点了按钮但平台没确认的任务不计入配额，这是防虚报的刻意设计；日志会明确标为「未记为投递成功」。
 
-### 🎯 目标产能 · 设定「N 小时投满 M 份」（2026-11）
+### 🎯 目标必达 · 设定「N 小时投满 M 份」（2026-11）
 在 AIbot →「复盘与维护工具」里设定小时数（1-24，支持 0.5 步进）与目标份数（1-500），点「保存并启用」。设定后首屏出现常驻进度条，显示已投 / 目标、距截止剩余时间、每份最多能花多少秒。
+
+**设定目标 = 系统承诺达成**，默认开启「必达模式」（可手动关闭，关闭后回到尽力而为的节奏建议）。未达成前 AIbot 不自行停机，所有插件自己能改的参数都会被自动接管：自动切海投、抬配额、开启全部平台、放行工作时段、关闭模拟休息、放宽评分门槛与采集条件。`mustAchieve` 老数据缺字段时默认按开启处理。
 
 | 层 | 说明 |
 |---|---|
@@ -231,9 +233,13 @@
 | **倒计时持久化** | 目标与 `startedAt` 写进本轮 campaign（`persistCapacityGoal`，与日志共用串行写入链）；参数不变则暂停 / Service Worker 重启不重置倒计时，改参数才重新计时 |
 | **预警与诊断** | 赶不上时每 10 分钟给一次可操作建议（放宽岗位名称 / 多开平台 / 下调目标，或提示目标超过配额合计）；到点未达成只通知一次，指引去查「未记为投递成功」「没有发现新岗位」与登录态日志 |
 | **运行中改目标** | `SET_CAPACITY_GOAL` 路由即时写设置 + campaign + 日志，并唤醒下一轮调度，不用重启 AIbot |
-| **回归测试** | `tests/capacity-goal.test.ts`（23 例：归一化边界、状态机、预测与调速下限、倒计时持久化、并发写入、静态契约）+ `tests/capacity-delivery-loop.test.ts`（24 例：产能闭环） |
+| **必达接管** | 新增 `src/shared/agent/must-achieve.ts`（`planMustAchieveQuotas` / `relaxFiltersForMustAchieve` / `shouldBypassWorkWindow` / `resolveMustAchieveMatchThreshold` / `shouldKeepCollectingOnNoSource`）。启动或改目标时 `applyMustAchieveTakeover()` 一次性把策略 / 配额 / 平台开关 / 日限标记拉到位，配额留 25%（至少 10 份）余量且只升不降 |
+| **达成才停** | `isCampaignFinished()` 在必达目标未达成时恒为 `false`：超时不返回 `missed`、全平台日限耗尽不判完成、关键词全被标无效不暂停、`activePlatforms=0` 时按 10 分钟冷却自动解除标记继续换平台；只有平台确认投递数达标才显式停机并通知 |
+| **可控门槛全放开** | 必达模式全程开启产能优先：本地匹配分门槛降到 0（只排序不否决）、活跃时间临时放宽到「不限时间」、本地语义硬闸门降级、每平台每轮采集上限 50、跳过历史回收冷却、锁定 30 秒高频补仓。用户设置本身不改写 |
+| **风险例外** | 验证码不再整体停机：该平台临时冷却、其余平台继续投；账号受限仍保留安全熔断（继续点击会加重账号处罚），日志明确写明这是唯一例外且目标不会记为成功 |
+| **回归测试** | `tests/capacity-goal.test.ts`（归一化 / 状态机 / 必达超时不停机 / 倒计时持久化 / 静态契约）+ `tests/capacity-delivery-loop.test.ts`（24 例：产能闭环）+ `tests/must-achieve.test.ts`（25 例：自动接管纯函数、`isCampaignFinished` 真实行为、全链路接线） |
 
-> 诚实边界：这是**截止节奏管理**，不是「保证达标」。岗位供给、登录态、平台风控都不可控，系统只做可达性预判、自动调速与到点诊断，不会为了数字好看把「点了按钮但平台没确认」算成投递成功。
+> 诚实边界：**必达是执行承诺，不是虚报数字**。只认平台侧已确认投递数，点了按钮但平台没确认永远不算成功；技术栈 / 岗位方向 / 黑名单硬约束保留，不会为了凑数乱投前端或 Java；间隔压缩仍守 8 秒防风控下限。平台登录失效、验证码与账号受限属于平台侧物理阻断，系统会持续重试并明确留痕卡在哪一步，不会静默停机，也不会把目标写成「已达成」。
 
 #### 产能闭环修复 · 为什么「设了目标却一个都投不出去」（2026-11-07 现场日志）
 
