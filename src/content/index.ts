@@ -1,6 +1,7 @@
 // Content script entry point - injected into Boss Zhipin pages
 import { getActivePlatform } from '../shared/platform'
 import type { PlatformAdapter } from '../shared/platform/types'
+import { resolvePanelPresence } from '../shared/assistant-entry'
 import { executeCampaignTask } from './task-runner'
 import { appendTasksToCampaign } from '../shared/agent/queue-store'
 import { setPlatformName } from './inject-ui'
@@ -249,10 +250,12 @@ function shutdownAssistantFromPanel(): void {
 }
 
 /**
- * 点击扩展图标 / 浮球：展开侧栏 ⇄ 收起为浮球。
+ * 点击扩展图标：展开侧栏 ⇄ 收起为浮球。
+ * ensureExpanded=true 时只展开不切换，供「去招聘网站展开侧栏」的兜底路径使用：
+ * 此时 background 已写入 expanded，若再 toggle 反而会把侧栏收成浮球。
  * 非招聘页（init 因 pageType 不支持而跳过）也会兜底创建面板。
  */
-async function toggleAssistantPanelPresence(): Promise<void> {
+async function toggleAssistantPanelPresence(ensureExpanded = false): Promise<void> {
   if (!adapter) adapter = await getActivePlatform()
   if (!panelHost?.isConnected) {
     panelHost = createFloatingPanel()
@@ -266,7 +269,7 @@ async function toggleAssistantPanelPresence(): Promise<void> {
       isChatPage: pageType === 'chat',
     })
   }
-  const next: PanelState = assistantState.panelState === 'expanded' ? 'bubble' : 'expanded'
+  const next: PanelState = resolvePanelPresence(assistantState.panelState, ensureExpanded)
   setPanelState(panelHost, next)
   writeAssistantState({ panelState: next })
 }
@@ -330,8 +333,9 @@ async function init(): Promise<void> {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // 点击扩展图标：展开侧栏 ⇄ 收起为浮球
   if (message.type === 'TOGGLE_ASSISTANT_PANEL') {
-    log(MOD, 'onMessage', 'TOGGLE_ASSISTANT_PANEL')
-    void toggleAssistantPanelPresence().catch(() => {})
+    const ensureExpanded = message.payload?.ensureExpanded === true
+    log(MOD, 'onMessage', `TOGGLE_ASSISTANT_PANEL ensureExpanded=${ensureExpanded}`)
+    void toggleAssistantPanelPresence(ensureExpanded).catch(() => {})
     sendResponse({ success: true })
     return true
   }

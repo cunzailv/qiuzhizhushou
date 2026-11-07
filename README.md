@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1038%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1044%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -92,9 +92,10 @@
 
 | 能力 | 说明 |
 |------|------|
-| **点击图标唤起侧栏** | 点插件图标即在当前网页右侧展开整屏高侧栏（宽 440px，留 8px 边距），**正文就是原来的完整助手面板**（概览 / AIbot / 管家 / 简历 / 追踪 / 设置，同源 iframe 复用 popup 应用），标题栏只保留 ⚙ 置顶 ⏻ × 四个操作 |
-| **入口只回助手，绝不跳后台** | 入口决策收敛到 `src/shared/assistant-entry.ts`：只有普通 `http(s)` 网页才尝试注入侧栏；`chrome://` / 扩展页（`chrome-extension://`）等不可注入场景、或注入失败，一律打开 / 复用「独立助手面板」标签页（`src/popup/index.html?standalone=1`），**不再打开管理后台**。编排依赖签名里根本没有「打开后台」这个函数，从设计上杜绝把用户困在后台页 |
-| **后台页有回家入口** | 管理后台左侧栏顶部新增「返回助手侧栏」（找到 / 新开招聘网站标签页并展开侧栏）与「打开独立助手面板」两个按钮；独立助手面板顶部提示 + 右上角「展开侧栏」一键回到网页侧栏 |
+| **点击图标 = 右侧整高侧栏** | 点插件图标在**招聘网站页面右侧**展开整屏高侧栏（宽 440px，留 8px 边距），正文就是完整助手面板（概览 / AIbot / 管家 / 简历 / 追踪 / 设置，同源 iframe 复用 popup 应用），标题栏只保留 ⚙ 置顶 ⏻ × 四个操作。**不会弹出独立整页面板** |
+| **入口只回助手，绝不跳后台** | 入口决策收敛到 `src/shared/assistant-entry.ts`：只有「可注入 + 当前就是招聘网站」才在当前页展开侧栏；新标签页 / `chrome://` / 扩展页 / 任意普通网页，一律激活已打开的招聘网站标签页（没有则新开平台首页）并在右侧展开侧栏。`?standalone=1` 独立面板**只在两条路都失败时才兜底**，管理后台永远不作为兜底。编排依赖签名里根本没有「打开后台」这个函数 |
+| **注入不再误判失败** | 扩展刚装 / 刚重载时 content script 的 crxjs loader 会异步 import 多个 chunk，旧版固定等 300ms 就判定失败并回退成独立面板。现改为动态注入后最多轮询 5 次 × 250ms 等消息端就绪；兜底路径额外发「确保展开」消息（`ensureExpanded`），避免和已写入的 `expanded` 状态打架把侧栏收成浮球 |
+| **后台页有回家入口** | 管理后台左侧栏顶部「返回助手侧栏」（找到 / 新开招聘网站标签页并展开侧栏）与「打开独立助手面板」；独立助手面板顶部提示 + 右上角「展开侧栏」一键回到网页侧栏 |
 | **两态收起（无小浮窗）** | `expanded`（整高侧栏）→ 点右上角 `×` → `bubble`（贴右侧居中的半圆浮球）→ 点浮球 → 回到整高侧栏。另有 `collapsed`（旧版窄把手，兼容历史数据）与 `closed`（关闭并停止 AIbot，入口仍是浮球）。历史残留的 `floating` 会自动归一为 `expanded`；侧栏固定在右侧，不能拖动脱离 |
 | **叉掉 ≠ 停止** | 侧栏右上角 `×` 只是收起为浮球，AIbot 继续运行；停止请点标题栏的 `⏻` 或 AIbot 配置页「停止」 |
 | **置顶常驻** | 标题栏 `📌` 打开后不再自动收起，新页面也直接展开侧栏 |
@@ -273,7 +274,7 @@ npm run build
 | 样式 | Tailwind CSS 3 + shadow DOM 注入 |
 | 数据 | Dexie (IndexedDB) + chrome.storage |
 | AI | OpenAI / DeepSeek / 自定义兼容接口 + 本地语义精筛 + AI SDK 7 tool-calling 循环 |
-| 测试 | Vitest（1038 用例 / 76 文件）+ Playwright（E2E） |
+| 测试 | Vitest（1044 用例 / 76 文件）+ Playwright（E2E） |
 | UI 组件 | Lucide React + Recharts + react-markdown / remark-gfm |
 
 ## 📁 项目结构
@@ -321,8 +322,8 @@ docs/EXTERNAL_AI.md     # 外部 AI 接入完整指南
 ## 🧪 测试与验收
 
 ```bash
-npm test                                       # tsc -b + vite build + 全部 1038 个测试用例
-npx vitest run                                  # 全量单测/E2E：76 文件 / 1038 用例
+npm test                                       # tsc -b + vite build + 全部 1044 个测试用例
+npx vitest run                                  # 全量单测/E2E：76 文件 / 1044 用例
 npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用例（基线 110 + 新增 36）
 ```
 
@@ -335,6 +336,7 @@ npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用�
 
 | 版本 | 内容 |
 |------|------|
+| `未发布` | 🧭 点击插件图标不再弹独立整页面板：一律落到招聘网站右侧整高侧栏，动态注入改轮询等待，新增 6 例入口契约测试 |
 | `未发布` | 🗂️ 信息架构分层收纳：首屏只留「现在做什么 / 现在怎么样了」，低频设置进 Disclosure，功能一个不删；新增 17 例信息架构契约测试 |
 | `未发布` | 🎨 按 unslop 完成全量界面收敛：石墨中性底座 + 单一压暗橙 accent、去掉渐变/发光/毛玻璃/emoji 图标/循环动效、落地队列进度刻度线签名，新增 8 例设计契约测试 |
 | `未发布` | 🩺 异常留痕跨上下文统一：页面域异常不再丢失，对话台全链路降级留痕、日志脱敏、诊断中心新增「对话台」筛选 |

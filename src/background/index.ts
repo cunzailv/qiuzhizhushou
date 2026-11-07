@@ -899,45 +899,77 @@ async function focusOrCreateAssistantPanel(): Promise<void> {
   await chrome.tabs.create({ url: `${POPUP_PAGE_URL}?standalone=1` })
 }
 
-/** 「返回助手侧栏」：激活已有招聘网站标签页并展开侧栏；没有则新开平台首页 */
+/** 「返回助手侧栏」/ 点图标兜底：激活已有招聘网站标签页并展开侧栏；没有则新开平台首页 */
 async function openJobSiteWithSidebar(): Promise<boolean> {
-  const entries = getPlatformEntries()
-  const isJobSite = (url: string) => entries.some((entry) => entry.matchesUrl(url))
-  const tabs = await chrome.tabs.query({ currentWindow: true })
-  const existingId = findJobSiteTabId(tabs, isJobSite)
+  try {
+    const entries = getPlatformEntries()
+    const isJobSite = (url: string) => entries.some((entry) => entry.matchesUrl(url))
+    const tabs = await chrome.tabs.query({ currentWindow: true })
+    const existingId = findJobSiteTabId(tabs, isJobSite)
 
-  // 写统一控制状态，所有招聘网站标签页会通过 storage.onChanged 同步展开
-  await patchAssistantState({ panelState: 'expanded' })
+    // 写统一控制状态，所有招聘网站标签页会通过 storage.onChanged 同步展开
+    await patchAssistantState({ panelState: 'expanded' })
 
-  if (existingId !== null) {
-    await chrome.tabs.update(existingId, { active: true })
+    if (existingId !== null) {
+      await chrome.tabs.update(existingId, { active: true })
+      // 扩展重载后旧标签页的 content script 可能已失联，storage 广播收不到；补一次确保展开
+      await ensureSidebarInTab(existingId)
+      return true
+    }
+    const homeUrl = entries[0]?.homeUrl || 'https://www.zhipin.com/'
+    // 新标签页由 manifest 自动注入 content script，init 读到 expanded 会自行展开
+    await chrome.tabs.create({ url: homeUrl })
     return true
+  } catch (error) {
+    logError(MOD, 'openJobSiteWithSidebar', 'Unable to open job site', error)
+    return false
   }
-  const homeUrl = entries[0]?.homeUrl || 'https://www.zhipin.com/'
-  await chrome.tabs.create({ url: homeUrl })
-  return true
 }
 
-async function toggleAssistantPanelInTab(tabId: number): Promise<boolean> {
+/**
+ * 向招聘网站标签页发送侧栏消息；content script 未就绪时动态注入并轮询等待。
+ *
+ * 动态注入的 crxjs loader 会异步 import 多个 chunk，固定等 300ms 经常不够，
+ * 旧版因此误判失败并回退到独立整页面板。ensureExpanded=true 时只展开不切换，
+ * 用于「去招聘网站展开侧栏」的兜底路径，避免和 storage 广播的 expanded 打架。
+ */
+async function sendPanelAction(tabId: number, ensureExpanded: boolean): Promise<boolean> {
+  const send = () => chrome.tabs.sendMessage(tabId, {
+    type: 'TOGGLE_ASSISTANT_PANEL',
+    payload: { ensureExpanded },
+  })
   try {
-    await chrome.tabs.sendMessage(tabId, { type: 'TOGGLE_ASSISTANT_PANEL' })
+    await send()
     return true
   } catch {
-    // content script 尚未注入（非招聘页 / 刚装扩展），动态注入后重试一次
+    // content script 尚未注入（刚装扩展 / 刚重载 / 页面先于扩展打开）
     const scripts = (chrome.runtime.getManifest().content_scripts ?? [])
       .flatMap((entry) => entry.js ?? [])
     if (scripts.length === 0) return false
     try {
       await chrome.scripting.executeScript({ target: { tabId }, files: scripts })
-      await new Promise((resolve) => setTimeout(resolve, 300))
-      await chrome.tabs.sendMessage(tabId, { type: 'TOGGLE_ASSISTANT_PANEL' })
-      return true
     } catch (error) {
       logError(MOD, 'action.onClicked', 'Unable to inject assistant panel', error)
       return false
     }
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 250))
+      try {
+        await send()
+        return true
+      } catch {
+        // 消息端还没注册完，继续等下一轮
+      }
+    }
+    return false
   }
 }
+
+/** 点图标：在当前招聘网站标签页切换侧栏（展开 ⇄ 浮球） */
+const toggleAssistantPanelInTab = (tabId: number) => sendPanelAction(tabId, false)
+
+/** 兜底：在已有招聘网站标签页确保右侧侧栏展开，不切换 */
+const ensureSidebarInTab = (tabId: number) => sendPanelAction(tabId, true)
 
 // 「侧栏」按钮：在网页右侧唤起整高侧栏（面板正文就是完整的助手面板）
 // 受限页面（chrome:// / 扩展页）注入不了时由调用方去招聘网站展开，绝不打开管理后台
@@ -951,9 +983,15 @@ async function openSidebarInActiveTab(): Promise<boolean> {
 }
 
 chrome.action.onClicked.addListener((tab) => {
+  // 只有招聘网站页面才在当前页注入侧栏；其余场景（新标签页 / 任意网页 / 扩展页）
+  // 一律去招聘网站展开右侧整高侧栏，不再弹独立整页面板。
+  const entries = getPlatformEntries()
+  const isJobSite = (url: string) => entries.some((entry) => entry.matchesUrl(url))
   void runAssistantEntry(tab.url ?? '', extensionOrigin(), {
+    isJobSite,
     tryToggleSidebar: () =>
       tab.id ? toggleAssistantPanelInTab(tab.id) : Promise.resolve(false),
+    openJobSiteSidebar: openJobSiteWithSidebar,
     openAssistantPanel: focusOrCreateAssistantPanel,
   }).catch((error) => logError(MOD, 'action.onClicked', 'Unable to open assistant', error))
 })

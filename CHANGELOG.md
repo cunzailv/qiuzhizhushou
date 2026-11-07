@@ -1,9 +1,10 @@
 # Changelog
 
-## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用、智能中控对话台 Tool-Calling Agent、异常留痕跨上下文统一、unslop 界面设计体系、信息架构分层收纳
+## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用、智能中控对话台 Tool-Calling Agent、异常留痕跨上下文统一、unslop 界面设计体系、信息架构分层收纳、图标入口直达右侧侧栏
 
 ### Added
 
+- **侧栏形态决策单一真源**：`assistant-entry.ts` 新增纯函数 `resolvePanelPresence(current, ensureExpanded)`，区分「点图标切换展开 ⇄ 浮球」与「兜底路径只确保展开」；`tests/assistant-entry.test.ts` 扩到 22 例（新增 `job-site-sidebar` 编排、非招聘网站不注入、独立面板只作为最后兜底、静态链路契约）。测试总量 1038 → 1044
 - **分层收纳底座**：新增 `src/components/ui/disclosure.tsx`（`type="button"` + `aria-expanded` + 默认收起 + 无 emoji / 渐变 / 循环动效）。首屏只回答「现在做什么 / 现在怎么样了」，低频设置全部可展开，**功能一个不删**
 - **回归测试**：新增 `tests/popup-information-architecture.test.ts`（17 例：Disclosure 无障碍契约 / 标签成对闭合 / AIbot 至少 15 个控件折叠、管家至少 10 个 / E2E 关键文案必须在深度 0 / 低频按钮按事件处理器定位必须在深度 > 0 / 功能文案一个没删 / 行为日志默认展开 / 概览与外壳去冗余）。测试总量 1021 → 1038（75 → 76 文件）
 
@@ -29,6 +30,10 @@
 - **回归测试**：新增 `tests/error-report.test.ts`（10 例：转发成功不双写 / 转发抛错或 success:false 的兜底 / storage 不可用回退 Dexie / 并发写入不互相覆盖 / 去重 / 脏载荷 / 合并读取 / 清空 / 脏共享数据）
 
 ### Changed
+
+- **点击图标的兜底从「独立整页面板」改为「去招聘网站展开右侧侧栏」**：`planAssistantEntry` 现在要求「可注入 + 当前就是招聘网站」才走 `try-sidebar`；新标签页 / 任意普通网页 / `chrome://` / 扩展页 / 注入失败，一律由 `openJobSiteWithSidebar()` 激活已有招聘网站标签页（没有则新开平台首页）并展开侧栏。`?standalone=1` 只在两条路都失败时才兜底，管理后台仍绝不作为兜底
+- **动态注入改轮询**：`sendPanelAction()` 统一封装消息发送，注入 crxjs loader 后最多轮询 5 次 × 250ms 等消息端就绪，替代固定 300ms；`openJobSiteWithSidebar` 对已有招聘网站标签页补发 `ensureExpanded: true`，避免与写入的 `expanded` 状态打架把侧栏收成浮球；新增失败时返回 `false` 让编排能继续兜底
+- **文档同步**：README 的 F 层入口表、测试徽章 1038 → 1044、更新日志；CHANGELOG 补 Added / Changed / Fixed
 
 - **常驻头部与概览首屏**：`App.tsx` 一行放完品牌 + 平台状态 + 导航，平台名只在下拉里出现一次（删掉重复的平台徽章、副标题与「未检测到招聘平台页面」提示）；`PlatformShortcuts.tsx` 的 5 个平台直达卡收进「打开平台」，同时移除品牌色映射与 hover 位移；`Dashboard.tsx` 的 5 个独立统计卡合并成一行紧凑数字；`BatchControlCard.tsx` 的「投递模式 / AI 评分」收进「更多设置」，开跑按钮仍常驻
 - **AIbot 面板重排**：把「一键开跑 / 暂停 / 恢复 / 终止」从页面底部上移到指标看板正下方；「复盘与维护工具」收纳管家跳转、清空重获、立即补仓、恢复默认配额、刷新授权；「平台与配额」收纳 5 个平台开关 / 授权 / 配额输入；「悬浮窗配置」收纳 10 个模式与形态开关。「全自主无人值守队列 / 免手动」说明条与行为日志保持常驻；时段 / 间歇 / 投递方式三个入口移到编辑器正上方，展开后不用反向滚动
@@ -61,6 +66,7 @@
 
 ### Fixed
 
+- **点击插件图标弹出独立整页面板，而不是右侧整高侧栏**：旧编排把 `focusOrCreateAssistantPanel()` 当作常规兜底，只要当前标签页不是招聘网站（最常见是新标签页）或注入没赶上，就打开一整个 `?standalone=1` 标签页。现改为优先去招聘网站展开侧栏；同时修掉「固定等 300ms 判定注入失败」的误判。用户感知：点图标永远落在招聘网站右侧侧栏，不再多出一个面板标签页
 - **折叠提示文案重复导致 E2E 严格模式冲突**：管家「按来源筛选」的 hint 曾写「共 N 条记录」，与诊断中心标题里的同文案同时被 `getByText(/共 \d+ 条记录/)` 命中，`tests/aibot-browser-e2e.test.ts` 失败。改用来源枚举作为 hint，「导出与刷新」的重复计数提示同步移除；两套受影响的浏览器 E2E 复跑通过
 - **副标题与 Tab 同名导致 E2E 严格模式冲突**：精简副标题时曾写入「结果追踪」，使 `getByText('追踪')` 同时匹配副标题与 Tab；改为「回复复盘」后 `tests/extension-flow.test.ts` 12 例恢复全绿
 
