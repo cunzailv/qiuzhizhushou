@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "智能求职助手",
   "version": "1.2.0",
-  "description": "多平台智能求职助手，支持 Boss直聘、猎聘等平台的自动打招呼与简历投递（求职者端），含 AI 匹配度分析与投递进度追踪",
+  "description": "多平台智能求职助手：覆盖 Boss直聘/猎聘/智联招聘/前程无忧/脉脉，AI 匹配评分、Tool-Calling 中控 Agent、精投/海投自动投递与目标必达",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",

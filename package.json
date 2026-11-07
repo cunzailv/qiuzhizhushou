@@ -2,7 +2,7 @@
   "name": "qiuzhizhushou",
   "version": "1.2.0",
   "private": false,
-  "description": "多平台智能求职助手 — 支持 Boss直聘、猎聘的 AI 驱动的自动打招呼与简历投递 Chrome 扩展（求职者端）",
+  "description": "多平台智能求职助手 — 覆盖 Boss直聘、猎聘、智联招聘、前程无忧、脉脉的 Chrome 扩展：AI 简历画像与语义匹配评分、Tool-Calling 中控 Agent、精投/海投双模式、目标必达自动投递，只认平台确认投递数",
   "type": "module",
   "author": "cunzailv",
   "license": "MIT",

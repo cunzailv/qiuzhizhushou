@@ -4,6 +4,7 @@
 
 ### Added
 
+- **项目简介全面更新（README / package.json / manifest.json）**：旧文案还停留在「支持 Boss直聘、猎聘两个平台」，现统一为 5 平台 + AI 简历画像 / 语义评分 + Tool-Calling 中控 Agent + 精投/海投双模式 + 目标必达。README 新增「📌 项目简介」章节，明确写出「启动前必须自己选半自动/全自动，全自动再选精投/海投」「只认平台确认投递数」「后台静默不抢焦点」「数据留在浏览器本地」
 - **目标必达模式（产品语义变更：「设定了目标必须要成功，哪怕是海投」）**：`CapacityGoal` 新增 `mustAchieve`，默认开启、老数据缺字段按开启处理；UI 折叠组新增「必达模式」开关，首屏显示「必达 · 未达成不停机」，关闭后回到旧的截止节奏语义。设定目标不再接受「不保证达标」的结论
 - **自动接管所有可控参数**：新增 `src/shared/agent/must-achieve.ts` 纯函数底座（`planMustAchieveQuotas` / `relaxFiltersForMustAchieve` / `shouldBypassWorkWindow` / `resolveMustAchieveMatchThreshold` / `shouldBypassRelevanceGate` / `shouldKeepCollectingOnNoSource` / `shouldMarkKeywordInvalid` / `resolveCollectMaxJobs`）。后台 `applyMustAchieveTakeover()` 在启动与运行中改目标时自动切海投、抬配额（目标 +25% 至少 10 份余量，只升不降）、开启全部平台、解除日限标记、清掉 24 小时无效关键词锁、清掉遗留休息状态
 - **达成才停机**：`isCampaignFinished()` 在必达目标未达成时恒为 `false`；超时只报进度事实、不再返回 `missed`；工作时段自动临时放行（不改写用户设置）；全程跳过模拟休息、锁定 30 秒高频补仓；`activePlatforms=0` 时按 10 分钟持久化冷却解除标记继续换平台。只有平台已确认投递数达标才显式停机 + 通知
