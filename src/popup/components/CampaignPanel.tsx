@@ -67,6 +67,10 @@ import {
   DEFAULT_FOREGROUND_MODE,
   FOREGROUND_MODE_KEY,
 } from '../../shared/agent/stealth-mode'
+import {
+  DEFAULT_REST_ENABLED,
+  REST_ENABLED_KEY,
+} from '../../shared/agent/rest-policy'
 
 const PLATFORM_INFOS: Array<{ id: PlatformId; name: string }> = [
   { id: 'boss', name: 'Boss直聘' },
@@ -176,6 +180,8 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
 
   // 前台可见模式：默认关闭 = AIbot 只在专用后台标签页跑，不抢焦点、不导航用户当前页面
   const [foregroundMode, setForegroundMode] = useState(DEFAULT_FOREGROUND_MODE)
+  // 模拟真人作息休息：默认开启防风控；嫌慢可关掉，海投策略下批次更长、休息更短
+  const [restEnabled, setRestEnabled] = useState(DEFAULT_REST_ENABLED)
 
   const [logExpanded, setLogExpanded] = useState(true)
   /** 用户往上翻看历史时暂停自动跟随，不再每 2 秒被强行拉回底部 */
@@ -246,6 +252,9 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         setStrategy(await getDeliveryStrategy())
         setForegroundMode(
           (await getSetting<boolean>(FOREGROUND_MODE_KEY, DEFAULT_FOREGROUND_MODE)) === true,
+        )
+        setRestEnabled(
+          (await getSetting<boolean>(REST_ENABLED_KEY, DEFAULT_REST_ENABLED)) !== false,
         )
 
         const savedQuotas = await getSavedPlatformQuotas()
@@ -342,6 +351,44 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
       )
     } catch {
       onNotify?.('运行模式保存失败，请重试', 'error')
+    }
+  }
+
+  /** 关闭模拟休息：后台下一轮 tick 会立即 resume，不再白等十几分钟 */
+  const handleRestEnabledChange = async (enabled: boolean) => {
+    setRestEnabled(enabled)
+    try {
+      await setSetting(REST_ENABLED_KEY, enabled)
+      if (!enabled) {
+        // 若此刻正卡在休息里，别让用户再等十几分钟，直接唤醒
+        void chrome.runtime.sendMessage({ type: 'SKIP_REST' }).catch(() => {})
+      }
+      onNotify?.(
+        enabled
+          ? '已开启模拟真人作息休息（防风控）'
+          : '已关闭模拟休息，AIbot 将连续投递；若正在休息，已立即恢复',
+        'success',
+      )
+    } catch {
+      onNotify?.('运行节奏设置保存失败，请重试', 'error')
+    }
+  }
+
+  /** 一键跳过当前这次休息，立刻恢复投递 */
+  const handleSkipRest = async () => {
+    try {
+      const res = (await chrome.runtime.sendMessage({ type: 'SKIP_REST' })) as {
+        success?: boolean
+        error?: string
+      }
+      if (res?.success) {
+        onNotify?.('已跳过本次休息，AIbot 正在恢复投递', 'success')
+        await fetchStats()
+      } else {
+        onNotify?.(`跳过休息失败：${res?.error || '后台暂不可达'}`, 'warning')
+      }
+    } catch {
+      onNotify?.('跳过休息失败：后台暂不可达', 'warning')
     }
   }
 
@@ -706,6 +753,12 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
   const isPaused = stats?.status === 'paused'
   const isCaptchaPaused = isPaused && stats?.pausedReason === 'captcha'
   const displayLogs: CampaignLog[] = showLogHistory ? historyLogs : (stats?.logs ?? [])
+  /** 只看已开启平台，用户才知道「80」到底指的是哪些平台加起来的目标 */
+  const totalQuota = stats
+    ? (Object.keys(stats.platformBreakdown) as PlatformId[])
+        .filter((pid) => stats.platformBreakdown[pid]?.enabled !== false)
+        .reduce((sum, pid) => sum + (stats.platformBreakdown[pid]?.quota || 0), 0)
+    : 0
 
   return (
     <div className="bg-surface-darkest rounded-xl border border-surface-hairline shadow-sm overflow-hidden text-text-primary space-y-3.5 p-3.5">
@@ -767,17 +820,24 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         </div>
       )}
 
-      {/* 模拟真人休息提示条 */}
+      {/* 模拟真人休息提示条：显示配额进度，并给一个立刻恢复的出口 */}
       {stats?.restUntil && stats.restUntil > Date.now() && (
-        <div className="bg-surface-dark border border-surface-hairline rounded-lg p-2 text-xs text-blue-800 flex items-center gap-2">
+        <div className="bg-surface-dark border border-surface-hairline rounded-lg p-2 flex items-center gap-2">
           <Coffee className="w-4 h-4 text-info shrink-0" />
-          <span className="text-xs">
-            模拟真人作息休息中：已连续投递多份，剩余约{' '}
-            <strong className="text-blue-700">
+          <span className="flex-1 min-w-0 text-xs text-text-secondary">
+            模拟真人休息中，剩余约{' '}
+            <strong className="text-text-primary font-medium">
               {Math.max(1, Math.round((stats.restUntil - Date.now()) / 60000))}
             </strong>{' '}
-            分钟后自动继续投递。
+            分钟 · 今日已投 {stats.done}/{totalQuota}
           </span>
+          <button
+            type="button"
+            onClick={() => void handleSkipRest()}
+            className="shrink-0 rounded-md border border-surface-hairline bg-surface-darkest px-2 py-1 text-xs text-text-secondary hover:text-text-primary transition-colors cursor-pointer"
+          >
+            立即继续
+          </button>
         </div>
       )}
 
@@ -797,6 +857,9 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         <div>
           <div className="text-xs text-success font-medium">已成功投递</div>
           <div className="text-sm font-medium text-success mt-0.5">{stats?.done ?? 0}</div>
+          {totalQuota > 0 && (
+            <div className="text-xs text-text-muted font-normal">目标 {totalQuota}</div>
+          )}
         </div>
         <div>
           <div className="text-xs text-text-muted">AI筛岗跳过</div>
@@ -923,6 +986,23 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             <span className="block text-xs text-text-muted mt-0.5 leading-relaxed">
               默认关闭：AIbot 在专用后台标签页运行，不切换标签页、不聚焦窗口、不改动你正在看的页面。
               若后台标签页被浏览器节流导致采不到岗位，可临时打开此项排查。
+            </span>
+          </span>
+        </label>
+
+        {/* 休息节奏：默认开启防风控；关掉后 AIbot 连续投递，不再插入十几分钟空档 */}
+        <label className="mt-2 flex items-start gap-2 rounded-md border border-surface-hairline bg-surface-dark px-2.5 py-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={restEnabled}
+            onChange={(event) => void handleRestEnabledChange(event.target.checked)}
+            className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-accent"
+          />
+          <span className="min-w-0">
+            <span className="block text-xs text-text-secondary">模拟真人作息休息（防风控）</span>
+            <span className="block text-xs text-text-muted mt-0.5 leading-relaxed">
+              精投连投 15-25 份休息 8-20 分钟，海投连投 30-45 份只休息 3-6 分钟。
+              嫌慢可关掉连续投递；若正在休息，关掉或点提示条「立即继续」都会马上恢复。
             </span>
           </span>
         </label>

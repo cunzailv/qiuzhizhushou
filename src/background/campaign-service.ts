@@ -22,6 +22,7 @@ import {
   updateCampaignInterval,
   updateCampaignQuotas,
   clearPendingTasks,
+  persistRestState,
 } from '../shared/agent/queue-store'
 import {
   startCampaign as startAgentCampaign,
@@ -58,6 +59,14 @@ import {
 import type { ApplyFilters } from '../shared/types/filters'
 import { releaseRunMode } from '../shared/runtime-state'
 import { getSetting, setSetting } from '../shared/db/settings-store'
+import { getDeliveryStrategy } from '../shared/agent/delivery-strategy'
+import {
+  DEFAULT_REST_ENABLED,
+  REST_ENABLED_KEY,
+  decideRest,
+  pickInitialRestThreshold,
+  resolveRestPolicy,
+} from '../shared/agent/rest-policy'
 import { log, logWarn, logError } from '../shared/utils/logger'
 
 const MOD = 'CampaignService'
@@ -272,6 +281,25 @@ const MAX_SLEEP_CHUNK_MS = 5 * 60_000
 
 /** 上次输出“不在投递时段”日志的时间，用于分片轮询时的日志去重 */
 let lastWindowSleepLogAt = 0
+/** 上次输出“休息中”日志的时间；5 分钟切片轮询时不重复刷屏 */
+let lastRestNoticeAt = 0
+
+/** 汇总已启用平台的今日配额进度，让「投不满」时用户能一眼看到卡在哪 */
+function summarizeQuotaProgress(campaign: Campaign): {
+  applied: number
+  quota: number
+  remaining: number
+} {
+  let applied = 0
+  let quota = 0
+  for (const pid of Object.keys(campaign.quotas) as PlatformId[]) {
+    const q = campaign.quotas[pid]
+    if (!q || q.enabled === false) continue
+    quota += q.quota
+    applied += q.applied
+  }
+  return { applied, quota, remaining: Math.max(0, quota - applied) }
+}
 
 /** 设定下一次 tick 触发（结合 setTimeout 与 Alarm 机制双重保险） */
 export function scheduleNextTick(delayMs = 60_000) {
@@ -407,8 +435,9 @@ export async function runCampaignTick(): Promise<void> {
       // 分片轮询会频繁命中这里，日志每 30 分钟最多提示一次，避免刷屏
       if (Date.now() - lastWindowSleepLogAt > 30 * 60_000) {
         lastWindowSleepLogAt = Date.now()
+        const sleepProgress = summarizeQuotaProgress(campaign)
         await appendCampaignLog(
-          `🌙 当前不在投递时段内 (允许时段: ${formatTimeWindows(campaign.windows)})，AIbot 进入静默休眠。您可点击底部【工作时段】随时修改或一键设为【24小时不限】立即唤醒`,
+          `🌙 当前不在投递时段内 (允许时段: ${formatTimeWindows(campaign.windows)})，AIbot 进入静默休眠；今日已确认投递 ${sleepProgress.applied}/${sleepProgress.quota}，还差 ${sleepProgress.remaining} 份。您可点击底部【工作时段】随时修改或一键设为【24小时不限】立即唤醒`,
           'info',
         )
       }
@@ -420,31 +449,73 @@ export async function runCampaignTick(): Promise<void> {
     // 已进入允许时段，重置休眠日志去重标记，便于下次休眠时再次提示
     lastWindowSleepLogAt = 0
 
-    // 3. 检查强制休息时间（模拟真人离开电脑休息）
-    if (campaign.restUntil && campaign.restUntil > now) {
-      const restWait = campaign.restUntil - now
-      const restMins = Math.round(restWait / 60_000)
-      log(MOD, 'runCampaignTick', `Taking human-like rest. Remaining: ${restMins} min`)
-      await appendCampaignLog(`☕ 模拟真人休息中，还剩约 ${restMins} 分钟后自动继续`, 'info')
-      scheduleNextTick(restWait)
-      return
-    }
+    // 3. 模拟真人作息休息（状态机 + 原子落盘）
+    //
+    // 旧版只改内存里的 campaign 就 appendCampaignLog()，日志会从 storage 读旧副本
+    // 整份写回，restUntil 从未落盘、连投计数从未清零 —— 每个 5 分钟切片 tick
+    // 都重新触发一次休息，AIbot 永远卡在「休息中」，一天都投不满配额。
+    // 现在所有状态变化都走 persistRestState() 串行链，且阈值一次生成后固定。
+    const strategy = await getDeliveryStrategy()
+    const restPolicy = resolveRestPolicy(strategy)
+    const restEnabled = (await getSetting<boolean>(REST_ENABLED_KEY, DEFAULT_REST_ENABLED)) === true
+    const restDecision = decideRest({
+      now,
+      restUntil: campaign.restUntil,
+      consecutiveRestCounter: campaign.consecutiveRestCounter || 0,
+      restThreshold: campaign.restThreshold,
+      lastRestNoticeAt,
+      policy: restPolicy,
+      enabled: restEnabled,
+    })
+    const progress = summarizeQuotaProgress(campaign)
 
-    // 如果连续投递达到 15-25 份，触发 8-20 分钟随机休息
-    const restThreshold = 15 + Math.floor(Math.random() * 10)
-    if ((campaign.consecutiveRestCounter || 0) >= restThreshold) {
-      const restDuration = (8 + Math.floor(Math.random() * 12)) * 60_000
-      campaign.restUntil = now + restDuration
-      campaign.consecutiveRestCounter = 0
-      const durationMins = Math.round(restDuration / 60_000)
-      log(MOD, 'runCampaignTick', `Reached threshold ${restThreshold}. Resting for ${durationMins} min`)
+    if (restDecision.kind === 'resume') {
+      // 休息到期 / 用户关掉休息：清状态，并且本轮立刻继续投递，不再空跑一整轮
+      await persistRestState({
+        restUntil: null,
+        consecutiveRestCounter: 0,
+        restThreshold: pickInitialRestThreshold(restPolicy),
+      })
       await appendCampaignLog(
-        `☕ 已连续投递 ${restThreshold} 份，模拟真人作息休息 ${durationMins} 分钟，防止平台风控`,
+        `☕ 休息结束，立即恢复投递（今日已确认投递 ${progress.applied}/${progress.quota}，还差 ${progress.remaining} 份）`,
+        'success',
+      )
+      lastRestNoticeAt = 0
+      // 刻意不 return：继续往下领任务，把刚浪费的这一轮补回来
+    } else if (restDecision.kind === 'waiting') {
+      const restMins = Math.max(1, Math.round(restDecision.remainingMs / 60_000))
+      if (restDecision.shouldLog) {
+        lastRestNoticeAt = now
+        await appendCampaignLog(
+          `☕ 模拟真人休息中（${restPolicy.label}节奏），还剩约 ${restMins} 分钟；今日已确认投递 ${progress.applied}/${progress.quota}`,
+          'info',
+        )
+      }
+      log(MOD, 'runCampaignTick', `Taking human-like rest. Remaining: ${restMins} min`)
+      scheduleNextTick(Math.min(restDecision.remainingMs, MAX_SLEEP_CHUNK_MS))
+      return
+    } else if (restDecision.kind === 'start-rest') {
+      const restMins = Math.round(restDecision.durationMs / 60_000)
+      await persistRestState({
+        restUntil: now + restDecision.durationMs,
+        consecutiveRestCounter: 0,
+        restThreshold: restDecision.nextThreshold,
+      })
+      log(MOD, 'runCampaignTick', `Reached threshold ${restDecision.threshold}. Resting for ${restMins} min`)
+      await appendCampaignLog(
+        `☕ 已连投 ${restDecision.threshold} 份（${restPolicy.label}节奏），休息 ${restMins} 分钟防止风控；今日已确认投递 ${progress.applied}/${progress.quota}，还差 ${progress.remaining} 份`,
         'info',
       )
-      sendNotification('☕ AIbot 休息中', `已连续投递 ${restThreshold} 份，模拟真人休息 ${durationMins} 分钟后继续。`)
-      scheduleNextTick(restDuration)
+      sendNotification(
+        '☕ AIbot 休息中',
+        `已连投 ${restDecision.threshold} 份，休息 ${restMins} 分钟后继续（今日 ${progress.applied}/${progress.quota}）。`,
+      )
+      lastRestNoticeAt = now
+      scheduleNextTick(restDecision.durationMs)
       return
+    } else if (restDecision.restThreshold !== undefined) {
+      // 旧 campaign 没有持久化阈值：补写一次，之后每轮共用，不再每 tick 重随机
+      await persistRestState({ restThreshold: restDecision.restThreshold })
     }
 
     // 3.5 自主重规划：按真实复盘 + 经验记忆调整今日策略（失败静默降级，不影响原流水线）
@@ -505,6 +576,15 @@ export async function runCampaignTick(): Promise<void> {
           const tips: string[] = []
           if (offline.length > 0) tips.push(`登录失效：${offline.join('、')}`)
           tips.push('可将「活跃时间」放宽到本月，或在「岗位名称」里补充更多短职位词')
+          // 「投了一天还没投满」时，必须让用户看到数字卡在哪一层，而不是只看到一句空转提示
+          const progress = summarizeQuotaProgress(campaign)
+          const failedAttempts = campaign.tasks.filter((t) => t.status === 'failed').length
+          tips.push(
+            `今日已确认投递 ${progress.applied}/${progress.quota}，还差 ${progress.remaining} 份；未计入配额的失败尝试 ${failedAttempts} 次`,
+          )
+          if (failedAttempts > 0) {
+            tips.push('若日志出现「未记为投递成功」，先到平台聊天列表核对，再检查登录态 / 风控')
+          }
 
           await appendCampaignLog(
             `💤 已连续 ${emptyDiscoveryStreak} 轮没有发现新岗位，自动降频为每 ${Math.round(nextMs / 60_000)} 分钟巡检一次（一有新岗位立即恢复高频）。诊断建议：${tips.join('；')}`,
@@ -1172,6 +1252,21 @@ export const campaignService = {
       await appendCampaignLog(`🧹 已回收 ${closed} 个 AIbot 专用后台标签页`, 'info')
     }
     return cmp
+  },
+  /** 用户点「立即继续」/ 关掉休息开关：立刻清掉休息状态并唤醒下一轮投递 */
+  skipRest: async () => {
+    const current = await getCampaign()
+    if (!current) return null
+    const policy = resolveRestPolicy(await getDeliveryStrategy())
+    await persistRestState({
+      restUntil: null,
+      consecutiveRestCounter: 0,
+      restThreshold: pickInitialRestThreshold(policy),
+    })
+    await appendCampaignLog('⏭ 已手动跳过本次模拟休息，立即恢复投递', 'info')
+    lastRestNoticeAt = 0
+    if (current.status === 'running') scheduleNextTick(1000)
+    return getCampaign()
   },
   togglePlatform: async (platform: PlatformId, enabled: boolean) => {
     return togglePlatformEnabled(platform, enabled)

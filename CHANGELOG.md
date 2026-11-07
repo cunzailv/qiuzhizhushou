@@ -1,9 +1,13 @@
 # Changelog
 
-## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用、智能中控对话台 Tool-Calling Agent、异常留痕跨上下文统一、unslop 界面设计体系、信息架构分层收纳、图标入口直达右侧侧栏、投递确认层与行为日志历史回看、搜索方向生效与技术栈硬约束、后台静默运行不抢焦点
+## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用、智能中控对话台 Tool-Calling Agent、异常留痕跨上下文统一、unslop 界面设计体系、信息架构分层收纳、图标入口直达右侧侧栏、投递确认层与行为日志历史回看、搜索方向生效与技术栈硬约束、后台静默运行不抢焦点、休息状态机与产能修复
 
 ### Added
 
+- **休息状态机**：新增 `src/shared/agent/rest-policy.ts`（`decideRest` / `resolveRestPolicy` / `pickRestThreshold` / `pickRestDurationMs` / `estimateRemainingMs`）。休息批次与时长跟随投递策略：精投连投 15-25 份休 8-20 分钟，海投连投 30-45 份只休 3-6 分钟；阈值一次生成后持久化，不再每 tick 重随机
+- **原子落盘**：`queue-store.ts` 新增 `persistRestState()`，与 `appendCampaignLog` 共用串行写入链；`Campaign` 新增 `restThreshold`。休息到期返回 `resume` 后**本轮立即继续投递**，休息中日志按 10 分钟节流
+- **用户出口**：AIbot「复盘与维护工具」新增「模拟真人作息休息」开关（`aibotRestEnabled`，默认开）；休息提示条新增「立即继续」按钮与 `SKIP_REST` 后台路由，关开关时自动唤醒。首屏「已成功投递」显示合计目标，休息 / 休眠 / 空转诊断日志都带「今日已确认投递 X/Y」与「未计入配额的失败尝试 N 次」
+- **回归测试**：新增 `tests/campaign-rest-policy.test.ts`（25 例：深拷贝 storage 真实复现旧死锁、原子落盘与并发、阈值/时长边界、状态机六种决策、静态契约）。测试总量 1116 → 1141（80 → 81 文件）
 - **后台静默运行**：新增 `src/shared/agent/stealth-mode.ts`（`shouldActivateTab` / `pickStealthTab` / `pickForegroundTab` / `isProtectedTab`）与设置 `aibotForegroundMode`（默认 `false`）。AIbot 默认只在专用**非活跃**标签页里采集 / 投递，不激活标签页、不聚焦窗口、不导航用户当前页面
 - **专用后台标签页**：`aibot_dedicated_tabs` 按平台记住后台 tab，避免每轮新建；终止 AIbot 时 `releaseDedicatedTabs()` 回收，用户已点开的标签页一律保留。启动日志写明运行模式，登录失效时后台打开登录页 + 通知，不打断手上的事
 - **前台可见模式开关**：AIbot →「复盘与维护工具」提供显式开关，首屏队列说明同步显示当前模式；仅当浏览器对后台标签页节流导致采不到岗位时临时打开排查。用户主动点击图标 / 打开平台 / 展开侧栏仍按意图激活，不受影响
@@ -85,6 +89,7 @@
 
 ### Fixed
 
+- **「模拟真人作息休息 12 分钟，投了一天还没投满 80」（P0 死锁）**：休息分支只在内存写 `campaign.restUntil` / `consecutiveRestCounter = 0`，随后 `appendCampaignLog()` 从 storage 读旧副本整份写回，状态修改被覆盖 —— `restUntil` 从未落盘、连投计数从未清零。结果每个 5 分钟切片 tick 都重新触发一次休息，AIbot 永久卡在休息循环里，配额永远投不满。现全部走 `persistRestState()` 原子落盘；同时修掉阈值每 tick 重随机、休息节奏与精投/海投脱钩（海投投 10 分钟却休 14 分钟）、休息日志刷屏、到期后还要空跑一整轮、用户没有「立刻继续」出口
 - **「打开别的软件 / 切换页面 / 下滑，Chrome 都被拉回招聘网站」**：`ensurePlatformTab()` 每个投递任务与每轮补仓都无条件 `tabs.update({active:true})` + `windows.update({focused:true})`，还优先复用**当前活跃标签页**并导航到搜索 URL。现默认后台静默：排除所有窗口的活跃页、只操作专用后台 tab；激活 / 聚焦调用全部收进 `if (foreground)` 分支，`openPlatformLoginTab()` 同步改为后台打开
 - **「岗位名称写了 php 后台开发 / AI 全栈开发却没效果」**：长词组没被拆开、简历技能没参与提取、脉脉搜索 URL 忽略关键词，三层叠加导致平台搜不到结果并降级成推荐流。现按空格拆词 + 简历技能参与 + 五平台都带 query
 - **「一个前端、一个 Java 开发，都不对，还是精投」**：旧版本地语义「只统计不否决」+ 后端族谱把 Java 当同义 + `relaxCareerFilter` 清空方向白名单 + 软过滤补足名额，没配 AI Key 的精投等于完全不设防；硬编码兜底词里还含「前端开发工程师」，会真的去搜前端岗位。现四处统一加技术栈硬约束 + 精投本地闸门，跨栈岗位永远进不了队列

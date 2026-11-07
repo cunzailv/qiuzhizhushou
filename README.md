@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1116%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1141%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -206,6 +206,21 @@
 
 > 权衡：Chrome 会对长时间隐藏的标签页做定时器节流，静默模式下采集速度可能略慢。若发现补仓变少，临时打开「前台可见模式」排查即可。
 
+### ⏱ 休息节奏与产能 · 不再一整天卡在「休息中」（2026-11）
+「模拟真人作息休息 12 分钟，投了一天还没投满 80」的根因是一个 **P0 死锁**：休息分支只在内存里写 `campaign.restUntil = …` 和 `consecutiveRestCounter = 0`，紧接着 `appendCampaignLog()` 会从 `chrome.storage.local` 读一份**旧副本**并整份写回 —— 休息到期时间从未落盘、连投计数从未清零。于是每个 5 分钟切片 tick 都「重新触发一次休息」，AIbot 一整天都在休息循环里。
+
+| 层 | 说明 |
+|---|---|
+| **原子落盘** | 新增 `queue-store.ts` 的 `persistRestState()`，与日志共用同一条串行写入链；`restUntil` / 连投计数 / 本批阈值一次写入，不再被日志覆盖 |
+| **阈值固定** | 旧版 `15 + random()*10` 写在 tick 里每轮重随机；现在阈值一次生成后随 campaign 持久化，行为可复现 |
+| **策略联动** | 新增 `src/shared/agent/rest-policy.ts` 纯状态机。**精投**连投 15-25 份休 8-20 分钟；**海投**连投 30-45 份只休 3-6 分钟，不再出现「海投投 10 分钟却休息 14 分钟」 |
+| **到期即投** | 休息结束返回 `resume`，清状态后**本轮立刻继续领任务**，不再空跑一整轮；休息中的日志按 10 分钟节流，5 分钟切片不刷屏 |
+| **用户出口** | 「复盘与维护工具」里可关闭「模拟真人作息休息」；休息提示条新增「立即继续」按钮（`SKIP_REST`），关开关时也会自动唤醒，不用干等十几分钟 |
+| **进度可见** | 首屏「已成功投递」下方显示已启用平台的合计目标（如 `目标 80`）；休息 / 休眠 / 空转诊断日志都写明「今日已确认投递 X/Y，还差 Z 份」及「未计入配额的失败尝试 N 次」，并提示去平台聊天列表核对未确认投递 |
+| **回归测试** | `tests/campaign-rest-policy.test.ts`（25 例）：用深拷贝 storage **真实复现旧死锁**、原子落盘与并发写入、阈值/时长边界、状态机六种决策、静态契约 |
+
+> 说明：配额只统计「平台侧已确认」的投递（`done`）。点了按钮但平台没确认的任务不计入配额，这是防虚报的刻意设计；日志会明确标为「未记为投递成功」。
+
 ---
 
 ## 📸 界面预览（浅色主题）
@@ -326,7 +341,7 @@ npm run build
 | 样式 | Tailwind CSS 3 + shadow DOM 注入 |
 | 数据 | Dexie (IndexedDB) + chrome.storage |
 | AI | OpenAI / DeepSeek / 自定义兼容接口 + 本地语义精筛 + AI SDK 7 tool-calling 循环 |
-| 测试 | Vitest（1116 用例 / 80 文件）+ Playwright（E2E） |
+| 测试 | Vitest（1141 用例 / 81 文件）+ Playwright（E2E） |
 | UI 组件 | Lucide React + Recharts + react-markdown / remark-gfm |
 
 ## 📁 项目结构
@@ -374,8 +389,8 @@ docs/EXTERNAL_AI.md     # 外部 AI 接入完整指南
 ## 🧪 测试与验收
 
 ```bash
-npm test                                       # tsc -b + vite build + 全部 1116 个测试用例
-npx vitest run                                  # 全量单测/E2E：80 文件 / 1116 用例
+npm test                                       # tsc -b + vite build + 全部 1141 个测试用例
+npx vitest run                                  # 全量单测/E2E：81 文件 / 1141 用例
 npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用例（基线 110 + 新增 36）
 ```
 

@@ -536,6 +536,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true
   }
 
+  // 用户点「立即继续」跳过模拟休息，或关掉休息开关：立刻恢复投递
+  if (message.type === 'SKIP_REST') {
+    campaignService.skipRest()
+      .then((cmp) => sendResponse({ success: true, data: cmp }))
+      .catch((err) => sendResponse({ success: false, error: String(err) }))
+    return true
+  }
+
   if (message.type === 'TRIGGER_AUTO_COLLECT') {
     campaignService.triggerAutoCollect()
       .then((res) => sendResponse({ success: true, data: res }))

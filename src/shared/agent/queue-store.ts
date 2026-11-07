@@ -89,8 +89,10 @@ export interface Campaign {
   intervalConfig: IntervalConfig
   lastTickAt?: number
   aiBudgetUsed: number
-  consecutiveRestCounter: number // 连投计数（用于每15-25份强制休息）
+  consecutiveRestCounter: number // 连投计数（达到 restThreshold 后触发休息）
   restUntil?: number             // 强制休息到期时间戳
+  /** 本批休息阈值，必须落盘；否则每轮 tick 重新随机会导致行为不可复现 */
+  restThreshold?: number
   logs: CampaignLog[]            // 每时每刻行为日志流水
 }
 
@@ -108,7 +110,10 @@ function formatLogStamp(now: Date): { date: string; time: string } {
   }
 }
 
-/** 日志写入串行链：所有 get-modify-set 排队执行，避免并发覆盖吞掉历史 */
+/**
+ * Campaign 写入串行链：所有 get-modify-set 排队执行，避免并发覆盖吞掉历史。
+ * 休息状态也走同一条链，否则「先改内存再写日志」会被日志里的旧副本整份覆盖。
+ */
 let logWriteChain: Promise<unknown> = Promise.resolve()
 
 /** 获取当前活动的 Campaign，若无或格式损坏则返回 null */
@@ -241,6 +246,45 @@ export function appendCampaignLog(
   level: CampaignLog['level'] = 'info',
 ): Promise<void> {
   const task = logWriteChain.then(() => appendCampaignLogInternal(message, level))
+  logWriteChain = task.catch(() => {})
+  return task
+}
+
+export interface RestStatePatch {
+  /** null / undefined 表示清除休息状态 */
+  restUntil?: number | null
+  consecutiveRestCounter?: number
+  restThreshold?: number
+}
+
+/**
+ * 原子持久化休息状态。
+ *
+ * 必须在同一条串行写入链里执行：旧实现直接在内存改 `campaign.restUntil` 然后
+ * `appendCampaignLog()`，日志内部会读一份 storage 里的旧 campaign 并整份写回，
+ * 把休息状态覆盖掉，AIbot 于是每 5 分钟「重新休息一次」，永远投不满配额。
+ */
+async function persistRestStateInternal(patch: RestStatePatch): Promise<Campaign | null> {
+  const campaign = await getCampaign()
+  if (!campaign) return null
+
+  if ('restUntil' in patch) {
+    if (patch.restUntil == null) delete campaign.restUntil
+    else campaign.restUntil = patch.restUntil
+  }
+  if (typeof patch.consecutiveRestCounter === 'number' && Number.isFinite(patch.consecutiveRestCounter)) {
+    campaign.consecutiveRestCounter = Math.max(0, Math.round(patch.consecutiveRestCounter))
+  }
+  if (typeof patch.restThreshold === 'number' && Number.isFinite(patch.restThreshold)) {
+    campaign.restThreshold = patch.restThreshold
+  }
+
+  await saveCampaign(campaign)
+  return campaign
+}
+
+export function persistRestState(patch: RestStatePatch): Promise<Campaign | null> {
+  const task = logWriteChain.then(() => persistRestStateInternal(patch))
   logWriteChain = task.catch(() => {})
   return task
 }
