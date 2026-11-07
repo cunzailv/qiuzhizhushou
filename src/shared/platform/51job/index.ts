@@ -3,6 +3,7 @@
 // 详情页存在反爬验证，选择器采用多候选回退（登录态用户通常可正常访问）。
 // 所有选择器均为"多候选 + 兜底"，站点改版时优先调整这里的选择器常量。
 import { collectJobCards as collectJobCardsGeneric } from '../boss/action-simulator'
+import { generateJobId } from '../boss/parser'
 import type { PlatformAdapter, PlatformRiskConfig, PageType } from '../types'
 import type { JobCard } from '../../types/job'
 import type { CommunicationUiSnapshot } from '../types'
@@ -67,7 +68,15 @@ function parseJobCardsFromSearchPage(): JobCard[] {
     const jobUrl = detailLink?.href
       || (cardEl.getAttribute('data-url') || '')
       || (cardEl.querySelector('a')?.href || '')
-    const id = detailLink?.href ? extractIdFromUrl(detailLink.href) : (cardEl.getAttribute('data-jobid') || String(Date.now()))
+    const companyName = textOf(cardEl, SELECTORS.company)
+    /**
+     * 岗位 ID 是补仓去重键，必须稳定。旧版在「没有详情链接、也没有 data-jobid」
+     * 时退化成 Date.now()，站点改版后每次解析都会生成新 ID，历史投递记录全部失效，
+     * 同一个岗位会被反复入队投递。这里用「公司 + 标题」生成稳定哈希兜底。
+     */
+    const id = detailLink?.href
+      ? extractIdFromUrl(detailLink.href)
+      : (cardEl.getAttribute('data-jobid') || generateJobId(jobUrl, `${companyName}:${title}`))
 
     const infoText = textOf(cardEl, SELECTORS.info)
     const areaText = textOf(cardEl, SELECTORS.area)
@@ -93,7 +102,7 @@ function parseJobCardsFromSearchPage(): JobCard[] {
     cards.push({
       id,
       title,
-      companyName: textOf(cardEl, SELECTORS.company),
+      companyName,
       companyLogo: '',
       salary,
       location: areaText || extractLocation(infoText),

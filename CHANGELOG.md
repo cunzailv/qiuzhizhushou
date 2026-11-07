@@ -4,6 +4,10 @@
 
 ### Added
 
+- **平台验证状态诚实标注（用户反馈「Boss直聘、猎聘两个平台测试使用了，其他还需要测试」）**：README 简介与 D 层表格区分「真实账号实测」与「仅模拟页面 E2E」，新增**待真实账号验收清单**（6 步：登录注入侧栏 → 扫描诊断数字 → 卡片字段与稳定 ID → 半自动沟通 1 个 → 到平台聊天列表核对 → 翻第 2 页），避免把「适配 5 平台」误读成「5 平台都真实测过」
+- **待验证平台适配层契约测试**：新增 `tests/platform-verification-parity.test.ts`（13 例），覆盖 51job / 智联 / 脉脉的注册与 URL 识别不串站、接口 / 风控文案 / 配额完整性、搜索 URL 带 query 与页码、列表解析字段与不重复入队、岗位 ID 稳定性、投递确认层统一链路。明确声明这只证明适配层正确，不能替代真实账号验收
+- **修复岗位 ID 不稳定会重复投递**：`51job` / `zhaopin` 在卡片既无详情链接也无 `data-jobid` 时用 `String(Date.now())` 兜底，站点改版后每轮解析都生成新 ID，历史去重键全部失效、同一岗位反复入队。改用 Boss 已有的 `generateJobId(url, '公司:标题')` 生成稳定哈希兜底
+- **回归验证**：重建 dist 后全量 **85 文件 / 1233 例通过**（含 Chromium E2E，`multi-platform-flow.test.ts` 三个模拟平台流程无回归）
 - **项目简介全面更新（README / package.json / manifest.json）**：旧文案还停留在「支持 Boss直聘、猎聘两个平台」，现统一为 5 平台 + AI 简历画像 / 语义评分 + Tool-Calling 中控 Agent + 精投/海投双模式 + 目标必达。README 新增「📌 项目简介」章节，明确写出「启动前必须自己选半自动/全自动，全自动再选精投/海投」「只认平台确认投递数」「后台静默不抢焦点」「数据留在浏览器本地」
 - **目标必达模式（产品语义变更：「设定了目标必须要成功，哪怕是海投」）**：`CapacityGoal` 新增 `mustAchieve`，默认开启、老数据缺字段按开启处理；UI 折叠组新增「必达模式」开关，首屏显示「必达 · 未达成不停机」，关闭后回到旧的截止节奏语义。设定目标不再接受「不保证达标」的结论
 - **自动接管所有可控参数**：新增 `src/shared/agent/must-achieve.ts` 纯函数底座（`planMustAchieveQuotas` / `relaxFiltersForMustAchieve` / `shouldBypassWorkWindow` / `resolveMustAchieveMatchThreshold` / `shouldBypassRelevanceGate` / `shouldKeepCollectingOnNoSource` / `shouldMarkKeywordInvalid` / `resolveCollectMaxJobs`）。后台 `applyMustAchieveTakeover()` 在启动与运行中改目标时自动切海投、抬配额（目标 +25% 至少 10 份余量，只升不降）、开启全部平台、解除日限标记、清掉 24 小时无效关键词锁、清掉遗留休息状态

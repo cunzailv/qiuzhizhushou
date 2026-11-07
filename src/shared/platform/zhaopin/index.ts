@@ -3,6 +3,7 @@
 // 点击卡片在右侧内联详情面板（.job-detail-panel / .job-detail-summary）展示，投递按钮 .job-detail-summary__apply。
 // 选择器多候选回退，站点改版优先调整本文件顶部常量。
 import { collectJobCards as collectJobCardsGeneric } from '../boss/action-simulator'
+import { generateJobId } from '../boss/parser'
 import type { PlatformAdapter, PlatformRiskConfig, PageType } from '../types'
 import type { JobCard } from '../../types/job'
 import type { CommunicationUiSnapshot } from '../types'
@@ -67,7 +68,13 @@ function parseJobCardsFromSearchPage(): JobCard[] {
     // 岗位链接：卡片内 a 或 data 属性
     const link = cardEl.querySelector<HTMLAnchorElement>('a[href]')
     const jobUrl = link?.href || cardEl.getAttribute('data-url') || ''
-    const id = extractId(jobUrl) || cardEl.getAttribute('data-jobid') || String(Date.now())
+    /**
+     * 去重键必须稳定：站点改版后卡片可能既没有带 jobId 的链接、也没有 data-jobid，
+     * 旧版 Date.now() 会让同一岗位每轮都换个 ID，补仓反复重投。改用「公司 + 标题」哈希。
+     */
+    const id = extractId(jobUrl)
+      || cardEl.getAttribute('data-jobid')
+      || generateJobId(jobUrl, `${company}:${title}`)
 
     // 地点/经验/学历在卡片文本中
     const cardText = (cardEl.textContent || '').replace(/\s+/g, ' ')
