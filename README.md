@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1090%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1116%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -191,6 +191,21 @@
 | **条目可追溯** | 每条带 `date` 与 `campaignId`，跨天 / 跨轮次能分辨是哪一次跑的；写入走串行链，避免并发 `get-modify-set` 覆盖 |
 | **回归测试** | `tests/campaign-log-history.test.ts`（6 例）：日期与轮次、归档上限、跨轮次保留、清空隔离、并发写入不丢 |
 
+### 🔇 后台静默运行 · 不再抢焦点（2026-11）
+「打开别的软件、切换标签页或下滑，Chrome 都被硬拉回招聘网站页面」的根因：每个投递任务与每轮自动补仓都会调 `ensurePlatformTab()`，旧实现**无条件**执行 `chrome.tabs.update({active:true})` + `chrome.windows.update({focused:true})`，并优先复用「当前活跃标签页」再导航到搜索 URL —— 用户正在看的页面被直接改掉。
+
+| 层 | 说明 |
+|---|---|
+| **默认静默** | 新增 `src/shared/agent/stealth-mode.ts` 纯函数底座与设置 `aibotForegroundMode`（默认 `false`）。AIbot 只在**专用非活跃标签页**里采集 / 投递，不激活标签页、不聚焦窗口 |
+| **多窗口保护** | `pickStealthTab()` 排除**所有窗口**的活跃标签页（不只是 `currentWindow`），避免另一个窗口里正在看的页面被导航；专用 tab 被用户点开后自动让位，绝不抢回来 |
+| **专用标签页** | `aibot_dedicated_tabs` 记住每个平台的后台 tab，避免每轮新建一堆标签页；终止 AIbot 时 `releaseDedicatedTabs()` 回收，但用户已经点开的标签页一律保留 |
+| **前台模式兜底** | AIbot →「复盘与维护工具」里提供「前台可见模式（会抢焦点）」开关。仅当浏览器对后台标签页节流导致采不到岗位时临时开启，恢复旧行为用于排查 |
+| **用户主动入口不受影响** | 点击扩展图标、「打开平台」、手动展开右侧侧栏等**用户显式操作**仍按意图激活页面；只有 AIbot 后台调度改为静默 |
+| **可见性** | 启动日志明确写「后台静默运行 / 前台可见模式」，首屏队列说明显示当前模式；登录失效时在后台标签页打开登录页并通知，不打断手上的事；`sendTabMessageWithRetry` 负责后台页 content script 注入恢复 |
+| **回归测试** | `tests/stealth-mode.test.ts`（26 例）：模式决策、多窗口活跃页排除、专用 tab 优先级与让位、前台兼容、调用链静态契约、UI 开关与回收留痕 |
+
+> 权衡：Chrome 会对长时间隐藏的标签页做定时器节流，静默模式下采集速度可能略慢。若发现补仓变少，临时打开「前台可见模式」排查即可。
+
 ---
 
 ## 📸 界面预览（浅色主题）
@@ -311,7 +326,7 @@ npm run build
 | 样式 | Tailwind CSS 3 + shadow DOM 注入 |
 | 数据 | Dexie (IndexedDB) + chrome.storage |
 | AI | OpenAI / DeepSeek / 自定义兼容接口 + 本地语义精筛 + AI SDK 7 tool-calling 循环 |
-| 测试 | Vitest（1090 用例 / 79 文件）+ Playwright（E2E） |
+| 测试 | Vitest（1116 用例 / 80 文件）+ Playwright（E2E） |
 | UI 组件 | Lucide React + Recharts + react-markdown / remark-gfm |
 
 ## 📁 项目结构
@@ -359,8 +374,8 @@ docs/EXTERNAL_AI.md     # 外部 AI 接入完整指南
 ## 🧪 测试与验收
 
 ```bash
-npm test                                       # tsc -b + vite build + 全部 1090 个测试用例
-npx vitest run                                  # 全量单测/E2E：79 文件 / 1090 用例
+npm test                                       # tsc -b + vite build + 全部 1116 个测试用例
+npx vitest run                                  # 全量单测/E2E：80 文件 / 1116 用例
 npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用例（基线 110 + 新增 36）
 ```
 

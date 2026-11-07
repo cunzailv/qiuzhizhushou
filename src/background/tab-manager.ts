@@ -2,6 +2,16 @@
 
 import { getPlatformById } from '../shared/platform'
 import type { PlatformId } from '../shared/agent/quota'
+import { getSetting } from '../shared/db/settings-store'
+import {
+  DEDICATED_TABS_KEY,
+  DEFAULT_FOREGROUND_MODE,
+  FOREGROUND_MODE_KEY,
+  pickForegroundTab,
+  pickStealthTab,
+  shouldActivateTab,
+  type EnsureTabOptions,
+} from '../shared/agent/stealth-mode'
 import { log, logWarn, logError } from '../shared/utils/logger'
 
 const MOD = 'TabManager'
@@ -50,26 +60,94 @@ const PLATFORM_LOGIN_PAGE: Record<PlatformId, string> = {
   maimai: 'https://maimai.cn/login',
 }
 
+/** 是否打开「前台可见模式」（默认关闭，AIbot 后台静默运行） */
+export async function isForegroundMode(): Promise<boolean> {
+  try {
+    return (await getSetting<boolean>(FOREGROUND_MODE_KEY, DEFAULT_FOREGROUND_MODE)) === true
+  } catch {
+    return DEFAULT_FOREGROUND_MODE
+  }
+}
+
+/** 读取该平台的专用后台标签页 id */
+async function getDedicatedTabId(platform: PlatformId): Promise<number | null> {
+  try {
+    const res = await chrome.storage.local.get(DEDICATED_TABS_KEY)
+    const map = (res?.[DEDICATED_TABS_KEY] || {}) as Record<string, number>
+    const id = map[platform]
+    return typeof id === 'number' ? id : null
+  } catch {
+    return null
+  }
+}
+
+/** 记住专用后台标签页，避免每轮采集都新建标签页 */
+async function rememberDedicatedTab(platform: PlatformId, tabId: number): Promise<void> {
+  try {
+    const res = await chrome.storage.local.get(DEDICATED_TABS_KEY)
+    const map = (res?.[DEDICATED_TABS_KEY] || {}) as Record<string, number>
+    await chrome.storage.local.set({
+      [DEDICATED_TABS_KEY]: { ...map, [platform]: tabId },
+    })
+  } catch {
+    // 记不住就下轮重新挑一个，不影响业务
+  }
+}
+
 /**
  * 打开平台登录页。
- * 仅在检测到登录失效时主动拉起一次，避免用户还要自己去面板里翻“去登录”。
+ * 仅在检测到登录失效时拉起一次；静默模式下以后台标签页打开 + 通知提醒，
+ * 不把整个 Chrome 窗口抢回前台打断用户手上的事。
  */
 export async function openPlatformLoginTab(platform: PlatformId): Promise<boolean> {
   const url = PLATFORM_LOGIN_PAGE[platform]
   if (!url) return false
+  const foreground = await isForegroundMode()
   try {
     const allTabs = await chrome.tabs.query({})
     const existing = allTabs.find((t) => t.url && t.url.startsWith(url.split('?')[0]))
     if (existing?.id) {
-      await chrome.tabs.update(existing.id, { active: true })
-      if (existing.windowId) await chrome.windows.update(existing.windowId, { focused: true })
+      if (foreground) {
+        await chrome.tabs.update(existing.id, { active: true })
+        if (existing.windowId) await chrome.windows.update(existing.windowId, { focused: true })
+      }
       return true
     }
-    await chrome.tabs.create({ url, active: true })
+    await chrome.tabs.create({ url, active: foreground })
     return true
   } catch (err) {
     logWarn(MOD, 'openPlatformLoginTab', `Failed to open login page for ${platform}: ${String(err)}`)
     return false
+  }
+}
+
+/**
+ * 终止 AIbot 时回收专用后台标签页。
+ * 只关「仍是非活跃」的专用页；一旦用户点开了那个标签页，就把它交还给用户，绝不替他关掉。
+ */
+export async function releaseDedicatedTabs(): Promise<number> {
+  try {
+    const res = await chrome.storage.local.get(DEDICATED_TABS_KEY)
+    const map = (res?.[DEDICATED_TABS_KEY] || {}) as Record<string, number>
+    const ids = Array.from(new Set(Object.values(map).filter((id) => typeof id === 'number')))
+    if (ids.length === 0) return 0
+
+    const activeTabs = await chrome.tabs.query({ active: true })
+    const protectedIds = new Set(
+      activeTabs.map((t) => t.id).filter((id): id is number => typeof id === 'number'),
+    )
+    const closable = ids.filter((id) => !protectedIds.has(id))
+    if (closable.length > 0) {
+      try {
+        await chrome.tabs.remove(closable)
+      } catch {
+        // 某些标签页可能已被用户关掉，忽略即可
+      }
+    }
+    await chrome.storage.local.remove(DEDICATED_TABS_KEY)
+    return closable.length
+  } catch {
+    return 0
   }
 }
 
@@ -104,11 +182,21 @@ export function isOnTargetSearchUrl(url: string | undefined, query?: string, pag
   return currentPage === Math.max(1, page)
 }
 
-/** 确保目标平台有可用的标签页（优先复用已有 Tab，没有则新建） */
+/**
+ * 确保目标平台有可用的标签页。
+ *
+ * 默认「后台静默」：只在专用后台标签页里采集 / 投递，
+ * **不激活标签页、不聚焦窗口、不导航用户当前正在看的页面**。
+ * 旧版每个任务都 `tabs.update(active:true)` + `windows.update(focused:true)`，
+ * 用户切到别的软件或在别的标签页下滑都会被硬拉回来。
+ *
+ * 打开「前台可见模式」后恢复旧行为（用于后台标签页被浏览器节流、采不到岗位时）。
+ */
 export async function ensurePlatformTab(
   platform: PlatformId,
   query?: string,
   page = 1,
+  opts: EnsureTabOptions = {},
 ): Promise<chrome.tabs.Tab | null> {
   const adapter = getPlatformById(platform)
   if (!adapter) {
@@ -116,35 +204,60 @@ export async function ensurePlatformTab(
     return null
   }
 
-  // 1. 先找可复用的标签页（当前活跃窗口优先，其次任意窗口）
-  let reusable: chrome.tabs.Tab | undefined
+  const foreground = shouldActivateTab(await isForegroundMode(), opts)
+  const matches = (url: string) => adapter.matchesUrl(url)
+
+  let activeTabId: number | undefined
+  let protectedTabIds: number[] = []
+  let allTabs: chrome.tabs.Tab[] = []
   try {
     const [currentActive] = await chrome.tabs.query({ active: true, currentWindow: true })
-    if (currentActive?.id && currentActive.url && adapter.matchesUrl(currentActive.url)) {
-      reusable = currentActive
+    activeTabId = currentActive?.id
+    // 至少把当前窗口的活跃页保护起来，后续查询失败也不会误挑到它
+    if (activeTabId) protectedTabIds = [activeTabId]
+    // 每个 Chrome 窗口各有一个 active tab，全部排除；否则会把另一个窗口里
+    // 用户正在看的招聘网站页面导航到搜索 URL。
+    try {
+      const activeInEveryWindow = await chrome.tabs.query({ active: true })
+      protectedTabIds = Array.from(
+        new Set([
+          ...protectedTabIds,
+          ...activeInEveryWindow
+            .map((t) => t.id)
+            .filter((id): id is number => typeof id === 'number'),
+        ]),
+      )
+    } catch {
+      // 退化为只保护当前窗口活跃页
     }
+    allTabs = await chrome.tabs.query({})
   } catch {
-    // 忽略查询失败
+    // 查询失败时按「没有可用 tab」处理，走下面新建分支
   }
 
-  if (!reusable) {
-    const allTabs = await chrome.tabs.query({})
-    reusable = allTabs.find((tab) => tab.url && adapter.matchesUrl(tab.url))
-  }
+  const dedicatedTabId = foreground ? null : await getDedicatedTabId(platform)
+  const reusable = foreground
+    ? pickForegroundTab(allTabs, activeTabId, matches)
+    : pickStealthTab(allTabs, protectedTabIds, matches, dedicatedTabId)
 
   // 2. 复用标签页：必要时导航到本次目标关键词搜索页，并确保 content script 已就绪
   if (reusable?.id) {
     const tabId = reusable.id
-    log(MOD, 'ensurePlatformTab', `Reusing tab for ${platform}: id=${tabId}, url=${reusable.url}`)
+    log(MOD, 'ensurePlatformTab', `Reusing ${foreground ? 'foreground' : 'background'} tab for ${platform}: id=${tabId}, url=${reusable.url}`)
 
-    try {
-      await chrome.tabs.update(tabId, { active: true })
-      if (reusable.windowId) await chrome.windows.update(reusable.windowId, { focused: true })
-    } catch {
-      // 忽略激活异常
+    if (foreground) {
+      try {
+        await chrome.tabs.update(tabId, { active: true })
+        if (reusable.windowId) await chrome.windows.update(reusable.windowId, { focused: true })
+      } catch {
+        // 忽略激活异常
+      }
+    } else {
+      await rememberDedicatedTab(platform, tabId)
     }
 
-    // 停留在首页 / 上一轮关键词 / 上一页时，导航到本次目标搜索页，否则会一直解析同一批旧卡片
+    // 停留在首页 / 上一轮关键词 / 上一页时，导航到本次目标搜索页，否则会一直解析同一批旧卡片。
+    // 静默模式下 reusable 已排除用户当前活跃页，所以这里的导航不会改掉用户正在看的内容。
     const hasTarget = Boolean(query && query.trim()) || page > 1
     if (hasTarget && !isOnTargetSearchUrl(reusable.url, query, page)) {
       const targetUrl = getPlatformSearchUrl(platform, query, page)
@@ -165,17 +278,20 @@ export async function ensurePlatformTab(
     return reusable
   }
 
-  // 3. 没有匹配的 Tab，根据目标职业搜索关键词或默认首页新创建一个
+  // 3. 没有安全的后台 Tab，新建一个**非激活**的专用标签页
   const targetUrl = getPlatformSearchUrl(platform, query, page) || PLATFORM_HOME_URLS[platform] || adapter.homeUrl
-  log(MOD, 'ensurePlatformTab', `Creating new tab for ${platform}: ${targetUrl}`)
+  log(MOD, 'ensurePlatformTab', `Creating ${foreground ? 'foreground' : 'background'} tab for ${platform}: ${targetUrl}`)
 
   try {
     const created = await chrome.tabs.create({
       url: targetUrl,
-      active: true, // 激活前台打开，确保页面获得渲染焦点，防止后台睡眠节流
+      // 静默模式后台打开；content script 在非活跃标签页同样会注入并响应消息，
+      // 采集与 DOM 交互都不需要抢用户焦点。
+      active: foreground,
     })
 
     if (!created.id) return null
+    if (!foreground) await rememberDedicatedTab(platform, created.id)
 
     // 等待页面初次加载完成
     const loaded = await waitForTabLoaded(created.id, 20_000)

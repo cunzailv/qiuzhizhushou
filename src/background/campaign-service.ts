@@ -34,7 +34,13 @@ import {
 import { prefetchNextTasksAI } from '../shared/ai/prefetch'
 import { AI_FAILURE_KEY, type AiFailureMark } from '../shared/ai/api-client'
 import { getDefaultResume } from '../shared/db/resume-store'
-import { ensurePlatformTab, sendTabMessageWithRetry, openPlatformLoginTab } from './tab-manager'
+import {
+  ensurePlatformTab,
+  isForegroundMode,
+  releaseDedicatedTabs,
+  sendTabMessageWithRetry,
+  openPlatformLoginTab,
+} from './tab-manager'
 import { checkPlatformAuth, checkAllPlatformsAuth } from '../shared/platform/auth-checker'
 import { generateDailyButlerReport } from '../shared/agent/butler/daily-report-generator'
 import { getDailyReportConfig } from '../shared/db/butler-evolution-store'
@@ -707,10 +713,12 @@ async function autoCollectJobsForCampaign(
       // 首次发现失效时主动拉起登录页，用户扫码登录后自动恢复，不需要到处找入口
       if (!loginTabOpened[platform]) {
         loginTabOpened[platform] = true
+        const foreground = await isForegroundMode()
         const opened = await openPlatformLoginTab(platform)
+        const where = foreground ? '已自动为你打开登录页' : '已在后台标签页打开登录页（不会切走你当前的页面）'
         await appendCampaignLog(
           opened
-            ? `🔐 【${pName}】登录已失效，已自动为你打开登录页。完成登录后该平台会自动恢复投递（在此之前每 10 分钟复查一次，不再反复提醒）`
+            ? `🔐 【${pName}】登录已失效，${where}。完成登录后该平台会自动恢复投递（在此之前每 10 分钟复查一次，不再反复提醒）`
             : `🔐 【${pName}】登录已失效，请手动登录后该平台会自动恢复（每 10 分钟复查一次）`,
           'warn',
         )
@@ -1123,6 +1131,13 @@ export const campaignService = {
     windows?: TimeWindow[],
   ) => {
     const cmp = await startAgentCampaign(customQuotas, enabledPlatforms, windows)
+    // 启动即说明运行模式，避免用户以为插件又要把浏览器抢回前台
+    await appendCampaignLog(
+      (await isForegroundMode())
+        ? '🖥 前台可见模式：AIbot 运行时会切回招聘网站标签页（仅建议排查采集问题时开启）'
+        : '🔇 后台静默运行：AIbot 只在专用后台标签页工作，不抢标签页、不聚焦窗口、不改动你正在看的页面',
+      'info',
+    )
     // 启动即校验时段：非时段立刻给出明确提示，避免“开了却一直没动静”
     if (cmp && !isWithinWindow(cmp.windows)) {
       const waitMins = Math.max(1, Math.round(getDelayUntilNextWindow(cmp.windows) / 60_000))
@@ -1151,6 +1166,11 @@ export const campaignService = {
     if (scheduledTimer) clearTimeout(scheduledTimer)
     scheduledTimer = null
     try { await chrome.alarms.clear(ALARM_APPLY_TICK) } catch { /* 预期内异常，安全忽略 */ }
+    // 回收 AIbot 专用后台标签页；用户已点开的标签页会被保留
+    const closed = await releaseDedicatedTabs()
+    if (closed > 0) {
+      await appendCampaignLog(`🧹 已回收 ${closed} 个 AIbot 专用后台标签页`, 'info')
+    }
     return cmp
   },
   togglePlatform: async (platform: PlatformId, enabled: boolean) => {

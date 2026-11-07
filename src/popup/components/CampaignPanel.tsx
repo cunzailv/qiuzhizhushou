@@ -63,6 +63,10 @@ import {
 } from '../../shared/runtime-state'
 import { Disclosure } from '../../components/ui/disclosure'
 import { getCampaignLogHistory, type CampaignLog } from '../../shared/agent/queue-store'
+import {
+  DEFAULT_FOREGROUND_MODE,
+  FOREGROUND_MODE_KEY,
+} from '../../shared/agent/stealth-mode'
 
 const PLATFORM_INFOS: Array<{ id: PlatformId; name: string }> = [
   { id: 'boss', name: 'Boss直聘' },
@@ -170,6 +174,9 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
   const [quotaInput, setQuotaInput] = useState('')
   const cancelQuotaEditRef = useRef(false)
 
+  // 前台可见模式：默认关闭 = AIbot 只在专用后台标签页跑，不抢焦点、不导航用户当前页面
+  const [foregroundMode, setForegroundMode] = useState(DEFAULT_FOREGROUND_MODE)
+
   const [logExpanded, setLogExpanded] = useState(true)
   /** 用户往上翻看历史时暂停自动跟随，不再每 2 秒被强行拉回底部 */
   const [logAutoFollow, setLogAutoFollow] = useState(true)
@@ -237,6 +244,9 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
         setMinSecInput(String(savedInterval.minSeconds))
         setMaxSecInput(String(savedInterval.maxSeconds))
         setStrategy(await getDeliveryStrategy())
+        setForegroundMode(
+          (await getSetting<boolean>(FOREGROUND_MODE_KEY, DEFAULT_FOREGROUND_MODE)) === true,
+        )
 
         const savedQuotas = await getSavedPlatformQuotas()
         setPlatformQuotas(savedQuotas)
@@ -312,6 +322,26 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
     setLogAutoFollow(true)
     if (logContainerRef.current) {
       logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight
+    }
+  }
+
+  /**
+   * 前后台模式切换。默认静默：AIbot 在专用后台标签页采集 / 投递，
+   * 不激活标签页、不聚焦 Chrome 窗口、不导航用户当前正在看的页面。
+   * 只有后台标签页被浏览器节流导致采不到岗位时，才需要临时打开前台可见模式。
+   */
+  const handleForegroundModeChange = async (enabled: boolean) => {
+    setForegroundMode(enabled)
+    try {
+      await setSetting(FOREGROUND_MODE_KEY, enabled)
+      onNotify?.(
+        enabled
+          ? '已切到前台可见模式：AIbot 运行时会切回招聘页，适合排查采集问题'
+          : '已恢复后台静默运行：AIbot 不再抢焦点，也不改动你当前的页面',
+        'success',
+      )
+    } catch {
+      onNotify?.('运行模式保存失败，请重试', 'error')
     }
   }
 
@@ -879,6 +909,23 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             刷新授权
           </button>
         </div>
+
+        {/* 运行模式：默认后台静默，不抢用户焦点；前台可见模式仅作排查兜底 */}
+        <label className="mt-2 flex items-start gap-2 rounded-md border border-surface-hairline bg-surface-dark px-2.5 py-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={foregroundMode}
+            onChange={(event) => void handleForegroundModeChange(event.target.checked)}
+            className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-accent"
+          />
+          <span className="min-w-0">
+            <span className="block text-xs text-text-secondary">前台可见模式（会抢焦点）</span>
+            <span className="block text-xs text-text-muted mt-0.5 leading-relaxed">
+              默认关闭：AIbot 在专用后台标签页运行，不切换标签页、不聚焦窗口、不改动你正在看的页面。
+              若后台标签页被浏览器节流导致采不到岗位，可临时打开此项排查。
+            </span>
+          </span>
+        </label>
       </Disclosure>
 
       {/* 全自主无人值守队列说明：补仓按钮已收进「复盘与维护工具」 */}
@@ -893,7 +940,8 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
               </span>
             </div>
             <div className="text-xs text-text-muted mt-0.5 truncate">
-              待投队列由 AIbot 自主巡检开启平台推荐流自动补仓
+              待投队列由 AIbot 自主巡检补仓 ·{' '}
+              {foregroundMode ? '前台可见模式（会切回招聘页）' : '后台静默运行，不抢焦点'}
             </div>
           </div>
         </div>

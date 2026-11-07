@@ -1,9 +1,13 @@
 # Changelog
 
-## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用、智能中控对话台 Tool-Calling Agent、异常留痕跨上下文统一、unslop 界面设计体系、信息架构分层收纳、图标入口直达右侧侧栏、投递确认层与行为日志历史回看、搜索方向生效与技术栈硬约束
+## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用、智能中控对话台 Tool-Calling Agent、异常留痕跨上下文统一、unslop 界面设计体系、信息架构分层收纳、图标入口直达右侧侧栏、投递确认层与行为日志历史回看、搜索方向生效与技术栈硬约束、后台静默运行不抢焦点
 
 ### Added
 
+- **后台静默运行**：新增 `src/shared/agent/stealth-mode.ts`（`shouldActivateTab` / `pickStealthTab` / `pickForegroundTab` / `isProtectedTab`）与设置 `aibotForegroundMode`（默认 `false`）。AIbot 默认只在专用**非活跃**标签页里采集 / 投递，不激活标签页、不聚焦窗口、不导航用户当前页面
+- **专用后台标签页**：`aibot_dedicated_tabs` 按平台记住后台 tab，避免每轮新建；终止 AIbot 时 `releaseDedicatedTabs()` 回收，用户已点开的标签页一律保留。启动日志写明运行模式，登录失效时后台打开登录页 + 通知，不打断手上的事
+- **前台可见模式开关**：AIbot →「复盘与维护工具」提供显式开关，首屏队列说明同步显示当前模式；仅当浏览器对后台标签页节流导致采不到岗位时临时打开排查。用户主动点击图标 / 打开平台 / 展开侧栏仍按意图激活，不受影响
+- **回归测试**：新增 `tests/stealth-mode.test.ts`（26 例：模式决策、多窗口活跃页排除、专用 tab 优先级与让位、前台兼容、tab-manager 激活调用被模式开关包住、UI 开关与回收留痕）。测试总量 1090 → 1116（79 → 80 文件）
 - **技术栈硬约束**：新增 `src/shared/agent/stack-guard.ts`（`extractTargetStacks` / `isCrossStackJob` / `detectTechStacks`）。方向里明确写了 PHP 时，「Java开发」「前端开发」「Golang后端」一律硬否决；通用「后端开发工程师」不带栈照常放行。技能清单只用于补主语言栈，避免「熟悉 Vue」把前端算成求职方向
 - **搜索词来源扩充**：`extractSearchKeywords` 接入简历 `structuredData.skills`、项目 `technologies`、画像 `skillLevels` 与一句话画像中的标准职位名；用户填的方向仍优先
 - **方向可见性**：采集日志写明本轮搜索词 + 来源（设置里的「岗位名称」/ 简历技能）+ 目标方向 + 「技术栈约束【PHP】已生效：剔除 N 个不对口岗位」；浮窗扫描文案显示 `限 PHP`
@@ -81,6 +85,7 @@
 
 ### Fixed
 
+- **「打开别的软件 / 切换页面 / 下滑，Chrome 都被拉回招聘网站」**：`ensurePlatformTab()` 每个投递任务与每轮补仓都无条件 `tabs.update({active:true})` + `windows.update({focused:true})`，还优先复用**当前活跃标签页**并导航到搜索 URL。现默认后台静默：排除所有窗口的活跃页、只操作专用后台 tab；激活 / 聚焦调用全部收进 `if (foreground)` 分支，`openPlatformLoginTab()` 同步改为后台打开
 - **「岗位名称写了 php 后台开发 / AI 全栈开发却没效果」**：长词组没被拆开、简历技能没参与提取、脉脉搜索 URL 忽略关键词，三层叠加导致平台搜不到结果并降级成推荐流。现按空格拆词 + 简历技能参与 + 五平台都带 query
 - **「一个前端、一个 Java 开发，都不对，还是精投」**：旧版本地语义「只统计不否决」+ 后端族谱把 Java 当同义 + `relaxCareerFilter` 清空方向白名单 + 软过滤补足名额，没配 AI Key 的精投等于完全不设防；硬编码兜底词里还含「前端开发工程师」，会真的去搜前端岗位。现四处统一加技术栈硬约束 + 精投本地闸门，跨栈岗位永远进不了队列
 - **「显示投递成功，但手机里没有聊天和投递记录」的假阳性**：过去 `clickApplyButton() === true` 就直接落盘 + 去重 + 配额 + 输出成功日志，自愈点击 Tier 3/4 点错相似按钮、弹窗被风控/登录态拦截、半自动链路根本没有招呼语输入框，都会被记成一次成功投递。现改为必须拿到平台侧状态变化证据才记成功；拿不到一律标「未确认」并留痕，不再虚报
