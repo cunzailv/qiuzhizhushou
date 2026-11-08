@@ -285,7 +285,10 @@ describe('必达模式接线契约', () => {
     expect(service).toContain('userRestEnabled && !mustAchieveActive')
     expect(service).toContain('mustAchieveActive || isCapacityUrgent(capacity?.status)')
     expect(service).toContain('activePlatforms.length === 0 && mustAchieveActive')
-    expect(service).toContain('必达模式受阻')
+    // 全平台被标日限不再空等 10 分钟：每轮解除标记 + 30 秒后立刻重试
+    expect(service).toContain('clearPlatformExhausted(exhaustedPlatforms)')
+    expect(service).toContain('scheduleNextTick(MUST_ACHIEVE_EXHAUSTED_RETRY_MS)')
+    expect(service).not.toContain('coolingDown')
     expect(service).toContain('shouldKeepCollectingOnNoSource(mustAchieve)')
   })
 
@@ -301,7 +304,9 @@ describe('必达模式接线契约', () => {
   it('验证码不再整体停机；账号受限仍保留安全熔断但明确说明', () => {
     expect(service).toContain('必达模式不整体停机')
     expect(service).toContain('await markPlatformExhausted(task.platform)')
-    expect(service).toContain('必达模式下唯一的安全例外')
+    // 必达模式只熔断出问题的平台，不再把整个活动 abort 成永久停机
+    expect(service).toContain('其余平台继续投递直到目标达成')
+    expect(service).toContain('await abortAgentCampaign(\'blocked\')')
   })
 
   it('UI 默认开启必达并把承诺写清楚', () => {

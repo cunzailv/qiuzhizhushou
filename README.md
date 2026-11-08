@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1243%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1268%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -31,7 +31,7 @@
 - **会自检也会复盘**：L2 语义相关性自愈、L3 真实回复率回流反哺搜索方向、Planner 防数字幻觉，Tool-Calling 中控对话台支持多轮上下文与危险动作人工审批。
 - **数据留在本地**：简历、画像、队列、日志保存在浏览器本地（Dexie / IndexedDB + `chrome.storage`）；AI 能力走你自己配置的模型接口，不上传第三方服务。
 
-> 当前状态：`85` 个测试文件 / `1243` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
+> 当前状态：`86` 个测试文件 / `1268` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
@@ -263,6 +263,8 @@
 
 **设定目标 = 系统承诺达成**，默认开启「必达模式」（可手动关闭，关闭后回到尽力而为的节奏建议）。未达成前 AIbot 不自行停机，所有插件自己能改的参数都会被自动接管：自动切海投、抬配额、开启全部平台、放行工作时段、关闭模拟休息、放宽评分门槛与采集条件。`mustAchieve` 老数据缺字段时默认按开启处理。
 
+**独立周期看门狗保证调度永不断**：`apply-tick` 是一次性定时器，早期版本只要有一轮发现 campaign 不是 `running` 就直接返回、也不重建定时器（验证码 / 无岗位来源 / 日限 / 账号受限 / 误判完成都会触发），流水线就此永久静默 —— 这正是「跑到 16/80 就不动」的真实原因。现在另有一条**独立于 tick、由浏览器持久化的 1 分钟周期 alarm**：只要平台确认投递数没到目标，就把被挂起的活动自动拉回 `running`，同时清掉休息态、无效词锁与日限标记、重新接管配额，并立即安排下一轮投递。人工暂停给 5 分钟宽限、账号受限给 15 分钟安全冷却，到期仍自动回来；目标达成后看门狗完全不干预。想彻底停机请关闭「必达模式」。
+
 **必达模式里没有「超时」**：小时数只是进度参考，不是失败判定。超过设定时限后状态仍显示「`16/80 · 目标必达继续投递`」，日志按 `info` 级进度播报、面板用正常色，不会弹「已超时 / 未达成」这类标签。只有显式关掉必达，才回到有「超时 / `missed`」的旧节奏语义。
 
 | 层 | 说明 |
@@ -273,12 +275,14 @@
 | **预警与诊断**（非必达模式） | 赶不上时每 10 分钟给一次可操作建议（放宽岗位名称 / 多开平台 / 下调目标，或提示目标超过配额合计）；到点未达成只通知一次，指引去查「未记为投递成功」「没有发现新岗位」与登录态日志。必达模式下同一条日志改为「🎯 目标进度」按 `info` 级播报，不叫预警 |
 | **运行中改目标** | `SET_CAPACITY_GOAL` 路由即时写设置 + campaign + 日志，并唤醒下一轮调度，不用重启 AIbot |
 | **必达接管** | 新增 `src/shared/agent/must-achieve.ts`（`planMustAchieveQuotas` / `relaxFiltersForMustAchieve` / `shouldBypassWorkWindow` / `resolveMustAchieveMatchThreshold` / `shouldKeepCollectingOnNoSource`）。启动或改目标时 `applyMustAchieveTakeover()` 一次性把策略 / 配额 / 平台开关 / 日限标记拉到位，配额留 25%（至少 10 份）余量且只升不降 |
-| **达成才停** | `isCampaignFinished()` 在必达目标未达成时恒为 `false`：没有超时判定、不返回 `missed`、全平台日限耗尽不判完成、关键词全被标无效不暂停、`activePlatforms=0` 时按 10 分钟冷却自动解除标记继续换平台；只有平台确认投递数达标才显式停机并通知 |
+| **达成才停** | `isCampaignFinished()` 在必达目标未达成时恒为 `false`：没有超时判定、不返回 `missed`、全平台日限耗尽不判完成、关键词全被标无效不暂停；`activePlatforms=0` 时每轮自动解除标记、30 秒后立刻换平台重试（不再空等 10 分钟冷却）。只有平台确认投递数达标才显式停机并通知 |
+| **看门狗自愈** | `must-achieve.ts` 的 `decideMustAchieveWatchdog()` 是纯函数状态机：系统自设的挂起（验证码 / 无来源 / 日限）立即恢复，人工暂停宽限 5 分钟、账号受限冷却 15 分钟后自动恢复，目标达成后完全不干预。后台 `ensureMustAchieveAlive()` 在 tick 开头、冷启动与 1 分钟周期 alarm 三处被调用，复活时清休息态 / 无效词锁 / 日限标记并重新接管配额 |
+| **执行页对齐** | 采集时把「搜索词 + 来源页码」写进任务（`searchKeyword` / `searchPage`），执行前用 `ensurePlatformTab(platform, keyword, page)` 把后台标签页导回同一张列表页。修掉异步补仓把标签页导航到别的关键词后、执行器报「未找到对应岗位卡片」导致投递失败却不涨进度的问题 |
 | **可控门槛全放开** | 必达模式全程开启产能优先：本地匹配分门槛降到 0（只排序不否决）、活跃时间临时放宽到「不限时间」、本地语义硬闸门降级、每平台每轮采集上限 50、跳过历史回收冷却、锁定 30 秒高频补仓。用户设置本身不改写 |
-| **风险例外** | 验证码不再整体停机：该平台临时冷却、其余平台继续投；账号受限仍保留安全熔断（继续点击会加重账号处罚），日志明确写明这是唯一例外且目标不会记为成功 |
-| **回归测试** | `tests/capacity-goal.test.ts`（归一化 / 状态机 / 必达无超时判定 / 倒计时持久化 / 静态契约）+ `tests/capacity-delivery-loop.test.ts`（24 例：产能闭环）+ `tests/must-achieve.test.ts`（25 例：自动接管纯函数、`isCampaignFinished` 真实行为、全链路接线） |
+| **风险例外** | 验证码不再整体停机：该平台临时冷却、其余平台继续投。账号受限在必达模式下**只熔断出问题的平台**、其余平台继续投，30 秒后自动重试；不再把活动写成 `aborted` 造成永久停机。账号安全优先（继续猛点会加重处罚），目标也不会被记为成功 |
+| **回归测试** | `tests/capacity-goal.test.ts`（归一化 / 状态机 / 必达无超时判定 / 倒计时持久化 / 静态契约）+ `tests/capacity-delivery-loop.test.ts`（24 例：产能闭环）+ `tests/must-achieve.test.ts`（25 例：自动接管纯函数、`isCampaignFinished` 真实行为、全链路接线）+ `tests/must-achieve-watchdog.test.ts`（25 例：状态复活判定、周期 alarm 接线、以及 **16/80 被挂起后真的恢复成 running** 的行为测试） |
 
-> 诚实边界：**必达是执行承诺，不是虚报数字**。只认平台侧已确认投递数，点了按钮但平台没确认永远不算成功；技术栈 / 岗位方向 / 黑名单硬约束保留，不会为了凑数乱投前端或 Java；间隔压缩仍守 8 秒防风控下限。平台登录失效、验证码与账号受限属于平台侧物理阻断，系统会持续重试并明确留痕卡在哪一步，不会静默停机，也不会把目标写成「已达成」。
+> 诚实边界：**必达是执行承诺，不是虚报数字**。只认平台侧已确认投递数，点了按钮但平台没确认永远不算成功；技术栈 / 岗位方向 / 黑名单硬约束保留，不会为了凑数乱投前端或 Java；间隔压缩仍守 8 秒防风控下限。平台登录失效、验证码与账号受限属于平台侧物理阻断，系统会持续重试并明确留痕卡在哪一步，不会静默停机，也不会把目标写成「已达成」——但如果平台侧确实长期阻断（日限 / 封禁 / 岗位供给耗尽），进度会停在真实数字上并持续重试，不会伪造达标。人工暂停 / 终止不再是永久出口（分别 5 / 15 分钟后自动恢复），要彻底停机请关闭「必达模式」。
 
 #### 产能闭环修复 · 为什么「设了目标却一个都投不出去」（2026-11-07 现场日志）
 
@@ -414,7 +418,7 @@ npm run build
 | 样式 | Tailwind CSS 3 + shadow DOM 注入 |
 | 数据 | Dexie (IndexedDB) + chrome.storage |
 | AI | OpenAI / DeepSeek / 自定义兼容接口 + 本地语义精筛 + AI SDK 7 tool-calling 循环 |
-| 测试 | Vitest（1189 用例 / 83 文件）+ Playwright（E2E） |
+| 测试 | Vitest（1268 用例 / 86 文件）+ Playwright（E2E） |
 | UI 组件 | Lucide React + Recharts + react-markdown / remark-gfm |
 
 ## 📁 项目结构
@@ -462,7 +466,7 @@ docs/EXTERNAL_AI.md     # 外部 AI 接入完整指南
 ## 🧪 测试与验收
 
 ```bash
-npm test                                       # tsc -b + vite build + 全部 1189 个测试用例
+npm test                                       # tsc -b + vite build + 全部 1268 个测试用例
 npx vitest run                                  # 全量单测/E2E：83 文件 / 1189 用例
 npx vitest run tests/self-healing-*.test.ts     # 自愈架构专项：146 用例（基线 110 + 新增 36）
 ```

@@ -44,6 +44,8 @@ export interface ApplyTask {
   bossTitle?: string
   /** L3 结果复盘：该岗位由哪个搜索关键词采集而来，用于按方向统计真实回复率 */
   searchKeyword?: string
+  /** 采集来源页码：执行任务时据此把后台标签页导航回同一页，否则会「找不到岗位卡片」 */
+  searchPage?: number
   status: TaskStatus
   attempts: number            // 已尝试次数，上限 2
   leaseUntil?: number         // running 态租约到期时间戳（毫秒）

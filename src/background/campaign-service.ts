@@ -100,6 +100,10 @@ import {
   shouldMarkKeywordInvalid,
   resolveCollectMaxJobs,
   MUST_ACHIEVE_EXHAUSTED_COOLDOWN_MS,
+  MUST_ACHIEVE_EXHAUSTED_RETRY_MS,
+  MUST_ACHIEVE_WATCHDOG_ALARM,
+  MUST_ACHIEVE_WATCHDOG_PERIOD_MINUTES,
+  decideMustAchieveWatchdog,
 } from '../shared/agent/must-achieve'
 import { log, logWarn, logError } from '../shared/utils/logger'
 
@@ -430,12 +434,42 @@ function readCapacityEvaluation(
 // ─────────── 必达模式：自动接管所有可控参数 ───────────
 /** 「全平台日限耗尽」冷却时间戳必须持久化，SW 重启后不能立刻狂点被限流的平台 */
 const MUST_ACHIEVE_EXHAUSTED_KEY = 'aibot_must_achieve_exhausted_at'
+/** 最近一次流水线挂起时间：看门狗据此区分「刚手动暂停」与「已卡死很久」 */
+const MUST_ACHIEVE_PAUSED_AT_KEY = 'aibot_must_achieve_paused_at'
 /** 各类提示节流（只是提示，重启后重打一条无副作用） */
 let lastMustAchieveWindowNoteAt = 0
 let lastMustAchieveBlockNoteAt = 0
 let capacityOverrunNotifiedFor = ''
 /** 采集条件自动放宽只播报一次，避免每 30 秒刷同一条日志 */
 let mustAchieveRelaxAnnounced = false
+/** 看门狗与 tick 可能同时被唤醒，用一个内存锁避免重复复活 */
+let ensuringAlive = false
+
+async function readPausedAt(): Promise<number> {
+  try {
+    const res = await chrome.storage.local.get(MUST_ACHIEVE_PAUSED_AT_KEY)
+    const value = Number(res?.[MUST_ACHIEVE_PAUSED_AT_KEY] ?? 0)
+    return Number.isFinite(value) ? value : 0
+  } catch {
+    return 0
+  }
+}
+
+async function markPausedAt(at: number): Promise<void> {
+  try {
+    await chrome.storage.local.set({ [MUST_ACHIEVE_PAUSED_AT_KEY]: at })
+  } catch {
+    // 写不进去时按「历史脏数据」处理：看门狗会立即复活，不会把目标卡死
+  }
+}
+
+async function clearPausedAt(): Promise<void> {
+  try {
+    await chrome.storage.local.remove(MUST_ACHIEVE_PAUSED_AT_KEY)
+  } catch {
+    // 同上，无副作用
+  }
+}
 
 async function readExhaustedResetAt(): Promise<number> {
   try {
@@ -463,7 +497,7 @@ async function markExhaustedResetAt(at: number): Promise<void> {
 async function applyMustAchieveTakeover(
   campaign: Campaign,
   goal: CapacityGoal,
-  source: 'start' | 'goal' | 'blocked',
+  source: 'start' | 'goal' | 'blocked' | 'watchdog',
   opts: { allowRevive?: boolean } = {},
 ): Promise<void> {
   if (!isMustAchieve(goal)) return
@@ -525,6 +559,92 @@ export function scheduleNextTick(delayMs = 60_000) {
 }
 
 /**
+ * 目标必达的独立周期看门狗 alarm。
+ *
+ * `apply-tick` 是一次性 alarm：tick 只要早退一次（最常见是 campaign 被写成
+ * paused / done），就再也没人重建它，整条流水线永久静默。
+ * 这个周期 alarm 与 tick 完全解耦，浏览器会持久化，即使 SW 被回收也会每分钟
+ * 把 Service Worker 唤醒一次来校验目标状态。
+ */
+export async function ensureWatchdogAlarm(): Promise<void> {
+  try {
+    const existing = await chrome.alarms.get(MUST_ACHIEVE_WATCHDOG_ALARM)
+    if (existing) return
+    chrome.alarms.create(MUST_ACHIEVE_WATCHDOG_ALARM, {
+      delayInMinutes: MUST_ACHIEVE_WATCHDOG_PERIOD_MINUTES,
+      periodInMinutes: MUST_ACHIEVE_WATCHDOG_PERIOD_MINUTES,
+    })
+  } catch (e) {
+    logWarn(MOD, 'ensureWatchdogAlarm', e)
+  }
+}
+
+/**
+ * 目标必达看门狗：只要平台确认投递数没到目标，就把流水线拉回 running。
+ *
+ * 返回 true 表示本轮已复活，调用方应重新读一份 campaign 再继续，
+ * 这样复活的这一轮就能立刻领任务投递，不白白浪费一个调度周期。
+ * 进度一律来自平台确认投递数（quotas.applied），绝不因为「恢复运行」虚报成功。
+ */
+export async function ensureMustAchieveAlive(known?: Campaign | null): Promise<boolean> {
+  if (ensuringAlive) return false
+  ensuringAlive = true
+  try {
+    await ensureWatchdogAlarm()
+    const campaign = known !== undefined ? known : await getCampaign()
+    if (!campaign) return false
+
+    const goal = campaign.capacityGoal
+    const progress = summarizeQuotaProgress(campaign)
+    const decision = decideMustAchieveWatchdog({
+      status: campaign.status,
+      pausedReason: campaign.pausedReason,
+      pausedAt: await readPausedAt(),
+      mustAchieve: isMustAchieve(goal),
+      achieved: !!goal?.enabled && isGoalAchieved(goal, progress.applied),
+      applied: progress.applied,
+      targetJobs: goal?.targetJobs ?? 0,
+      now: Date.now(),
+    })
+
+    if (decision.kind === 'resume') {
+      await resumeAgentCampaign()
+      await clearPausedAt()
+      // 挂起期间遗留的休息态、无效词锁、日限标记都是系统自设的出口，
+      // 不清掉的话复活后第一轮又会立刻停下来。
+      await persistRestState({ restUntil: null, consecutiveRestCounter: 0 })
+      await clearInvalidKeywords()
+      const live = await getCampaign()
+      if (live && goal) {
+        await applyMustAchieveTakeover(live, goal, 'watchdog')
+        const blocked = (Object.keys(live.quotas) as PlatformId[]).filter(
+          (p) => live.quotas[p]?.exhausted,
+        )
+        if (blocked.length > 0) await clearPlatformExhausted(blocked)
+      }
+      await appendCampaignLog(
+        `🔁 目标必达看门狗：${decision.reason}。已自动恢复运行、解除休息/无效词/日限标记并重新接管配额，本轮立即继续投递；只认平台确认投递数`,
+        'warn',
+      )
+      scheduleNextTick(1_000)
+      return true
+    }
+
+    if (decision.kind === 'idle' && campaign.status === 'running') {
+      // running 但调度链断了（SW 被回收 / alarm 被清）：补挂一次 tick
+      const tickAlarm = await chrome.alarms.get(ALARM_APPLY_TICK).catch(() => undefined)
+      if (!tickAlarm && !scheduledTimer) scheduleNextTick(3_000)
+    }
+    return false
+  } catch (e) {
+    logWarn(MOD, 'ensureMustAchieveAlive', e)
+    return false
+  } finally {
+    ensuringAlive = false
+  }
+}
+
+/**
  * 一次性修复历史脏数据：把「岗位名称」里被 AI 进化提案 / 简历项目名污染的长句清洗成干净短词。
  * 典型脏数据：「刚刚好智创网站 全栈独立开发 / AI全栈:后台开发 / 全栈」
  * 清洗后：「全栈独立开发 AI全栈 后台开发 全栈」
@@ -582,6 +702,11 @@ export async function resumeFalseCaptchaPauseIfNeeded(): Promise<void> {
  */
 export async function resumeSchedulerIfNeeded(): Promise<void> {
   try {
+    // 必达目标未达成时，即使 campaign 被写成 paused / done 也要先复活；
+    // 旧版这里一见 status !== 'running' 就 return，冷启动后调度永久消失。
+    await ensureWatchdogAlarm()
+    const revived = await ensureMustAchieveAlive()
+    if (revived) return
     const existing = await chrome.alarms.get(ALARM_APPLY_TICK)
     if (existing) return
     const campaign = await getCampaign()
@@ -602,10 +727,15 @@ export async function runCampaignTick(): Promise<void> {
   isTicking = true
 
   try {
-    const campaign = await getCampaign()
-    if (!campaign || campaign.status !== 'running') {
-      return
-    }
+    let campaign = await getCampaign()
+    if (!campaign) return
+
+    // 0. 目标必达看门狗：调度链断了 / 状态被挂起，都先在这里自愈。
+    // 旧版此处 `status !== 'running' ⇒ return`，而 apply-tick 是一次性 alarm，
+    // 一次早退就再也不会有下一轮 tick —— 必达模式「未达成不停机」全成死代码。
+    const revived = await ensureMustAchieveAlive(campaign)
+    if (revived) campaign = await getCampaign()
+    if (!campaign || campaign.status !== 'running') return
 
     const goalNow = campaign.capacityGoal
     const progressNow = summarizeQuotaProgress(campaign)
@@ -842,38 +972,31 @@ export async function runCampaignTick(): Promise<void> {
           (p) => campaign.quotas[p].enabled !== false,
         )
         const exhaustedPlatforms = enabledIds.filter((p) => campaign.quotas[p].exhausted)
-        const allExhausted = enabledIds.length > 0 && exhaustedPlatforms.length === enabledIds.length
         const lastReset = await readExhaustedResetAt()
-        const cooldownLeft = MUST_ACHIEVE_EXHAUSTED_COOLDOWN_MS - (Date.now() - lastReset)
-        const coolingDown = allExhausted && cooldownLeft > 0
+        const sinceReset = Date.now() - lastReset
 
-        if (coolingDown) {
-          const waitMins = Math.max(1, Math.round(cooldownLeft / 60_000))
-          if (Date.now() - lastMustAchieveBlockNoteAt > 10 * 60_000) {
-            lastMustAchieveBlockNoteAt = Date.now()
-            await appendCampaignLog(
-              `⛔ 必达模式受阻：${exhaustedPlatforms.length} 个平台都被平台侧日限挡住（已确认投递 ${progressNow.applied}/${goalNow!.targetJobs}）。这是平台限制，不是插件放弃；约 ${waitMins} 分钟后自动解除标记继续重试。建议同时确认各平台登录态`,
-              'warn',
-            )
+        /**
+         * 旧版在「所有平台都被标 exhausted」时直接 return 等 10 分钟冷却，
+         * 这 10 分钟里既不采集也不投递 —— 进度就停在这里，用户看到的就是
+         * 「16/80 一直不动」。exhausted 是插件自己写的标记，属于可控参数，
+         * 必达模式不能拿它当停机理有：每轮都接管、每轮都解除、每轮都重试。
+         * 冷却只用来控制日志频率，不再阻塞调度。
+         */
+        await applyMustAchieveTakeover(campaign, goalNow!, 'blocked', { allowRevive: true })
+        if (exhaustedPlatforms.length > 0) {
+          await clearPlatformExhausted(exhaustedPlatforms)
+          if (sinceReset >= MUST_ACHIEVE_EXHAUSTED_COOLDOWN_MS) {
+            await markExhaustedResetAt(Date.now())
           }
-          scheduleNextTick(Math.min(cooldownLeft, 5 * 60_000))
-          return
-        }
-
-        await applyMustAchieveTakeover(campaign, goalNow!, 'blocked', {
-          allowRevive: cooldownLeft <= 0,
-        })
-        if (exhaustedPlatforms.length > 0 && cooldownLeft <= 0) {
-          await markExhaustedResetAt(Date.now())
         }
         if (Date.now() - lastMustAchieveBlockNoteAt > 10 * 60_000) {
           lastMustAchieveBlockNoteAt = Date.now()
           await appendCampaignLog(
-            `🔁 必达模式：配额/平台状态已自动接管，未达成 ${progressNow.applied}/${goalNow!.targetJobs} 前不停机，立即继续换平台补仓`,
+            `🔁 必达模式：配额/日限标记已自动接管并解除，已确认投递 ${progressNow.applied}/${goalNow!.targetJobs}，未达成前持续换平台/翻页补仓，不空等冷却。建议同时确认各平台登录态`,
             'info',
           )
         }
-        scheduleNextTick(30_000)
+        scheduleNextTick(MUST_ACHIEVE_EXHAUSTED_RETRY_MS)
         return
       }
 
@@ -961,8 +1084,14 @@ export async function runCampaignTick(): Promise<void> {
     )
 
     // 5. 确保目标平台 Tab 已就绪
+    // 执行前必须回到该任务被采集时的「关键词 + 页码」列表页。
+    // 旧版只传 platform：步骤 8 的异步补仓会把同一个后台 tab 导航到别的关键词/页，
+    // 下一个任务就落在错误的列表页上，执行器报「未找到对应岗位卡片」→ failed，
+    // 于是投了很多轮进度却不涨。URL 已一致时 ensurePlatformTab 不会重复导航。
+    const taskKeyword = (task.searchKeyword || '').trim()
+    const taskPage = taskKeyword ? (task.searchPage || 1) : 1
     await appendCampaignLog(`🌐 正在连接 ${task.platform} 平台标签页...`, 'info')
-    const tab = await ensurePlatformTab(task.platform)
+    const tab = await ensurePlatformTab(task.platform, taskKeyword || undefined, taskPage)
     if (!tab || !tab.id) {
       logWarn(MOD, 'runCampaignTick', `Cannot open or connect to tab for ${task.platform}`)
       await updateTaskResult(task.id, {
@@ -1116,7 +1245,7 @@ async function autoCollectJobsForCampaign(
   //    常规模式跳过「24 小时内被判定搜不到相关岗位」的关键词；
   //    必达模式忽略这份标记，否则当天所有词会被自己一次性锁死。
   const invalidKeywords = await loadInvalidKeywords()
-  const keywordInfo = await getNextSearchKeyword(
+  let keywordInfo = await getNextSearchKeyword(
     defaultResume,
     undefined,
     filters,
@@ -1124,17 +1253,38 @@ async function autoCollectJobsForCampaign(
   )
   if (keywordInfo.exhausted) {
     if (keywordInfo.reason === 'no_keywords') {
-      // 一个可信关键词都没有时，绝不替用户猜「前端 / 全栈」之类的通用词去乱搜。
-      // 保持 running，让用户填完期望职位后下一轮自动恢复，比直接暂停更不容易让人以为坏了。
-      await appendCampaignLog(
-        '⛔ 没有可用的搜索词：没在「期望职位」里读到职位名，简历技能 / 项目技术栈里也没解析出 PHP、AI 开发、全栈这类词。请到「设置 → 岗位名称」填写，例如「php 后台开发, AI 全栈开发」（用逗号或顿号分隔）。本轮不采集推荐流岗位，填好后下一轮自动恢复',
-        'error',
-      )
-      sendNotification(
-        '需要填写期望职位',
-        '没读到可用的搜索关键词，本轮不采集岗位。请到设置里填写岗位名称，例如「php 后台开发」。',
-        2,
-      )
+      if (mustAchieve) {
+        /**
+         * 旧版在必达模式下也走这条分支：打一条 error + 通知就 return false，
+         * 主循环继续每 30 秒巡检却永远不采集，进度就静止了。
+         * 必达模式改从平台推荐流继续找岗位（技术栈 / 方向 / 黑名单硬约束仍生效，
+         * 不凭空猜「前端」这类通用词）；用户补填岗位名称后下一轮自动切回精准搜索。
+         */
+        keywordInfo = {
+          ...keywordInfo,
+          exhausted: false,
+          keyword: '',
+          index: 0,
+          total: 1,
+          reason: 'ok',
+        }
+        await appendCampaignLog(
+          '⚠️ 必达模式没读到搜索词：本轮改从平台推荐流补仓（技术栈硬约束仍生效，不会乱投跨栈岗位）。建议到「设置 → 岗位名称」补充职位名，例如「php开发, 后端开发, AI 全栈开发」，下一轮自动切回精准搜索',
+          'warn',
+        )
+      } else {
+        // 一个可信关键词都没有时，绝不替用户猜「前端 / 全栈」之类的通用词去乱搜。
+        // 保持 running，让用户填完期望职位后下一轮自动恢复，比直接暂停更不容易让人以为坏了。
+        await appendCampaignLog(
+          '⛔ 没有可用的搜索词：没在「期望职位」里读到职位名，简历技能 / 项目技术栈里也没解析出 PHP、AI 开发、全栈这类词。请到「设置 → 岗位名称」填写，例如「php 后台开发, AI 全栈开发」（用逗号或顿号分隔）。本轮不采集推荐流岗位，填好后下一轮自动恢复',
+          'error',
+        )
+        sendNotification(
+          '需要填写期望职位',
+          '没读到可用的搜索关键词，本轮不采集岗位。请到设置里填写岗位名称，例如「php 后台开发」。',
+          2,
+        )
+      }
     } else if (shouldKeepCollectingOnNoSource(mustAchieve)) {
       // 必达模式：关键词全被标无效属于「系统自己加的锁」，解锁后继续巡检，绝不暂停活动。
       await clearInvalidKeywords()
@@ -1154,7 +1304,8 @@ async function autoCollectJobsForCampaign(
         2,
       )
     }
-    return false
+    // 必达模式 no_keywords 已在上面降级为「推荐流继续采」，不能在这里 return
+    if (keywordInfo.exhausted) return false
   }
   const targetCareers = extractTargetCareers(defaultResume, filters)
   const primaryCareerKeyword =
@@ -1263,6 +1414,7 @@ async function autoCollectJobsForCampaign(
             relaxCareerFilter,
             mustAchieve,
             keyword: primaryCareerKeyword,
+            page: currentPage,
             filters,
             retryCooldownMs,
           },
@@ -1296,6 +1448,7 @@ async function autoCollectJobsForCampaign(
               relaxCareerFilter: true,
               mustAchieve,
               keyword: primaryCareerKeyword,
+              page: currentPage,
               filters,
               retryCooldownMs,
             },
@@ -1474,14 +1627,15 @@ async function autoCollectJobsForCampaign(
 
 /** 处理 Content Script 返回的单任务执行结果 */
 async function handleTaskExecutionResult(task: ApplyTask, result: ExecuteTaskResult) {
+  const current = await getCampaign()
+  const progress = current ? summarizeQuotaProgress(current) : null
+  const mustAchieveActive =
+    !!current?.capacityGoal &&
+    isMustAchieve(current.capacityGoal) &&
+    !isGoalAchieved(current.capacityGoal, progress?.applied ?? 0)
+
   // 1. 验证码挂起处理
   if (result.riskDetected === 'captcha') {
-    const current = await getCampaign()
-    const progress = current ? summarizeQuotaProgress(current) : null
-    const mustAchieveActive =
-      !!current?.capacityGoal &&
-      isMustAchieve(current.capacityGoal) &&
-      !isGoalAchieved(current.capacityGoal, progress?.applied ?? 0)
     logWarn(MOD, 'handleTaskExecutionResult', `Captcha detected on ${task.platform}!`)
 
     if (mustAchieveActive) {
@@ -1535,15 +1689,36 @@ async function handleTaskExecutionResult(task: ApplyTask, result: ExecuteTaskRes
       status: 'failed',
       failReason: '账号异常/被风控封禁',
     })
-    await abortAgentCampaign('blocked')
-    await appendCampaignLog(
-      `🛑 [${task.platform}] 账号受限告警！已紧急终止全平台投递！这是必达模式下唯一的安全例外：继续点击会加重账号处罚，因此账号安全优先；目标未达成不会记为成功，人工解除账号异常后重新启动会继续按原目标投递`,
-      'error',
-    )
-    sendNotification('⛔ 账号受限告警', `平台 [${task.platform}] 检测到账号受限文案，已紧急停止全部投递！`, 2)
+    if (mustAchieveActive) {
+      /**
+       * 旧版必达模式下也走 abortAgentCampaign('blocked')：一次性把 status 写成
+       * aborted，而调度只认 running —— 目标没达成却再也不会有人推进。
+       * 现在只熔断「出问题的这一个平台」（账号安全仍然优先），其它平台继续投，
+       * 30 秒后由必达分支自动解除标记重试，看门狗保证调度一直活着。
+       */
+      await markPlatformExhausted(task.platform)
+      await appendCampaignLog(
+        `🛑 [${task.platform}] 账号受限告警！已熔断该平台（继续猛点会加重账号处罚），其余平台继续投递直到目标达成；当前已确认投递 ${progress?.applied ?? 0}/${current!.capacityGoal!.targetJobs}。约 30 秒后自动解除标记重试。请登录官方 APP 核对账号状态`,
+        'error',
+      )
+      sendNotification(
+        '⛔ 账号受限 · 必达继续',
+        `平台 [${task.platform}] 已熔断，其余平台继续投递直到目标达成；请核对账号状态。`,
+        2,
+      )
+    } else {
+      await abortAgentCampaign('blocked')
+      await appendCampaignLog(
+        `🛑 [${task.platform}] 账号受限告警！已紧急终止全平台投递！继续点击会加重账号处罚，因此账号安全优先；人工解除账号异常后可重新启动`,
+        'error',
+      )
+      sendNotification('⛔ 账号受限告警', `平台 [${task.platform}] 检测到账号受限文案，已紧急停止全部投递！`, 2)
+    }
     sendWebhookNotification({
       title: `⛔ 账号受限告警 (${task.platform})`,
-      content: `🛑 平台【${task.platform}】检测到账号受限或违规文案，AIbot 已紧急全量熔断并终止投递，请登录官方 APP 检查账号状态！`,
+      content: mustAchieveActive
+        ? `🛑 平台【${task.platform}】检测到账号受限或违规文案，已熔断该平台，其余平台继续投递直到目标达成。请登录官方 APP 检查账号状态！`
+        : `🛑 平台【${task.platform}】检测到账号受限或违规文案，AIbot 已紧急全量熔断并终止投递，请登录官方 APP 检查账号状态！`,
       type: 'risk_warning',
       extra: { platform: task.platform, taskId: task.id },
     }).catch(() => {})
@@ -1744,14 +1919,30 @@ export const campaignService = {
     } catch (err) {
       logWarn(MOD, 'start', err)
     }
+    // 启动即挂上看门狗，不等第一次 tick：即使这一轮就因为验证码 / 日限被挂起，
+    // 也有独立的周期 alarm 会在下一分钟把流水线拉回来。
+    await ensureWatchdogAlarm()
     scheduleNextTick(1000) // 1 秒后立即启动
     return cmp
   },
   pause: async (reason: Campaign['pausedReason'] = 'user') => {
+    // 必达目标未达成时，人工暂停只是「宽限」而非终止：记下时间让周期看门狗
+    // 5 分钟后自动拉回 running。想彻底停就在目标卡片里关掉「必达模式」。
+    const before = await getCampaign()
+    const unfinished = !!before && isMustAchieve(before.capacityGoal) &&
+      !isGoalAchieved(before.capacityGoal!, summarizeQuotaProgress(before).applied)
     const cmp = await pauseAgentCampaign(reason)
+    if (unfinished) {
+      await markPausedAt(Date.now())
+      await appendCampaignLog(
+        '⏸ 已暂停，但目标必达仍未达成：5 分钟后看门狗会自动恢复投递，不需要手动重启。若想彻底停止，请关闭「必达模式」',
+        'info',
+      )
+    }
     if (scheduledTimer) clearTimeout(scheduledTimer)
     scheduledTimer = null
-    // 暂停/终止后必须同时清掉 alarm 保底，否则 Service Worker 被唤醒后仍会跑下一 tick
+    // 暂停/终止后必须同时清掉 alarm 保底，否则 Service Worker 被唤醒后仍会跑下一 tick；
+    // 独立的周期看门狗 alarm 不清，它负责按必达规则按时把流水线拉回来。
     try { await chrome.alarms.clear(ALARM_APPLY_TICK) } catch { /* 预期内异常，安全忽略 */ }
     return cmp
   },
@@ -1761,7 +1952,17 @@ export const campaignService = {
     return cmp
   },
   abort: async () => {
+    const before = await getCampaign()
+    const unfinished = !!before && isMustAchieve(before.capacityGoal) &&
+      !isGoalAchieved(before.capacityGoal!, summarizeQuotaProgress(before).applied)
     const cmp = await abortAgentCampaign()
+    if (unfinished) {
+      await markPausedAt(Date.now())
+      await appendCampaignLog(
+        '⏹ 已终止，但目标必达仍未达成：账号安全冷却 15 分钟后看门狗会自动恢复投递。若想彻底停止，请关闭「必达模式」',
+        'info',
+      )
+    }
     if (scheduledTimer) clearTimeout(scheduledTimer)
     scheduledTimer = null
     try { await chrome.alarms.clear(ALARM_APPLY_TICK) } catch { /* 预期内异常，安全忽略 */ }

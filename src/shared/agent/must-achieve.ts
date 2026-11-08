@@ -176,3 +176,98 @@ export function shouldMarkKeywordInvalid(mustAchieve: boolean): boolean {
 export function resolveCollectMaxJobs(base: number, mustAchieve: boolean): number {
   return mustAchieve ? Math.max(base, MUST_ACHIEVE_MAX_JOBS) : base
 }
+
+/* -------------------------------------------------------------------------- *
+ * 目标必达看门狗
+ *
+ * 现场问题：用户设了「2 小时投满 80 份」，跑到 16/80 就再也不动。
+ * 根因不是「节奏慢」，而是调度链断了 —— `runCampaignTick()` 只要发现
+ * campaign.status !== 'running' 就直接 return，而 `apply-tick` 是**一次性**
+ * alarm，触发完就没了。任何一次内部自动挂起（验证码 / 无岗位来源 / 日限 /
+ * 平台被标 exhausted 后误判完成）都会让整条流水线永久静默，
+ * 「未达成不停机」的代码全都变成不可达分支。
+ *
+ * 因此必达模式不能只靠 tick 自己续命，必须有一条独立的周期看门狗：
+ * 只要目标没达成，无论流水线被写成什么状态，都要按安全规则把它拉回 running。
+ * -------------------------------------------------------------------------- */
+
+/** 独立于 apply-tick 的周期 alarm 名称；一次性 tick alarm 丢了也能兜底 */
+export const MUST_ACHIEVE_WATCHDOG_ALARM = 'must-achieve-watchdog'
+/** Chrome MV3 alarm 最小周期为 1 分钟 */
+export const MUST_ACHIEVE_WATCHDOG_PERIOD_MINUTES = 1
+/** 账号受限熔断后的安全冷却：到点自动恢复，且由服务层绕开该平台 */
+export const MUST_ACHIEVE_BLOCK_COOLDOWN_MS = 15 * 60_000
+/** 用户手动暂停后的宽限期：到期仍回来完成目标（想彻底停就关掉必达模式） */
+export const MUST_ACHIEVE_MANUAL_PAUSE_MS = 5 * 60_000
+/** 全平台被标日限时的重试间隔：必达模式不空等 10 分钟 */
+export const MUST_ACHIEVE_EXHAUSTED_RETRY_MS = 30_000
+
+export interface MustAchieveWatchdogInput {
+  status: 'running' | 'paused' | 'done' | 'aborted'
+  pausedReason?: 'captcha' | 'user' | 'rate' | 'blocked' | 'no_source'
+  /** 最近一次挂起时间戳；0 / 缺失代表历史脏数据，按「已挂起足够久」处理 */
+  pausedAt: number
+  mustAchieve: boolean
+  achieved: boolean
+  applied: number
+  targetJobs: number
+  now: number
+}
+
+export type MustAchieveWatchdogAction =
+  | { kind: 'idle' }
+  | { kind: 'resume'; reason: string }
+  | { kind: 'wait'; reason: string; retryMs: number }
+
+/**
+ * 判断本轮看门狗该做什么。纯函数，不碰 storage / alarm，便于单测穷举状态组合。
+ *
+ * 安全边界：
+ *  - 目标已达成 / 未启用必达 → 完全不干预，用户想停就停；
+ *  - 账号受限 → 冷却 15 分钟（继续猛点会加重账号处罚），到点自动恢复；
+ *  - 人工暂停 / 被误判 done → 宽限 5 分钟后自动回来，并明确留痕；
+ *  - 验证码 / 无来源 / 日限等系统自己造成的挂起 → **立即恢复**，一刻不等。
+ */
+export function decideMustAchieveWatchdog(
+  input: MustAchieveWatchdogInput,
+): MustAchieveWatchdogAction {
+  if (!input.mustAchieve || input.achieved) return { kind: 'idle' }
+  if (input.status === 'running') return { kind: 'idle' }
+
+  const progress = `已确认 ${input.applied}/${input.targetJobs}`
+  // pausedAt 缺失时不能算「刚暂停」，否则历史脏数据会把目标永久卡在 wait
+  const elapsed = input.pausedAt > 0
+    ? Math.max(0, input.now - input.pausedAt)
+    : Number.POSITIVE_INFINITY
+
+  if (input.pausedReason === 'blocked' || input.status === 'aborted') {
+    if (elapsed < MUST_ACHIEVE_BLOCK_COOLDOWN_MS) {
+      return {
+        kind: 'wait',
+        reason: `账号安全熔断冷却中（${progress}）`,
+        retryMs: Math.max(1_000, MUST_ACHIEVE_BLOCK_COOLDOWN_MS - elapsed),
+      }
+    }
+    return { kind: 'resume', reason: `账号安全冷却结束，继续冲刺目标（${progress}）` }
+  }
+
+  if (input.pausedReason === 'user' || input.status === 'done') {
+    if (elapsed < MUST_ACHIEVE_MANUAL_PAUSE_MS) {
+      return {
+        kind: 'wait',
+        reason: `人工暂停宽限中（${progress}）`,
+        retryMs: Math.max(1_000, MUST_ACHIEVE_MANUAL_PAUSE_MS - elapsed),
+      }
+    }
+    return {
+      kind: 'resume',
+      reason: `人工暂停宽限结束，目标仍未达成，自动恢复投递（${progress}）`,
+    }
+  }
+
+  // captcha / no_source / rate / 未知原因：都是系统自己设的出口，必达模式不认
+  return {
+    kind: 'resume',
+    reason: `流水线被挂起（${input.pausedReason || input.status}），${progress}，必达目标未达成，立即恢复`,
+  }
+}

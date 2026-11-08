@@ -506,6 +506,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       // 于是推荐流里的前端 / Java 岗位被整页灌进投递队列。
       const relaxCareerFilter = message.payload?.relaxCareerFilter === true
       const searchKeyword = String(message.payload?.keyword || '').trim()
+      // 采集来源页码随任务落盘，执行时才能回到同一张列表页找岗位卡片
+      const searchPage = Math.max(1, Math.round(Number(message.payload?.page) || 1))
       const targetCareers: string[] =
         message.payload?.targetCareers && message.payload.targetCareers.length > 0
           ? message.payload.targetCareers
@@ -692,6 +694,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         // L3 结果复盘：把「这条岗位是哪个搜索方向找来的」带进任务，
         // 投递成功后才能按方向统计真实回复率，而不是只按岗位名事后瞎猜。
         searchKeyword: searchKeyword || undefined,
+        searchPage: searchKeyword && searchPage > 1 ? searchPage : undefined,
       }))
       const added = await appendTasksToCampaign(tasks, appendOptions)
       sendResponse({

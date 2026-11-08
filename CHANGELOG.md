@@ -1,9 +1,21 @@
 # Changelog
 
-## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用、智能中控对话台 Tool-Calling Agent、异常留痕跨上下文统一、unslop 界面设计体系、信息架构分层收纳、图标入口直达右侧侧栏、投递确认层与行为日志历史回看、搜索方向生效与技术栈硬约束、后台静默运行不抢焦点、休息状态机与产能修复、目标产能设定、目标产能闭环修复（供给死锁 / 产能优先 / 时段冲突）、目标必达模式（设定即承诺，未达成不停机）
+## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用、智能中控对话台 Tool-Calling Agent、异常留痕跨上下文统一、unslop 界面设计体系、信息架构分层收纳、图标入口直达右侧侧栏、投递确认层与行为日志历史回看、搜索方向生效与技术栈硬约束、后台静默运行不抢焦点、休息状态机与产能修复、目标产能设定、目标产能闭环修复（供给死锁 / 产能优先 / 时段冲突）、目标必达模式（设定即承诺，未达成不停机）、目标必达看门狗（真正完成目标）
 
 ### Added
 
+- **修复「设了目标但 bot 没完成任务」（用户反馈「我的意思是必须完成呀，问题是你写的代码，还有 bot 没有完成任务」）**：上一轮只改了「超时」文案，没解决 `16/80` 停住不动本身。逐行审计 `runCampaignTick()` 后定位到**调度链断裂**这个根因：`apply-tick` 是一次性 `chrome.alarms`，而 tick 开头只要 `campaign.status !== 'running'` 就直接 `return` 且**不重建调度**；验证码、无岗位来源、平台日限、账号受限、误判完成都会把 status 写成非 running，`resumeSchedulerIfNeeded()` 又只在 `running` 时才恢复 —— 一次早退 = 永久静默，之前写的「未达成不停机」全成了不可达代码。修复：
+  - **独立周期看门狗**：新增 `must-achieve-watchdog` alarm（`periodInMinutes: 1`，由浏览器持久化、与一次性 tick 完全解耦），在 `onInstalled` / `onStartup` 注册，`onAlarm` 调 `ensureMustAchieveAlive()`。Service Worker 被回收、tick 早退、campaign 被挂起都拦不住它
+  - **状态复活状态机**：`decideMustAchieveWatchdog()` 纯函数 —— 系统自设的挂起（captcha / no_source / rate / 未知原因 / 被判 done 但未达标）**立即恢复**；人工暂停宽限 5 分钟、账号受限安全冷却 15 分钟后自动恢复；目标达成 / 未开启必达 / 正在 running 则完全不干预；`pausedAt` 缺失按「已卡死很久」处理，历史脏数据不会把目标锁死
+  - **复活即清空所有自设出口**：`ensureMustAchieveAlive()` 调 `resumeAgentCampaign()` 后清掉休息态、24h 无效词锁、全部平台 `exhausted` 标记，重新 `applyMustAchieveTakeover()` 接管配额，并 `scheduleNextTick(1000)` 让本轮立刻领任务投递，不浪费一个周期。tick 开头与冷启动恢复都会先跑它
+  - **人工暂停 / 终止不再是永久出口**：`campaignService.pause()` / `abort()` 在必达未达成时记录 `pausedAt` 并明确写日志「5 / 15 分钟后看门狗自动恢复」；独立的周期 alarm 不会被 `alarms.clear('apply-tick')` 清掉。想彻底停机请关闭「必达模式」
+- **修掉其余四处让进度涨不上去的空转/降级路径**：
+  - **10 分钟冷却空等**：`activePlatforms=0` 时旧版若全平台 `exhausted` 且在冷却期内就 `scheduleNextTick(5min)` + `return`，这 10 分钟既不采集也不投递。`exhausted` 是插件自己写的标记，属可控参数 —— 现每轮都接管、**每轮解除标记**、固定 `MUST_ACHIEVE_EXHAUSTED_RETRY_MS = 30s` 后重试，冷却只控制日志频率不再阻塞调度
+  - **没读到搜索词就永久空转**：`keywordInfo.reason === 'no_keywords'` 旧版在必达模式下也只打一条 error + 通知然后 `return false`，主循环继续巡检却永远不采集。现降级为「从平台推荐流继续补仓」（技术栈 / 方向 / 黑名单硬约束仍生效，不凭空猜通用词），保持 running，用户补填岗位名称后下一轮自动切回精准搜索
+  - **账号受限整机熔断**：`riskDetected === 'block'` 旧版无条件 `abortAgentCampaign('blocked')`，把 status 写成 `aborted` 造成永久停机。必达模式改为**只熔断该平台**（账号安全仍优先），其余平台继续投，30 秒后自动解除重试；非必达模式保留原整机终止语义
+  - **任务执行页与采集页错位**：`ensurePlatformTab(task.platform)` 不传关键词，而步骤 8 的异步补仓会把同一个后台 tab 导航到别的关键词 / 页码，执行器因此报「未找到对应岗位卡片」→ `failed`，投了很多轮进度却不涨。现把「搜索词 + 来源页码」写进任务（`ApplyTask.searchPage`、采集 payload `page: currentPage`、content 生成任务时落盘），执行前用 `ensurePlatformTab(platform, taskKeyword, taskPage)` 导回同一张列表页；URL 已一致时不重复导航
+- **回归测试**：新增 `tests/must-achieve-watchdog.test.ts`（25 例：状态机全部状态组合、周期 alarm / tick 自愈 / 冷启动 / 复活清锁 / 冷却不阻塞 / 执行页对齐的静态契约，以及 **16/80 被挂成 paused 后 `ensureMustAchieveAlive()` 真的把状态改回 running 并重挂调度** 的行为测试）；`tests/must-achieve.test.ts` 两条旧静态断言随语义更新为更严格的新断言。`tsc` 0 error、`eslint` 0 error、重建 dist 后全量 **86 文件 / 1268 例通过**（含 Chromium E2E）
+- **诚实边界不变**：只认平台侧已确认投递数，复活运行不等于达标；技术栈 / 方向 / 黑名单硬约束保留；间隔压缩守 8 秒防风控下限。平台长期物理阻断时进度会停在真实数字上并持续重试，不会伪造「已达成」
 - **必达模式不再有「超时」这一说法（用户反馈「已超时 16/80 · 必达模式继续投递，没有超时这一说法的呀」）**：设定目标 = 承诺达成，小时数只是进度参考，`remainingMs <= 0` 不该显示为失败标签。现统一为「进行中」口径：`describeCapacityStatus()` 的超时分支改为 `16/80 · 目标必达继续投递`，`on-track` 必达分支改为 `X/Y 份 · 目标必达进行中`（不再写「X 小时内」），`at-risk` 预测分支也不再说「赶不上目标」；`evaluateCapacityGoal()` 的必达 advice 去掉「已超过 N 小时时限」，改报「目标进行中，当前已确认 X/Y，还差 Z 份」。后台超过时限那条日志去掉「已超过设定的 N 小时」并从 `warn` 降为 `info`，通知标题 `目标必达 · 超时继续` → `目标必达 · 继续投递`，每 10 分钟那条由「🎯 目标产能预警」改为「🎯 目标进度」（必达全程 capacityUrgent，是常态播报不是预警）。面板去掉「已超时，必达模式继续投递直到达成」，并让必达状态下的状态文字不再用警告黄。**显式关掉必达后仍保留 `missed` / 超时 / 预警的旧语义**，向后兼容不变
 - **回归测试**：`tests/capacity-goal.test.ts` +3 例（必达状态摘要与 advice 不含「超时 / 超期 / 未达成」、进行中不出现「X 小时内」、UI/后台静态契约），`tests/must-achieve.test.ts` 补静态断言。重建 dist 后全量 **85 文件 / 1243 例通过**
 - **岗位名称搜索词「空格填法」修复（用户反馈「刚填了 `php开发 后端开发 AI 全栈开发`，不知道是否有效果」）**：核实链路为 `设置 → 岗位名称` → `filterJobTitles` → `extractSearchKeywords` → `getNextSearchKeyword` 轮转 → `ensurePlatformTab(platform, keyword, page)` → 五平台搜索 URL 带 query；精投 / 海投共用同一份关键词，启动后 1 秒即开始第一轮补仓。但按旧界面提示用空格填会拆出孤立的 `AI`，占一轮轮转去搜回大量非 PHP 后端岗位。现：① 泛词 + 职位词补成 `AI 全栈开发` 组合词；② 所有来源（岗位名称 / 工作经历 / 简历技能）统一清除孤立 `AI` / `大模型` / `智能体` / `Agent` 等泛词，PHP / Laravel / AI开发 等真实职位词不受影响；③ 启动时把「岗位名称 → 解析出的 N 个搜索词」直接写进行为日志，不用等日志滚到补仓轮；④ 界面提示改为与后台一致的「多个岗位名用逗号或顿号分隔」

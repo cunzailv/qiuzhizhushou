@@ -9,7 +9,8 @@ import { setSharedResumeSummary } from '../shared/db/shared-state'
 import { resetDailyCounter } from '../shared/antiBot'
 import { log, logError, logGroup, logGroupEnd } from '../shared/utils/logger'
 import { butlerRunDaily, getActiveFollowUps } from '../shared/agent/butler'
-import { campaignService, resumeSchedulerIfNeeded, cleanupDirtyJobTitles, resumeFalseCaptchaPauseIfNeeded } from './campaign-service'
+import { campaignService, resumeSchedulerIfNeeded, cleanupDirtyJobTitles, resumeFalseCaptchaPauseIfNeeded, ensureMustAchieveAlive, ensureWatchdogAlarm } from './campaign-service'
+import { MUST_ACHIEVE_WATCHDOG_ALARM } from '../shared/agent/must-achieve'
 import { migrateDefaultModelName } from '../shared/db/settings-store'
 import {
   acquireRunMode,
@@ -129,6 +130,10 @@ chrome.runtime.onInstalled.addListener(() => {
     if (cfg.enabled) return ensureOffscreenDocument()
   }).catch(() => {})
 
+  // 目标必达的独立周期看门狗：与一次性 apply-tick 解耦，浏览器会持久化这个 alarm，
+  // 即使 Service Worker 被回收、tick 早退、campaign 被挂起，也会每分钟校验一次目标状态。
+  void ensureWatchdogAlarm()
+
   // 扩展重新加载/更新会清空上一轮注册的 tick alarm：若流水线仍在运行则立即重建调度
   void resumeSchedulerIfNeeded()
 
@@ -152,7 +157,8 @@ chrome.runtime.onStartup.addListener(() => {
     if (cfg.enabled) return ensureOffscreenDocument()
   }).catch(() => {})
 
-  // 浏览器重启后 alarm 可能已丢失，自愈恢复 AIbot 调度
+  // 浏览器重启后 alarm 可能已丢失，自愈恢复 AIbot 调度与必达看门狗
+  void ensureWatchdogAlarm()
   void resumeSchedulerIfNeeded()
 })
 
@@ -184,6 +190,12 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === 'apply-tick') {
     log(MOD, 'alarm', 'Running campaign tick...')
     await campaignService.tick()
+  }
+
+  if (alarm.name === MUST_ACHIEVE_WATCHDOG_ALARM) {
+    // 只要目标没达成，就把被挂起 / 调度丢失的流水线拉回来；达成后完全不干预。
+    // 这条路径不依赖 apply-tick，因此不存在「一次早退就永久静默」的问题。
+    await ensureMustAchieveAlive()
   }
 
   if (alarm.name === 'butler-daily-report-check') {
