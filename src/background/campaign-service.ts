@@ -61,6 +61,7 @@ import { sendWebhookNotification } from '../shared/notification/webhook-notifier
 import { recordOutcomeEvent } from '../shared/db/outcome-store'
 import {
   getNextSearchKeyword,
+  extractSearchKeywords,
   isQueueBelowThreshold,
   formatDiscoveryLogMessage,
 } from '../shared/agent/job-discovery'
@@ -1715,6 +1716,27 @@ export const campaignService = {
       const tip = `⏸ AIbot 已启动，但当前不在投递时段（${formatTimeWindows(cmp.windows)}），约 ${waitMins} 分钟后自动开始。如需立刻投递，请点击底部【工作时段】改为「24小时不限」后保存。`
       await appendCampaignLog(tip, 'warn')
       sendNotification('⏸ AIbot 已启动 · 当前不在投递时段', tip, 2)
+    }
+    // 启动即把「岗位名称 → 实际搜索词」摊开给用户看。
+    // 填完最常问的是「到底生效没有」，不能等到日志滚到第一轮补仓才说明。
+    try {
+      const startFilters = await loadSharedApplyFilters()
+      const startResume = await getDefaultResume()
+      const startKeywords = extractSearchKeywords(startResume, undefined, startFilters)
+      const rawTitles = (startFilters.jobTitles || '').trim()
+      if (startKeywords.length > 0) {
+        await appendCampaignLog(
+          `🔎 已读取岗位名称【${rawTitles || '未填写，以下来自简历'}】，解析出 ${startKeywords.length} 个搜索词：${startKeywords.join(' / ')}。每轮轮转 1 个词去各平台精准搜索（不是一次性全搜），下方「🔍 本轮搜索词」可看到当前用的是哪个`,
+          'info',
+        )
+      } else {
+        await appendCampaignLog(
+          '⚠️ 还没有可用的搜索词：请到「设置 → 岗位名称」填写职位名，例如「php开发, 后端开发, AI 全栈开发」。没读到词时不会按岗位名称搜索，只会停在平台推荐流',
+          'warn',
+        )
+      }
+    } catch (err) {
+      logWarn(MOD, 'start', err)
     }
     scheduleNextTick(1000) // 1 秒后立即启动
     return cmp

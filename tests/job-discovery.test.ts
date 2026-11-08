@@ -1,7 +1,10 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import 'fake-indexeddb/auto'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import {
   extractSearchKeywords,
+  isGenericNoiseKeyword,
   getDiscoveryKeywordRotationIndex,
   advanceDiscoveryKeywordRotationIndex,
   getNextSearchKeyword,
@@ -10,6 +13,9 @@ import {
 } from '../src/shared/agent/job-discovery'
 import type { Resume } from '../src/shared/types/resume'
 import type { Campaign } from '../src/shared/agent/queue-store'
+
+const ROOT = process.cwd()
+const read = (rel: string) => readFileSync(join(ROOT, rel), 'utf-8')
 
 describe('Job Discovery & Auto Queue Feeder (待投队列全自主搜寻采集中枢)', () => {
   const sampleResume: Resume = {
@@ -137,5 +143,72 @@ describe('Job Discovery & Auto Queue Feeder (待投队列全自主搜寻采集�
       pendingCount: 2,
     })
     expect(emptyMsg).toContain('暂无更多未投递新增岗位')
+  })
+
+  describe('岗位名称 → 搜索词（用户实际填法回归）', () => {
+    const userTyped = 'php开发 后端开发 AI 全栈开发'
+
+    it('空格填法：保留可搜短词，但不再产出孤立的「AI」去乱搜', () => {
+      const keywords = extractSearchKeywords(null, undefined, { jobTitles: userTyped } as any)
+      expect(keywords).toContain('php开发')
+      expect(keywords).toContain('后端开发')
+      expect(keywords).toContain('全栈开发')
+      expect(keywords).not.toContain('AI')
+      expect(isGenericNoiseKeyword('AI')).toBe(true)
+    })
+
+    it('空格填法：把「AI 全栈开发」补成一次精准组合搜索', () => {
+      const keywords = extractSearchKeywords(null, undefined, { jobTitles: userTyped } as any)
+      expect(keywords).toContain('AI 全栈开发')
+      expect(isGenericNoiseKeyword('AI 全栈开发')).toBe(false)
+    })
+
+    it('推荐填法（逗号分隔）：每个岗位名整体成为一个搜索词', () => {
+      const keywords = extractSearchKeywords(null, undefined, {
+        jobTitles: 'php开发, 后端开发, AI 全栈开发',
+      } as any)
+      expect(keywords).toContain('php开发')
+      expect(keywords).toContain('后端开发')
+      expect(keywords).toContain('AI 全栈开发')
+      expect(keywords).not.toContain('AI')
+    })
+
+    it('PHP / Java / Laravel / AI开发 等真实职位词不被泛词规则误杀', () => {
+      const keywords = extractSearchKeywords(null, undefined, {
+        jobTitles: 'PHP开发, Laravel, Java后端, AI开发',
+      } as any)
+      expect(keywords).toContain('PHP开发')
+      expect(keywords).toContain('Laravel')
+      expect(keywords).toContain('Java后端')
+      expect(keywords).toContain('AI开发')
+    })
+
+    it('简历工作经历里拆出的孤立「AI」同样被清掉', () => {
+      const resume = {
+        ...sampleResume,
+        structuredData: {
+          ...sampleResume.structuredData,
+          workExperience: [
+            { company: '某公司', position: 'AI', startDate: '2024', endDate: '2025', description: '' },
+          ],
+        },
+      } as any as Resume
+      const keywords = extractSearchKeywords(resume, undefined, { jobTitles: '' } as any)
+      expect(keywords).not.toContain('AI')
+    })
+
+    it('启动时把解析出的搜索词写进行为日志，且真的带词去导航（静态契约）', () => {
+      const svc = read('src/background/campaign-service.ts')
+      expect(svc).toContain('🔎 已读取岗位名称')
+      expect(svc).toContain('extractSearchKeywords(startResume, undefined, startFilters)')
+      expect(svc).toContain('ensurePlatformTab(platform, primaryCareerKeyword, currentPage)')
+      expect(svc).toContain('🔍 本轮搜索词')
+    })
+
+    it('界面提示与后台一致：多个岗位名用逗号或顿号分隔', () => {
+      const panel = read('src/popup/components/FilterPanel.tsx')
+      expect(panel).toContain('多个岗位名请用逗号或顿号分隔')
+      expect(panel).toContain('php开发, 后端开发, AI 全栈开发')
+    })
   })
 })

@@ -45,14 +45,14 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
       {!collapsed && (
         <div className="space-y-2.5 p-3 bg-black/[0.02] rounded-xl border border-surface-hairline">
           <p className="text-xs leading-relaxed text-text-muted rounded-lg bg-surface-dark border border-surface-hairline px-2 py-1.5">
-            此配置<strong className="text-primary-light">同时作用于概览半自动与 AIbot 全自动流水线</strong>，改一次两边同时生效。
+            此配置<strong className="text-primary-light">同时作用于概览半自动与 AIbot 全自动流水线</strong>，改一次两边同时生效。岗位名称是 bot 搜索岗位用的关键词，<strong className="text-primary-light">多个岗位名请用逗号或顿号分隔</strong>；空格会被拆成短词。
           </p>
 
           {/* Job Title */}
           <FilterField
             icon={<Search className="w-3 h-3 text-primary-light" />}
             label="岗位名称"
-            placeholder="例：前端开发 后端 Java（空格分隔）"
+            placeholder="例：php开发, 后端开发, AI 全栈开发"
             value={filters.jobTitles}
             onChange={(v) => onChange({ jobTitles: v })}
           />

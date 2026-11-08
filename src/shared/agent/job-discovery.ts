@@ -25,24 +25,65 @@ const MAX_KEYWORD_LEN = 12
 const MAX_KEYWORDS = 8
 
 /**
+ * 单独拿去平台搜索会命中大量非目标岗位的「泛技术修饰词」。
+ *
+ * 用户按界面提示用空格填「php开发 后端开发 AI 全栈开发」时，按空格拆出的
+ * 孤立「AI」会占用一轮轮转，去 5 个平台搜回 AI 产品经理 / 算法 / 数据标注岗，
+ * 正是 PHP 后端方向反复反馈的「乱投递」来源。这类词只有和后面的职位词
+ * 组成「AI 全栈开发」才是用户真正想要的岗位名。
+ */
+const GENERIC_MODIFIER_RE = /^(ai|人工智能|大模型|智能体|agent|aigc|llm)$/i
+
+/** 职位语义词：用来识别「泛修饰词 + 职位词」的组合 */
+const ROLE_WORD_RE = /(开发|工程师|全栈|前端|后端|后台|服务端|架构|研发|测试|运维|算法|产品)/
+
+/** 是否是不能单独当搜索词的泛词（含职位语义的组合词 / 职位词都不算） */
+export function isGenericNoiseKeyword(token: string): boolean {
+  return GENERIC_MODIFIER_RE.test(token.trim()) && !ROLE_WORD_RE.test(token)
+}
+
+/**
  * 把用户填写的期望职位等文本切成一个个可用的搜索词。
  * 支持逗号 / 顿号 / 分号 / 竖线 / 斜杠 / 换行 / **空格**。
  *
  * 空格必须切：「php 后台开发」「AI 全栈开发」如果整串扔给招聘平台，
  * 基本搜不到结果，平台会降级成推荐流，随后什么岗位都采进来。
- * 拆成「php」「后台开发」「AI」「全栈开发」才是真正可搜的短词。
- * 原始短词组保留在队尾，作为一次更精准的尝试。
+ * 但纯拆也有代价：「AI 全栈开发」会掉出孤立的「AI」这个泛词，
+ * 所以额外把「泛修饰词 + 职位词」补成一个组合词放队尾，
+ * 孤立泛词再由 extractSearchKeywords 统一过滤。
+ * 原始短词组同样保留在队尾，作为一次更精准的尝试。
  */
 function splitKeywordTokens(raw: string): string[] {
   const out: string[] = []
   for (const part of raw.split(/[,，、;；\n|/\\]+/)) {
     const original = sanitizeKeyword(part)
     if (!original) continue
-    for (const word of original.split(/\s+/)) {
-      const clean = sanitizeKeyword(word)
-      if (clean && !out.includes(clean)) out.push(clean)
+
+    const words = original.split(/\s+/).map(sanitizeKeyword).filter(Boolean)
+    const combos: string[] = []
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i]
+      if (word && !out.includes(word)) out.push(word)
+
+      // 「AI 全栈开发」这类：泛修饰词后面紧跟职位词时，补一次更精准的组合尝试。
+      // 连续泛词串（如「AI Agent 架构师」）由原始短词组整体保留，不造半截词。
+      const prev = words[i - 1]
+      const next = words[i + 1]
+      const prevIsGeneric = prev ? GENERIC_MODIFIER_RE.test(prev) : false
+      if (
+        word && next &&
+        GENERIC_MODIFIER_RE.test(word) &&
+        ROLE_WORD_RE.test(next) &&
+        !prevIsGeneric
+      ) {
+        const combo = `${word} ${next}`
+        if (combo.length <= MAX_KEYWORD_LEN && !combos.includes(combo)) combos.push(combo)
+      }
     }
     if (original.length <= MAX_KEYWORD_LEN && !out.includes(original)) out.push(original)
+    for (const combo of combos) {
+      if (!out.includes(combo)) out.push(combo)
+    }
   }
   return out
 }
@@ -158,7 +199,11 @@ export function extractSearchKeywords(
     if (isUsableKeyword(t) && !COMPANY_NOISE_RE.test(t)) keywordSet.add(t)
   }
 
-  const usable = Array.from(keywordSet).filter(isUsableKeyword).slice(0, MAX_KEYWORDS)
+  // 所有来源（岗位名称 / 工作经历 / 简历技能）统一清掉孤立泛词：
+  // ROLE_SEMANTIC_RE 里含「AI」，工作经历字段拆出的「AI」原本会漏过语义校验。
+  const usable = Array.from(keywordSet)
+    .filter((t) => isUsableKeyword(t) && !isGenericNoiseKeyword(t))
+    .slice(0, MAX_KEYWORDS)
 
   // 不再提供「全栈工程师 / 前端开发工程师 …」这类与用户无关的硬编码兜底词：
   // 那会让 PHP 后端用户真的去搜前端岗位并投递，是「乱投递」的直接来源。

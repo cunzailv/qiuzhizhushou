@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1233%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1240%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -31,7 +31,7 @@
 - **会自检也会复盘**：L2 语义相关性自愈、L3 真实回复率回流反哺搜索方向、Planner 防数字幻觉，Tool-Calling 中控对话台支持多轮上下文与危险动作人工审批。
 - **数据留在本地**：简历、画像、队列、日志保存在浏览器本地（Dexie / IndexedDB + `chrome.storage`）；AI 能力走你自己配置的模型接口，不上传第三方服务。
 
-> 当前状态：`85` 个测试文件 / `1233` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
+> 当前状态：`85` 个测试文件 / `1240` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
@@ -200,7 +200,7 @@
 
 | 层 | 问题 → 修复 |
 |---|---|
-| **拆词** | `splitKeywordTokens` 原来不按空格切，整串「php 后台开发」扔给平台基本搜不到、页面被降级成推荐流。现按标点 + 空格切成 `php` / `后台开发` / `AI` / `全栈开发` 等可搜短词 |
+| **拆词** | `splitKeywordTokens` 原来不按空格切，整串「php 后台开发」扔给平台基本搜不到、页面被降级成推荐流。现按标点 + 空格切成 `php` / `后台开发` / `全栈开发` 等可搜短词；**孤立的 `AI` / `大模型` / `智能体` 等泛词不再单独拿去搜**（会搜回产品经理 / 算法 / 标注岗），而是和后面的职位词补成 `AI 全栈开发` 这样的组合词 |
 | **来源** | `extractSearchKeywords` 原来只读「期望职位 / 工作经历职位 / 文件名」，简历里的 `skills`、项目 `technologies`、画像 `skillLevels` 完全没参与。现全部接入，PHP / Laravel / AI 开发 / 全栈开发 都会变成搜索词 |
 | **兜底** | 一个词都没有时旧版硬编码 `['全栈工程师','前端开发工程师',…]` 替用户猜方向，PHP 后端用户因此真的去搜前端岗位。现返回空并明确提示去「设置 → 岗位名称」填写（如 `php 后台开发, AI 全栈开发`）；**不暂停**，填好下一轮自动恢复 |
 | **搜索页** | 脉脉的搜索 URL 原来忽略 query，永远停在推荐流；现五个平台都把关键词写进 URL |
@@ -208,7 +208,15 @@
 | **精投闸门** | 旧版本地语义判定「只统计不否决」，`relaxCareerFilter` 又把 `targetCareers` 清空，加上软过滤补足名额，没配 AI Key 的精投等于完全不设防。现放宽模式**仍保留方向白名单**；本地语义在精投下也是硬闸门；语义不相关的岗位不能靠补足名额回到队列 |
 | **可见性** | 日志写明本轮搜索词 + 来源（设置 / 简历技能）+ 目标方向 + 「技术栈约束【PHP】已生效：剔除 N 个不对口岗位」，浮窗扫描文案也显示 `限 PHP`，不再黑盒 |
 
-回归测试 `tests/search-direction.test.ts`（19 例）覆盖拆词、简历技能来源、跨栈否决、精投闸门、五平台搜索 URL 与静态契约。
+回归测试 `tests/search-direction.test.ts`（19 例）与 `tests/job-discovery.test.ts`（12 例）覆盖拆词、简历技能来源、跨栈否决、精投闸门、五平台搜索 URL 与静态契约。
+
+#### 岗位名称怎么填才生效
+
+`设置 → 岗位名称` 就是 bot 搜索岗位用的关键词，**多个岗位名请用逗号或顿号分隔**，例如 `php开发, 后端开发, AI 全栈开发`。空格会被拆成短词，所以别用空格来分隔多个岗位名。
+
+生效链路是：`filterJobTitles` → `extractSearchKeywords` 提取搜索词 → 每轮 `getNextSearchKeyword` 轮转取 1 个 → `ensurePlatformTab(platform, keyword, page)` 把词写进平台搜索 URL（Boss `query` / 猎聘 `key` / 智联 `kw` / 51job `keyword` / 脉脉 `query`）→ 采集岗位入队 → 才开始投递。**精投和海投共用同一份关键词**，区别只在评分门槛与语义闸门。
+
+启动后 1 秒即开始第一轮补仓，行为日志会先打一条 `🔎 已读取岗位名称…解析出 N 个搜索词`，之后每轮打 `🔍 本轮搜索词【X】(i/N，来源…)`。看到这两条就说明填的词真的被拿去搜了；一条都没有就说明没读到词，日志会提示去补填岗位名称。
 
 ### 📜 行为日志 · 可回看全部历史（2026-11）
 「实时记录不能滑动、不知道之前干了什么」的根因：日志每 2 秒被无条件拉回底部、只保留本轮最近 120 条、新一轮 campaign 直接清空、条目只有 `HH:mm:ss` 没有日期，且并发写入互相覆盖。

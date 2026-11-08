@@ -71,12 +71,15 @@ function makeResume(over: Partial<Resume['structuredData']> = {}): Resume {
 }
 
 describe('搜索关键词：用户填的方向与简历技能都要真的拿去搜', () => {
-  it('「php 后台开发、AI 全栈开发」按空格与顿号拆成可搜短词', () => {
+  it('「php 后台开发、AI 全栈开发」拆成可搜短词，但不再产出孤立「AI」去乱搜', () => {
     const words = extractSearchKeywords(null, undefined, filters('php 后台开发、AI 全栈开发'))
     expect(words).toContain('php')
     expect(words).toContain('后台开发')
-    expect(words).toContain('AI')
     expect(words).toContain('全栈开发')
+    // 旧版把拆出的孤立「AI」也当搜索词，会拿去搜回 AI 产品 / 算法 / 标注岗。
+    // 现在保留用户真正想要的组合词，孤立的泛词统一清掉。
+    expect(words).toContain('AI 全栈开发')
+    expect(words).not.toContain('AI')
   })
 
   it('不再返回与用户无关的硬编码前端兜底词', () => {
