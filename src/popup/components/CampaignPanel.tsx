@@ -1003,11 +1003,13 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             </span>
             <span
               className={`text-xs font-medium ${
-                capacityEvaluation.status === 'at-risk' ||
-                capacityEvaluation.status === 'missed' ||
-                capacityEvaluation.status === 'blocked'
-                  ? 'text-warning'
-                  : capacityEvaluation.status === 'achieved' ? 'text-success' : 'text-text-primary'
+                capacityEvaluation.status === 'achieved'
+                  ? 'text-success'
+                  : capacityEvaluation.status === 'blocked' ||
+                    capacityEvaluation.status === 'missed' ||
+                    (capacityEvaluation.status === 'at-risk' && !isMustAchieve(capacityGoal))
+                    ? 'text-warning'
+                    : isMustAchieve(capacityGoal) ? 'text-primary' : 'text-text-primary'
               }`}
             >
               {describeCapacityStatus(capacityEvaluation, capacityGoal)}
@@ -1021,9 +1023,11 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
           </div>
           <div className="text-xs text-text-muted mt-1.5 leading-relaxed">
             已确认投递 {stats?.done ?? 0}/{capacityEvaluation.targetJobs} ·{' '}
-            {isMustAchieve(capacityGoal) && capacityEvaluation.remainingMs <= 0
-              ? '已超时，必达模式继续投递直到达成'
-              : `距截止约 ${Math.round(capacityEvaluation.remainingMs / 60_000)} 分钟`}
+            {isMustAchieve(capacityGoal)
+              ? '目标必达进行中，未达成不停机'
+              : capacityEvaluation.remainingMs <= 0
+                ? '已超过设定时限'
+                : `距截止约 ${Math.round(capacityEvaluation.remainingMs / 60_000)} 分钟`}
             {hasWindowConflict(capacityEvaluation) &&
               (isMustAchieve(capacityGoal)
                 ? '（工作时段已自动放行）'
@@ -1286,7 +1290,7 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
             </button>
           </div>
           <p className="text-xs text-text-muted mt-1.5 leading-relaxed">
-            必达模式：{describeMustAchieveTakeover()}。超时继续投递、不停机，只认平台确认投递数，绝不把点击算成功。
+            必达模式：{describeMustAchieveTakeover()}。没有「超时」这一说 —— 设定时限只是进度参考，未达成前始终继续投递、不停机，只认平台确认投递数，绝不把点击算成功。
             间隔压缩仍守 8 秒防风控下限；技术栈 / 岗位方向 / 黑名单硬约束保留，不会乱投前端或 Java。
             关闭必达后恢复「尽力而为」节奏：赶不上会预警、到点未达成给诊断，但不承诺达标。
             平台登录失效、风控验证码与账号受限属于平台侧阻断，会明确留痕并持续重试，不会虚报成功。

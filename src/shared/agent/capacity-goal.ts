@@ -4,7 +4,7 @@
  * 必达模式是产品承诺，不是「尽力而为的节奏建议」：
  *  1. 设定目标即自动接管所有可控参数（切海投、抬配额、开全平台、放行工作时段、
  *     关闭模拟休息、压缩间隔但守住防风控下限）；
- *  2. 目标未达成前**不允许自行停机**：不计超时、不因队列空 / 配额满 / 日限而宣告完成；
+ *  2. 目标未达成前**不允许自行停机**：没有「超时」这一失败判定，不因队列空 / 配额满 / 日限而宣告完成；
  *     换页、换词、换平台、回收历史跳过岗位，一直跑到平台确认投递数达标；
  *  3. 只有平台侧物理挡死（登录失效 / 风控 / 全平台日限）才会进入「受阻但持续重试」，
  *     并明确报出卡在哪一步，绝不虚报成功；
@@ -20,7 +20,7 @@ export const CAPACITY_GOAL_KEY = 'aibotCapacityGoal'
 
 export interface CapacityGoal {
   enabled: boolean
-  /** 时限（小时）；必达模式下超时不终止，只作进度参考 */
+  /** 设定时限（小时）；必达模式下只是进度参考，不是终止条件 */
   hours: number
   /** 目标份数（平台已确认投递数） */
   targetJobs: number
@@ -196,11 +196,12 @@ export function evaluateCapacityGoal(input: CapacityContext): CapacityEvaluation
     if (input.mustAchieve) {
       return {
         ...base,
-        // 必达模式没有「到点放弃」这个状态：超时只作为进度参考，
+        // 必达模式没有「到点放弃」这个状态：设定时限只是进度参考，
         // 继续按 at-risk 压缩间隔、跳过休息，直到平台确认投递数达标。
+        // 面向用户的文案里不出现「超时 / 超期」—— 那是非必达模式才有的失败判定。
         status: 'at-risk',
         shouldSkipRest: true,
-        advice: `已超过 ${goal.hours} 小时时限，当前 ${applied}/${targetJobs}，还差 ${remainingJobs} 份；必达模式不会自行停机，继续换词 / 翻页 / 换平台投递直到达成`,
+        advice: `目标进行中，当前已确认 ${applied}/${targetJobs}，还差 ${remainingJobs} 份；必达模式不会自行停机，继续换词 / 翻页 / 换平台投递直到达成`,
       }
     }
     return {
@@ -233,7 +234,10 @@ export function evaluateCapacityGoal(input: CapacityContext): CapacityEvaluation
       ...base,
       status: 'at-risk',
       shouldSkipRest: true,
-      advice: `${quotaShort}${windowShort}按当前节奏预计还要 ${projectedHours} 小时，赶不上 ${goal.hours} 小时目标；已自动压缩间隔并跳过模拟休息，建议放宽「岗位名称」、开启更多平台、切到海投或下调目标`,
+      // 必达模式下不存在「赶不上 / 超时」这个判定：只说还需多久、已加速、继续投。
+      advice: input.mustAchieve
+        ? `${quotaShort}${windowShort}按当前节奏预计还需 ${projectedHours} 小时，已自动压缩间隔并跳过模拟休息；目标未达成前继续投递，不会停机`
+        : `${quotaShort}${windowShort}按当前节奏预计还要 ${projectedHours} 小时，赶不上 ${goal.hours} 小时目标；已自动压缩间隔并跳过模拟休息，建议放宽「岗位名称」、开启更多平台、切到海投或下调目标`,
     }
   }
 
@@ -291,22 +295,34 @@ export function checkCapacityWindowFit(params: {
   return { wallMinutes, usableMinutes, conflict, advice }
 }
 
-/** 一行状态摘要，UI 与日志共用，避免两处文案漂移 */
+/**
+ * 一行状态摘要，UI 与日志共用，避免两处文案漂移。
+ *
+ * 必达模式没有「超时」这个状态：设定时限只是进度参考，超过之后仍然是
+ * 「进行中 / 继续投递」。`missed` / 「进度落后 / 赶不上」只属于显式关掉
+ * 必达后的旧「尽力而为」语义。
+ */
 export function describeCapacityStatus(evaluation: CapacityEvaluation, goal: CapacityGoal): string {
+  const applied = evaluation.targetJobs - evaluation.remainingJobs
   switch (evaluation.status) {
     case 'off':
       return '未设定目标产能'
     case 'achieved':
       return `已投满 ${evaluation.targetJobs} 份，目标达成`
     case 'missed':
-      return `未达成：${evaluation.targetJobs - evaluation.remainingJobs}/${evaluation.targetJobs} 份`
+      return `未达成：${applied}/${evaluation.targetJobs} 份`
     case 'blocked':
       return '目标与工作时段冲突 · 当前无法投递'
     case 'at-risk':
-      return evaluation.remainingMs <= 0
-        ? `已超时 ${evaluation.targetJobs - evaluation.remainingJobs}/${evaluation.targetJobs} · 必达模式继续投递`
-        : `进度落后 ${evaluation.targetJobs - evaluation.remainingJobs}/${evaluation.targetJobs} · 已自动加速`
+      if (evaluation.remainingMs <= 0) {
+        return `${applied}/${evaluation.targetJobs} · 目标必达继续投递`
+      }
+      return isMustAchieve(goal)
+        ? `${applied}/${evaluation.targetJobs} · 已自动加速，继续投递`
+        : `进度落后 ${applied}/${evaluation.targetJobs} · 已自动加速`
     default:
-      return `${evaluation.targetJobs - evaluation.remainingJobs}/${evaluation.targetJobs} 份 · ${goal.hours} 小时内`
+      return isMustAchieve(goal)
+        ? `${applied}/${evaluation.targetJobs} 份 · 目标必达进行中`
+        : `${applied}/${evaluation.targetJobs} 份 · ${goal.hours} 小时内`
   }
 }

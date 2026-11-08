@@ -728,19 +728,20 @@ export async function runCampaignTick(): Promise<void> {
     })
     const progress = summarizeQuotaProgress(campaign)
 
-    // 必达模式超过设定时限：只报一次进度事实，绝不「到点放弃」
+    // 必达模式没有「超时」：设定时限只是进度参考，报一次进度事实后继续投递。
+    // 不用 warn 级别、不叫预警，避免用户误以为目标失败或系统要放弃。
     if (
       mustAchieveActive && capacity && capacity.remainingMs <= 0 &&
       capacityOverrunNotifiedFor !== campaign.id
     ) {
       capacityOverrunNotifiedFor = campaign.id
       await appendCampaignLog(
-        `⏱ 已超过设定的 ${goalNow!.hours} 小时，当前平台已确认投递 ${progressNow.applied}/${goalNow!.targetJobs}；必达模式继续投递，不设到点放弃，直到达标`,
-        'warn',
+        `🎯 目标必达进行中：当前平台已确认投递 ${progressNow.applied}/${goalNow!.targetJobs}，还差 ${Math.max(0, goalNow!.targetJobs - progressNow.applied)} 份；必达模式继续投递，不设到点放弃，未达成不停机`,
+        'info',
       )
       sendNotification(
-        '目标必达 · 超时继续',
-        `已超时但不会停机，继续投到 ${goalNow!.targetJobs} 份为止（当前 ${progressNow.applied} 份）`,
+        '目标必达 · 继续投递',
+        `目标仍在进行中，继续投到 ${goalNow!.targetJobs} 份为止（当前 ${progressNow.applied} 份）`,
       )
     }
 
@@ -753,9 +754,14 @@ export async function runCampaignTick(): Promise<void> {
       capacityUrgent && Date.now() - lastCapacityNoticeAt > 10 * 60_000
     ) {
       lastCapacityNoticeAt = Date.now()
+      // 必达模式全程 capacityUrgent，这是常态进度播报而不是预警；
+      // 只有显式关掉必达后的「赶不上」才是真正的 warning。
+      const isMustAchieveProgress = isMustAchieve(campaign.capacityGoal)
       await appendCampaignLog(
-        `🎯 目标产能预警：${describeCapacityStatus(capacity!, campaign.capacityGoal!)}。${capacity!.advice}；已启用产能优先（锁定高频补仓、回收历史跳过岗位、放宽匹配分门槛）`,
-        'warn',
+        isMustAchieveProgress
+          ? `🎯 目标进度：${describeCapacityStatus(capacity!, campaign.capacityGoal!)}。${capacity!.advice}；产能优先全程开启（锁定高频补仓、回收历史跳过岗位、匹配分只排序不否决）`
+          : `🎯 目标产能预警：${describeCapacityStatus(capacity!, campaign.capacityGoal!)}。${capacity!.advice}；已启用产能优先（锁定高频补仓、回收历史跳过岗位、放宽匹配分门槛）`,
+        isMustAchieveProgress ? 'info' : 'warn',
       )
     }
 

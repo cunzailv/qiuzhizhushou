@@ -204,6 +204,31 @@ describe('必达模式 · 设定即承诺', () => {
     expect(resolvePacingInterval(45_000, ev)).toBe(MIN_PACING_INTERVAL_MS)
   })
 
+  it('必达模式没有「超时」这一说法：状态摘要与建议都只报进度', () => {
+    const ev = evaluateCapacityGoal(context({
+      goal, mustAchieve: true, now: T0 + 9 * HOUR, applied: 16,
+    }))
+    const status = describeCapacityStatus(ev, goal)
+    expect(status).toBe('16/80 · 目标必达继续投递')
+    expect(status).not.toContain('超时')
+    expect(status).not.toContain('超期')
+    expect(status).not.toContain('未达成')
+    expect(ev.advice).not.toContain('超时')
+    expect(ev.advice).toContain('目标进行中')
+    expect(describeMustAchieveTakeover()).not.toContain('超时')
+  })
+
+  it('必达模式进行中也不显示「X 小时内」这种期限口径', () => {
+    const ev = evaluateCapacityGoal(context({
+      goal, mustAchieve: true, now: T0, applied: 10,
+    }))
+    expect(ev.status).toBe('on-track')
+    const status = describeCapacityStatus(ev, goal)
+    expect(status).toContain('目标必达进行中')
+    expect(status).not.toContain('小时内')
+    expect(status).not.toContain('超时')
+  })
+
   it('显式关掉必达后，超时仍是 missed（旧语义向后兼容）', () => {
     const ev = evaluateCapacityGoal(context({
       now: T0 + 9 * HOUR, applied: 30, mustAchieve: false,
@@ -328,6 +353,18 @@ describe('调用链静态契约 · 设定能真正影响调度', () => {
     expect(panel).toContain('技术栈 / 岗位方向 / 黑名单硬约束保留')
     expect(panel).toContain('不会虚报成功')
     expect(panel).not.toContain('系统不会凭空承诺达标')
+  })
+
+  it('必达模式 UI / 后台都不再出现「已超时」这类失败口径', () => {
+    const panel = read(PANEL)
+    expect(panel).not.toContain('已超时')
+    expect(panel).toContain('目标必达进行中，未达成不停机')
+    expect(panel).toContain("'text-primary' : 'text-text-primary'")
+    expect(service).not.toContain('已超时')
+    expect(service).not.toContain('目标必达 · 超时继续')
+    expect(service).toContain('🎯 目标必达进行中')
+    expect(service).toContain("'目标必达 · 继续投递'")
+    expect(service).toContain('🎯 目标进度')
   })
 
   it('后台在启动与改目标时都会自动接管，且必达目标未达成不允许判完成', () => {

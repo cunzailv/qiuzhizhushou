@@ -271,10 +271,12 @@ describe('必达模式接线契约', () => {
     expect(service).toContain('togglePlatformEnabled(pid, true)')
   })
 
-  it('目标达成才停机，超时只作为进度事实、绝不判 missed', () => {
+  it('目标达成才停机，设定时限只作进度参考、绝不判 missed', () => {
     expect(service).toContain('goalAchieved && isMustAchieve(goalNow)')
     expect(service).toContain('🏆 目标必达')
     expect(service).toContain('必达模式继续投递，不设到点放弃')
+    expect(service).not.toContain('已超时')
+    expect(service).not.toContain('目标必达 · 超时继续')
     expect(read(CAMPAIGN)).toContain('if (!isGoalAchieved(campaign.capacityGoal!, applied)) return false')
   })
 

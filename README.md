@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1240%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1243%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -31,7 +31,7 @@
 - **会自检也会复盘**：L2 语义相关性自愈、L3 真实回复率回流反哺搜索方向、Planner 防数字幻觉，Tool-Calling 中控对话台支持多轮上下文与危险动作人工审批。
 - **数据留在本地**：简历、画像、队列、日志保存在浏览器本地（Dexie / IndexedDB + `chrome.storage`）；AI 能力走你自己配置的模型接口，不上传第三方服务。
 
-> 当前状态：`85` 个测试文件 / `1240` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
+> 当前状态：`85` 个测试文件 / `1243` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
@@ -263,18 +263,20 @@
 
 **设定目标 = 系统承诺达成**，默认开启「必达模式」（可手动关闭，关闭后回到尽力而为的节奏建议）。未达成前 AIbot 不自行停机，所有插件自己能改的参数都会被自动接管：自动切海投、抬配额、开启全部平台、放行工作时段、关闭模拟休息、放宽评分门槛与采集条件。`mustAchieve` 老数据缺字段时默认按开启处理。
 
+**必达模式里没有「超时」**：小时数只是进度参考，不是失败判定。超过设定时限后状态仍显示「`16/80 · 目标必达继续投递`」，日志按 `info` 级进度播报、面板用正常色，不会弹「已超时 / 未达成」这类标签。只有显式关掉必达，才回到有「超时 / `missed`」的旧节奏语义。
+
 | 层 | 说明 |
 |---|---|
 | **可达性预判** | 新增 `src/shared/agent/capacity-goal.ts` 的 `evaluateCapacityGoal()`，按剩余时间 / 剩余份数算 `requiredIntervalMs`，结合当前策略与休息开销预测完成时刻，输出 `on-track` / `at-risk` / `blocked` / `achieved` / `missed`；可达性一律按「工作时段内真正可投的分钟数」算，而不是墙钟剩余时间 |
 | **自动调速** | 进度需要时把拟人间隔压缩到 `resolvePacingInterval()`，但**最低不低于 8 秒**防风控；`at-risk` 时自动跳过模拟真人休息，把时间还给投递 |
 | **倒计时持久化** | 目标与 `startedAt` 写进本轮 campaign（`persistCapacityGoal`，与日志共用串行写入链）；参数不变则暂停 / Service Worker 重启不重置倒计时，改参数才重新计时 |
-| **预警与诊断** | 赶不上时每 10 分钟给一次可操作建议（放宽岗位名称 / 多开平台 / 下调目标，或提示目标超过配额合计）；到点未达成只通知一次，指引去查「未记为投递成功」「没有发现新岗位」与登录态日志 |
+| **预警与诊断**（非必达模式） | 赶不上时每 10 分钟给一次可操作建议（放宽岗位名称 / 多开平台 / 下调目标，或提示目标超过配额合计）；到点未达成只通知一次，指引去查「未记为投递成功」「没有发现新岗位」与登录态日志。必达模式下同一条日志改为「🎯 目标进度」按 `info` 级播报，不叫预警 |
 | **运行中改目标** | `SET_CAPACITY_GOAL` 路由即时写设置 + campaign + 日志，并唤醒下一轮调度，不用重启 AIbot |
 | **必达接管** | 新增 `src/shared/agent/must-achieve.ts`（`planMustAchieveQuotas` / `relaxFiltersForMustAchieve` / `shouldBypassWorkWindow` / `resolveMustAchieveMatchThreshold` / `shouldKeepCollectingOnNoSource`）。启动或改目标时 `applyMustAchieveTakeover()` 一次性把策略 / 配额 / 平台开关 / 日限标记拉到位，配额留 25%（至少 10 份）余量且只升不降 |
-| **达成才停** | `isCampaignFinished()` 在必达目标未达成时恒为 `false`：超时不返回 `missed`、全平台日限耗尽不判完成、关键词全被标无效不暂停、`activePlatforms=0` 时按 10 分钟冷却自动解除标记继续换平台；只有平台确认投递数达标才显式停机并通知 |
+| **达成才停** | `isCampaignFinished()` 在必达目标未达成时恒为 `false`：没有超时判定、不返回 `missed`、全平台日限耗尽不判完成、关键词全被标无效不暂停、`activePlatforms=0` 时按 10 分钟冷却自动解除标记继续换平台；只有平台确认投递数达标才显式停机并通知 |
 | **可控门槛全放开** | 必达模式全程开启产能优先：本地匹配分门槛降到 0（只排序不否决）、活跃时间临时放宽到「不限时间」、本地语义硬闸门降级、每平台每轮采集上限 50、跳过历史回收冷却、锁定 30 秒高频补仓。用户设置本身不改写 |
 | **风险例外** | 验证码不再整体停机：该平台临时冷却、其余平台继续投；账号受限仍保留安全熔断（继续点击会加重账号处罚），日志明确写明这是唯一例外且目标不会记为成功 |
-| **回归测试** | `tests/capacity-goal.test.ts`（归一化 / 状态机 / 必达超时不停机 / 倒计时持久化 / 静态契约）+ `tests/capacity-delivery-loop.test.ts`（24 例：产能闭环）+ `tests/must-achieve.test.ts`（25 例：自动接管纯函数、`isCampaignFinished` 真实行为、全链路接线） |
+| **回归测试** | `tests/capacity-goal.test.ts`（归一化 / 状态机 / 必达无超时判定 / 倒计时持久化 / 静态契约）+ `tests/capacity-delivery-loop.test.ts`（24 例：产能闭环）+ `tests/must-achieve.test.ts`（25 例：自动接管纯函数、`isCampaignFinished` 真实行为、全链路接线） |
 
 > 诚实边界：**必达是执行承诺，不是虚报数字**。只认平台侧已确认投递数，点了按钮但平台没确认永远不算成功；技术栈 / 岗位方向 / 黑名单硬约束保留，不会为了凑数乱投前端或 Java；间隔压缩仍守 8 秒防风控下限。平台登录失效、验证码与账号受限属于平台侧物理阻断，系统会持续重试并明确留痕卡在哪一步，不会静默停机，也不会把目标写成「已达成」。
 
