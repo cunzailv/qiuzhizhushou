@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1268%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1292%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -31,7 +31,7 @@
 - **会自检也会复盘**：L2 语义相关性自愈、L3 真实回复率回流反哺搜索方向、Planner 防数字幻觉，Tool-Calling 中控对话台支持多轮上下文与危险动作人工审批。
 - **数据留在本地**：简历、画像、队列、日志保存在浏览器本地（Dexie / IndexedDB + `chrome.storage`）；AI 能力走你自己配置的模型接口，不上传第三方服务。
 
-> 当前状态：`86` 个测试文件 / `1268` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
+> 当前状态：`87` 个测试文件 / `1292` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
@@ -82,7 +82,7 @@
 |------|----------|----------|
 | **Boss 直聘** | ✅ 列表 / 详情 / 批量沟通 / 匹配徽章 | ✅ 真实账号实测 |
 | **猎聘** | ✅ 列表 / 详情 / 投递 | ✅ 真实账号实测 |
-| **前程无忧 51job** | ✅ 列表 / 详情 / 投递（2026-10 新增） | ⚠️ 仅模拟页面 E2E · 待真实账号验证 |
+| **前程无忧 51job** | ✅ 列表 / 详情 / 投递（2026-10 新增；2026-11 按真实搜索页 DOM 重做卡片定位与确认弹窗） | ⚠️ 真实页面已排查定位链路 · 投递结果待真实账号验证 |
 | **智联招聘** | ✅ 列表 / 详情面板 / 投递（2026-10 新增） | ⚠️ 仅模拟页面 E2E · 待真实账号验证 |
 | **脉脉** | ✅ 列表 / 详情（保守策略 + 通用兜底） | ⚠️ 仅模拟页面 E2E · 待真实账号验证 |
 
@@ -102,6 +102,34 @@
 | 6 | 再翻到第 2 页 | 页码参数生效、能采到全新岗位，不是重复第 1 页 |
 
 > 站点改版导致选择器失配时，改对应 `src/shared/platform/<id>/index.ts` 顶部的 `SELECTORS` 常量，并同步更新 fixture 与契约测试；不要绕过「平台确认」判定去伪造成功。
+
+#### 🐞 51job 真实页面调试：投递失败时 bot 到底记了什么（2026-11）
+
+用户现场反馈 `❌ 投递未完成：[51job] AI全栈开发工程师 (原因: 页面中未找到对应岗位卡片或详情无法展开)`，并问「不知道 bot 是否有记录问题」。读取真实 Chrome 里的 `jobs.51job.com` 搜索页 DOM 后，定位到根因是**同一张搜索页里同时存在两类链接**：
+
+| 链接类型 | 真实样例 | 旧代码行为 |
+|---|---|---|
+| 公司页 | `jobs.51job.com/all/coUzxRPVA2VmkAYQdlVjY.html` | 被 `a[href*="jobs.51job.com"]` 当成岗位详情抓走，`window.open` 开成新标签（现场 Chrome 里十几个公司页标签就是这么来的） |
+| 岗位页 | `jobs.51job.com/shenzhen-ftq/173795328.html?s=...` | 真正该打开的目标，旧版反而没用上 |
+
+打开公司页后回原搜索页找详情容器，必然返回 `null`，于是报「未找到岗位卡片」。修复后：
+
+- **URL 分类**：`isJobDetailUrl()` 只认数字 ID 岗位页或带 `jobid` 的站内岗位链接；`isCompanyPageUrl()` 明确识别公司页，公司名可以取、但**永不作为 `jobUrl`**；`extractIdFromUrl()` 不再把整条公司页 URL 当成岗位 ID
+- **不再开新标签**：`activateJobCard()` 全程在后台专用标签页完成，按 `jobId → jobUrl → 标题 → 公司` 精确匹配目标卡片；真实搜索页（有岗位详情链接）且卡片自带「投递」按钮时直接返回，需要进详情才去掉 `target=_blank` 在当前页点链接；老结构无详情链接时按 `data-jobid` 命中并先展开内联 JD；**找不到目标岗位返回 `null`，绝不兜底点第一张卡**
+- **51job 没有「打招呼」**：它是「投递简历」模式。`fillGreetingMessage()` 不再无脑点任何含「投递 / 确认 / 确定」的按钮，只在**可见确认弹窗**里点 `确定 / 确认 / 确认投递 / 立即投递 / 继续投递`；不误点 `+ 关注`，也不重复投递
+- **确认证据不漏判**：`snapshotCommunicationUi()` 把可见弹窗纳入 `visibleDialogs`，否则 `communicationUiChanged` 恒为 `false`，投递确认层会拿不到平台侧证据
+
+**bot 有记录问题，而且现在能看清卡在哪一层**：
+
+| 去哪儿看 | 能看到什么 |
+|---|---|
+| AIbot「每时每刻行为日志」 | `❌ 投递未完成：[51job] …｜现场：N 张岗位卡片 / N 个详情链接 / N 个按钮 / 正文 N 字 / 链接样例：…`，不用再进诊断中心翻 context |
+| 管家 →「异常留痕」筛选 `runner.51job` / `campaign.51job` | 完整 context：`jobUrl`、`jobId`、标题、公司、`currentUrl`、卡片数、详情链接数、链接样例等现场 DOM 数字 |
+| 后台 `recordError.context` | 同一份诊断写入 `diagnostics` 字段，供后续复盘与导出 |
+
+旧的现场诊断只数 Boss 的 `.job-card-box` / `.btn-startchat`，对 51job 恒为 0，虽然记了却没有排查价值；现改为平台无关口径。另外 `reportRunnerError()` 原是 fire-and-forget，MV3 Service Worker 休眠时这条错误会丢，现按 `sendMessage` 结果判定，失败自动降级写 `chrome.storage.local` 共享队列 → 本地 Dexie，保证诊断中心查得到。
+
+> 回归测试：`tests/51job-apply-flow.test.ts`（24 例，用现场复刻 DOM 锁死公司页 / 岗位页分类、精确卡片命中、不 `window.open`、不误点关注、确认弹窗才点确定、UI 快照与错误留痕链路）。Chromium E2E 额外抓到并修掉两处真实回归：`findTargetCard()` 早退让「无岗位详情链接」的老结构整页激活失败、以及快速返回跳过内联 JD 展开导致岗位在打分环节被刷掉；模拟夹具也不再靠旧版恒返回 `true` 的「假成功」过确认层，改为真实吐出 `投递成功` 平台回执。**真实账号「投递后平台是否真的多一条记录」仍需按上方验收清单第 4–5 步核对**，模拟页面 E2E 不能替代。
 
 ### 🦾 E 层 · 自愈韧性智能体架构（M1–M5，2026-11）
 面对 DOM 变动、类名混淆、反爬遮罩与运行时异常，全流程自动降级与兜底：

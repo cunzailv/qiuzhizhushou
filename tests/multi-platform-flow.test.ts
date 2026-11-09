@@ -31,7 +31,10 @@ beforeAll(async () => {
   })
   serviceWorker = context.serviceWorkers()[0]
     ?? await context.waitForEvent('serviceworker')
-  serviceWorker.on('console', (message) => browserLogs.push(`[worker] ${message.text()}`))
+  serviceWorker.on('console', (message) => {
+    browserLogs.push(`[worker] ${message.text()}`)
+    if (process.env.DEBUG_E2E) console.log(`[worker] ${message.text()}`)
+  })
 }, 30_000)
 
 afterAll(async () => {
@@ -120,7 +123,10 @@ describe('multi-platform flow', () => {
   it('51job: parses .joblist cards, extracts detail, applies and persists with platformId', async () => {
     await seedResume()
     const page = await context.newPage()
-    page.on('console', (message) => browserLogs.push(`[page51] ${message.text()}`))
+    page.on('console', (message) => {
+      browserLogs.push(`[page51] ${message.text()}`)
+      if (process.env.DEBUG_E2E) console.log(`[page51] ${message.text()}`)
+    })
     await page.route('https://we.51job.com/**', async (route) => {
       await route.fulfill({
         headers: { 'content-type': 'text/html; charset=utf-8' },
@@ -137,9 +143,19 @@ describe('multi-platform flow', () => {
             </div>
           </div>
           <script>
+            // 真实 51job 投递后会给出平台侧回执。旧版适配器靠 fillGreetingMessage()
+            // 恒返回 true 伪造「已发送话术」来通过确认层；现在确认层只认平台证据，
+            // 因此夹具必须真的吐出「投递成功」提示，才能证明投递链路成立。
+            function markApplied(label) {
+              document.body.dataset.applied51 = label
+              const receipt = document.createElement('div')
+              receipt.setAttribute('role', 'alert')
+              receipt.textContent = '投递成功'
+              document.body.append(receipt)
+            }
             document.querySelector('.joblist-item').addEventListener('click', function (event) {
               if (event.target.tagName === 'BUTTON') {
-                document.body.dataset.applied51 = document.querySelector('.joblist-item-jobname').textContent.trim()
+                markApplied(document.querySelector('.joblist-item-jobname').textContent.trim())
                 return
               }
               const desc = document.createElement('div')
@@ -147,8 +163,9 @@ describe('multi-platform flow', () => {
               desc.innerHTML = '<h1>前端工程师（AI方向）</h1><p>React TypeScript JavaScript HTML CSS Node.js 负责前端开发</p>'
               const apply = document.createElement('button')
               apply.textContent = '投递'
-              apply.addEventListener('click', function () {
-                document.body.dataset.applied51 = 'detail-apply'
+              apply.addEventListener('click', function (event) {
+                event.stopPropagation()
+                markApplied('detail-apply')
               })
               document.body.append(desc, apply)
             })
@@ -156,9 +173,13 @@ describe('multi-platform flow', () => {
         </body></html>`,
       })
     })
+    if (process.env.DEBUG_E2E) console.log('[debug] goto 51job')
     await page.goto('https://we.51job.com/pc/search?keyword=%E5%89%8D%E7%AB%AF')
+    if (process.env.DEBUG_E2E) console.log('[debug] goto done, wait panel')
     await expect.poll(() => page.locator('#boss-assistant-panel').count(), { timeout: 10_000 }).toBe(1)
+    if (process.env.DEBUG_E2E) console.log('[debug] panel ready, trigger apply')
     await triggerApply('https://we.51job.com/*')
+    if (process.env.DEBUG_E2E) console.log('[debug] apply triggered')
     await expect.poll(async () => {
       const v = await page.locator('body').getAttribute('data-applied51')
       return v !== null && v.length > 0

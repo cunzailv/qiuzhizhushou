@@ -10,6 +10,7 @@ import { generateJobGreeting } from '../shared/ai/greeting'
 import { getOptimalResumeForJob } from '../shared/ai/resume-router'
 import { addSharedAppliedJobId } from '../shared/db/shared-state'
 import { recordSelfHealingEvent } from '../shared/db/diagnostics-store'
+import { appendSharedError, recordError } from '../shared/db/error-store'
 import { dismissUnexpectedModals } from '../shared/platform/boss/action-simulator'
 import { log, logWarn, logError } from '../shared/utils/logger'
 import { getSetting } from '../shared/db/settings-store'
@@ -93,20 +94,88 @@ export interface TaskRunnerCallbacks {
 /** 门槛放宽每个 content script 生命周期只播报一次，避免每个岗位刷一条日志 */
 let mustAchieveThresholdAnnounced = false
 
-function reportRunnerError(params: {
+interface RunnerErrorParams {
   source: string
   message: string
   stack?: string
   context?: string
-}) {
+}
+
+/**
+ * 后台休眠 / 无接收方时，不能让「岗位卡片找不到」这类关键诊断凭空消失。
+ * 与统一上报入口一致：先写跨域共享队列，再退到本上下文的 Dexie。
+ */
+async function fallbackRecordRunnerError(params: RunnerErrorParams): Promise<void> {
   try {
-    chrome.runtime.sendMessage({
+    const stored = await appendSharedError({
+      source: params.source,
+      message: params.message,
+      stack: params.stack,
+      context: params.context,
+    })
+    if (!stored) {
+      await recordError({
+        source: params.source,
+        message: params.message,
+        stack: params.stack,
+        context: params.context,
+      })
+    }
+  } catch {
+    // 留痕本身失败绝不阻塞主链路
+  }
+}
+
+function reportRunnerError(params: RunnerErrorParams) {
+  try {
+    const sent = chrome.runtime.sendMessage({
       type: 'RECORD_ERROR',
       payload: params,
     })
+    // MV3 的 sendMessage 返回 Promise；旧版 fire-and-forget 既不处理 rejection，
+    // 也没有兜底，Service Worker 休眠时这条错误就丢了，诊断中心查不到。
+    Promise.resolve(sent)
+      .then((res) => {
+        if (!(res as { success?: boolean } | undefined)?.success) {
+          void fallbackRecordRunnerError(params)
+        }
+      })
+      .catch(() => { void fallbackRecordRunnerError(params) })
   } catch {
-    // 忽略异常上报失败
+    void fallbackRecordRunnerError(params)
   }
+}
+
+/**
+ * 现场 DOM 诊断：岗位卡片定位失败时，光有「找不到」四个字无法判断
+ * 是站点改版、页面没加载、还是任务来源页不对。这些数字会同时进
+ * 诊断中心的 context 和 AIbot 行为日志。
+ */
+export function collectPageDomDiagnostics(): Record<string, unknown> {
+  if (typeof document === 'undefined') return {}
+  const count = (selector: string): number => {
+    try { return document.querySelectorAll(selector).length } catch { return -1 }
+  }
+  const sampleLinkTexts = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]'))
+    .map((a) => (a.textContent || '').replace(/\s+/g, ' ').trim())
+    .filter((t) => t.length > 4 && t.length < 60)
+    .slice(0, 3)
+  return {
+    pageUrl: typeof window !== 'undefined' ? window.location.href : '',
+    listContainers: count('.joblist, [class*="joblist"], [class*="job-list"], [class*="job-card"]'),
+    jobCards: count('.joblist-item, [class*="joblist-item"], [class*="job-card"], [class*="job-item"]'),
+    anchors: count('a[href]'),
+    detailLinks: count('a[href*="jobs.51job.com"], a[href*="/job_detail/"], a[href*="job-detail"]'),
+    buttons: count('button, [role="button"]'),
+    visibleDialogs: count('[role="dialog"], [class*="dialog"], [class*="modal"]'),
+    bodyTextLength: (document.body?.textContent || '').length,
+    sampleLinkTexts,
+  }
+}
+
+/** 给用户看的短诊断，直接进行为日志，不用再进诊断中心翻 */
+export function describePageDomDiagnostics(diag: Record<string, unknown>): string {
+  return `当前页 ${diag.jobCards ?? 0} 张岗位卡片 / ${diag.detailLinks ?? 0} 个详情链接 / ${diag.buttons ?? 0} 个按钮 / 正文 ${diag.bodyTextLength ?? 0} 字`
 }
 
 export interface TaskExecutionResponse {
@@ -118,6 +187,8 @@ export interface TaskExecutionResponse {
   riskDetected?: 'captcha' | 'rate' | 'block'
   failReason?: string
   appliedAt?: string
+  /** 现场 DOM 诊断 JSON：定位失败时让后台日志与诊断中心都能看到「卡在哪一层」 */
+  diagnostics?: string
   /** 平台侧确认证据；只有 level=confirmed 才允许记 done */
   verification?: ApplyVerification
 }
@@ -272,13 +343,11 @@ export async function executeCampaignTask(
     }
     if (!detailEl) {
       logWarn(MOD, 'executeCampaignTask', `Cannot open job detail element for: ${task.jobTitle}`)
-      notifyLog(`⚠️ 页面未找到岗位卡片：${task.jobTitle}`, 'warn')
-      const domCardCount = document.querySelectorAll(
-        'li.job-card-box, .job-card-wrapper, .recommend-job-card, li, [class*="job-card"]'
-      ).length
-      const applyBtnCount = document.querySelectorAll(
-        '.btn-startchat, [class*="btn-startchat"], [class*="btn-chat"], [class*="start-chat"]'
-      ).length
+      // 旧诊断只数 Boss 的 .job-card-box / .btn-startchat，对 51job 恒为 0，
+      // 记录虽然进了诊断中心却没有任何排查价值。现在按平台无关的口径采现场。
+      const diag = collectPageDomDiagnostics()
+      const diagText = describePageDomDiagnostics(diag)
+      notifyLog(`⚠️ 页面未找到岗位卡片：${task.jobTitle}（${diagText}）`, 'warn')
       reportRunnerError({
         source: `runner.${task.platform}`,
         message: `页面中未找到对应岗位卡片或详情无法展开: [${task.platform}] ${task.jobTitle} @ ${task.company}`,
@@ -288,14 +357,15 @@ export async function executeCampaignTask(
           jobTitle: task.jobTitle,
           company: task.company,
           currentUrl: window.location.href,
-          domCardCount,
-          applyBtnCount,
+          diagText,
+          ...diag,
         }),
       })
       result = {
         taskId: task.id,
         status: 'failed',
         failReason: '页面中未找到对应岗位卡片或详情无法展开',
+        diagnostics: JSON.stringify(diag),
       }
       return result
     }

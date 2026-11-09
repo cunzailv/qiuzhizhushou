@@ -1,8 +1,24 @@
 # Changelog
 
-## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用、智能中控对话台 Tool-Calling Agent、异常留痕跨上下文统一、unslop 界面设计体系、信息架构分层收纳、图标入口直达右侧侧栏、投递确认层与行为日志历史回看、搜索方向生效与技术栈硬约束、后台静默运行不抢焦点、休息状态机与产能修复、目标产能设定、目标产能闭环修复（供给死锁 / 产能优先 / 时段冲突）、目标必达模式（设定即承诺，未达成不停机）、目标必达看门狗（真正完成目标）
+## [Unreleased] — 侧栏形态收敛、概览批量沟通控制台、半自动/全自动互斥、筛选条件通用、智能中控对话台 Tool-Calling Agent、异常留痕跨上下文统一、unslop 界面设计体系、信息架构分层收纳、图标入口直达右侧侧栏、投递确认层与行为日志历史回看、搜索方向生效与技术栈硬约束、后台静默运行不抢焦点、休息状态机与产能修复、目标产能设定、目标产能闭环修复（供给死锁 / 产能优先 / 时段冲突）、目标必达模式（设定即承诺，未达成不停机）、目标必达看门狗（真正完成目标）、51job 真实页面投递链路与现场诊断留痕
 
 ### Added
+
+- **调试 51job 网页「打招呼和投递」（用户反馈 `❌ 投递未完成：[51job] AI全栈开发工程师 (原因: 页面中未找到对应岗位卡片或详情无法展开)`，并问「不知道 bot 是否有记录问题」）**：用 WorkBuddy 浏览器读取用户已登录 Chrome 里真实的 `jobs.51job.com` 搜索页 DOM，发现同一张列表里同时存在**公司页链接**（`jobs.51job.com/all/coXXXX.html`）与**岗位详情链接**（`jobs.51job.com/shenzhen-ftq/173795328.html?s=...`）。旧适配器用 `a[href*="jobs.51job.com"]` 取第一个链接，抓到的是公司页，再 `window.open(jobUrl, '_blank')` 打开公司页、回原搜索页找详情容器 → 必然 `null`，报「未找到岗位卡片」，同时刷出一堆公司页标签（现场 Chrome 里十几个 `jobs.51job.com` 标签即由此而来）。修复：
+  - **URL 分类真源**：新增 `isJobDetailUrl()`（只认数字 ID 岗位页 / 带 `jobid` 的站内岗位链接）与 `isCompanyPageUrl()`（明确识别公司页 `/all/co…`）；公司页链接只用来取公司名，永不作为 `jobUrl`；`extractIdFromUrl()` 非岗位链接返回空串，不再把整条 URL 当岗位 ID；列表采集支持「锚点路径（真实页面）+ 经典 `.joblist-item` 路径（模拟页 / 旧结构）」双路，并过滤嵌套候选，避免宽泛 `[class*="joblist-item"]` 把子元素也当卡片
+  - **不再开新标签、不再乱点**：`activateJobCard()` 全程在当前后台专用标签页完成，绝不 `window.open`；按 `jobId → jobUrl → 标题 → 公司` 精确匹配目标卡片（真实搜索页有详情链接时，卡片自带投递按钮就直接返回；老结构无详情链接则按 `data-jobid` 命中并先展开内联 JD），需要进详情时去掉 `target=_blank` 在当前页点链接；**找不到目标岗位返回 `null`，绝不兜底点第一张卡**（曾因 `SELECTORS.card` 是逗号选择器、属性只作用于最后一项而误命中任意卡片）
+  - **51job 是「投递简历」不是「打招呼」**：`clickApplyButton()` 只点明确匹配 `投递 / 申请 / 投个简历 / 马上投递 / 投简历` 的按钮，不误点 `+ 关注`；`fillGreetingMessage()` 旧版会无脑点任何含「投递 / 确认 / 确定」的按钮（可能重复投递），现只在**可见确认弹窗**里点 `确定 / 确认 / 确认投递 / 立即投递 / 继续投递`，没有弹窗返回 `false` 表示没有招呼语可发（不算失败）；`isVisible()` 改为 jsdom-safe
+  - **确认层不漏判**：`snapshotCommunicationUi()` 的 `visibleDialogs` 旧版恒为空，导致 `hasNewCommunicationUi()` 拿不到 51job 的投递确认弹窗、平台确认证据缺失；现从 `SELECTORS.dialog` 收集可见弹窗
+- **bot 确实记录了问题，且现在记录得能排查（回答「不知道 bot 是否有记录问题」）**：原有链路是 content `reportRunnerError()` → `RECORD_ERROR` → background `recordError()` → 扩展域 Dexie，后台 `handleTaskExecutionResult()` 另写 `campaign.51job` 与 `❌ 投递未完成` 行为日志，管家「异常留痕」可查。但有三个真实缺口：
+  - **会丢**：`reportRunnerError()` 是 fire-and-forget，MV3 Service Worker 休眠时 `sendMessage` 失败就静默丢弃。现按 Promise 结果判定，失败依次降级写 `chrome.storage.local` 共享队列 → 本地 Dexie（`appendSharedError` / `recordError`），与统一上报入口同语义
+  - **记了也没用**：现场诊断只数 Boss 的 `.job-card-box` / `.btn-startchat`，对 51job 恒为 0。现新增平台无关的 `collectPageDomDiagnostics()` / `describePageDomDiagnostics()`，采集当前页 URL、列表容器数、岗位卡片数、详情链接数、按钮数、可见弹窗数、正文长度与链接样例
+  - **日志只有一句失败原因**：`ExecuteTaskResult` / `TaskExecutionResponse` 新增 `diagnostics`，后台 `describeRunnerDiagnostics()` 把现场数字直接摊到 AIbot 行为日志（`…｜现场：N 张岗位卡片 / N 个详情链接 / N 个按钮 / 正文 N 字 / 链接样例：…`），并写进 `recordError.context`；用户不用再进诊断中心翻 context 就能判断是「页面没加载」还是「选择器失配」
+- **E2E 抓到并修掉两处真实回归（不是环境抖动）**：全量 Chromium E2E 里 `multi-platform-flow.test.ts > 51job` 稳定失败，单线程复跑确认后逐条定位：
+  - **`findTargetCard()` 早退把 legacy 路径变成死代码**：函数开头 `if (anchors.length === 0) return null`，而老结构 / 模拟列表页**根本没有岗位详情链接**，下面的 `data-jobid` 精确兜底永远走不到 → `activateJobCard()` 返回 `null` → 报「无法打开详情」→ 不投递。现改为先跑「岗位详情链接精确匹配」，没命中再跑「卡片根容器的 `data-jobid` / 标题 / 公司精确匹配」，两条路径都不会退回第一张卡；`listCardRoots()` 统一过滤嵌套候选（宽泛 `[class*="joblist-item"]` 会命中 `.joblist-item-jobname` 等子元素）
+  - **快速返回跳过了内联 JD 展开**：为了不在真实搜索页跳详情，新增了「卡片自带投递按钮就直接返回」；但老结构靠**点卡片行**展开 `.job_msg`，batch 模式靠完整 JD 打分，跳过这步会让岗位因描述为空被判「不匹配」（现场日志 `Done: 0 matched / 1 processed`），根本走不到投递。现只在**页面上存在岗位详情链接**时走快速返回；无链接的老结构仍先点开内联详情，再返回含投递按钮的目标卡片（`extractJobDescriptionFromDetail()` 回退到 `document` 取 `.job_msg`，既不丢 JD 也不会去 body 上误点别的岗位按钮）
+  - **夹具不再依赖旧的假成功**：旧 `fillGreetingMessage()` 恒返回 `true`，被确认层当成「已发送话术」从而伪造平台确认。诚实化之后模拟页会判 `unverified`，因此 `multi-platform-flow.test.ts` 的 51job 夹具改为点击后真的吐出 `[role="alert"] 投递成功` 平台回执；E2E 现在的通过依据是 `平台确认依据：投递成功`，而非「点过按钮」。另加 `DEBUG_E2E=1` 环境变量开关，本地排查时可即时打印页面 / worker 日志
+- **回归测试**：新增 `tests/51job-apply-flow.test.ts`（24 例：URL 分类、列表采集、公司名 / 标题解析、模拟页兼容、不 `window.open`、精确 jobId 命中、找不到返回 null、无详情链接时按 `data-jobid` 命中、内联 JD 展开后可提取完整 JD、不误点关注、确认弹窗才点确定、UI 快照含可见弹窗、DOM 诊断与三层错误留痕静态契约）；`tests/multi-platform-flow.test.ts`、`platform-verification-parity.test.ts`、`self-healing-mission.test.ts`、`apply-verification.test.ts`、`campaign-pipeline.test.ts` 无回归。`tsc` 0 error、`eslint` 0 error、重建 dist 后单线程全量 **87 文件 / 1292 例通过**（含 Chromium E2E）
+- **诚实边界**：真实页面只验证了「卡片定位 / 打开 / 按钮 / 确认弹窗」的 DOM 链路，**「投递后平台是否真的多一条投递记录」仍需真实账号按 README 验收清单第 4–5 步核对**；模拟页面 E2E 不能替代登录态、反爬与平台确认回执
 
 - **修复「设了目标但 bot 没完成任务」（用户反馈「我的意思是必须完成呀，问题是你写的代码，还有 bot 没有完成任务」）**：上一轮只改了「超时」文案，没解决 `16/80` 停住不动本身。逐行审计 `runCampaignTick()` 后定位到**调度链断裂**这个根因：`apply-tick` 是一次性 `chrome.alarms`，而 tick 开头只要 `campaign.status !== 'running'` 就直接 `return` 且**不重建调度**；验证码、无岗位来源、平台日限、账号受限、误判完成都会把 status 写成非 running，`resumeSchedulerIfNeeded()` 又只在 `running` 时才恢复 —— 一次早退 = 永久静默，之前写的「未达成不停机」全成了不可达代码。修复：
   - **独立周期看门狗**：新增 `must-achieve-watchdog` alarm（`periodInMinutes: 1`，由浏览器持久化、与一次性 tick 完全解耦），在 `onInstalled` / `onStartup` 注册，`onAlarm` 调 `ensureMustAchieveAlive()`。Service Worker 被回收、tick 早退、campaign 被挂起都拦不住它

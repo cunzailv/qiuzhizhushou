@@ -288,8 +288,29 @@ export interface ExecuteTaskResult {
   riskDetected?: 'captcha' | 'rate' | 'block'
   failReason?: string
   appliedAt?: string
+  /** 现场 DOM 诊断 JSON（content 侧采集），定位失败时写进后台日志与错误记录 */
+  diagnostics?: string
   /** 平台侧确认证据；只有 level=confirmed 的任务才会走到 done */
   verification?: ApplyVerification
+}
+
+/** 把 content 侧回传的 DOM 诊断 JSON 压成一句人话，避免日志里塞一大段 JSON */
+function describeRunnerDiagnostics(raw: string): string {
+  try {
+    const d = JSON.parse(raw) as Record<string, unknown>
+    const parts = [
+      `${Number(d.jobCards) || 0} 张岗位卡片`,
+      `${Number(d.detailLinks) || 0} 个详情链接`,
+      `${Number(d.buttons) || 0} 个按钮`,
+      `正文 ${Number(d.bodyTextLength) || 0} 字`,
+    ]
+    if (Array.isArray(d.sampleLinkTexts) && d.sampleLinkTexts.length > 0) {
+      parts.push(`链接样例：${d.sampleLinkTexts.slice(0, 2).join(' / ')}`)
+    }
+    return parts.join(' / ')
+  } catch {
+    return '诊断信息不可用'
+  }
 }
 
 /** Content Script 采集岗位后回传的统计结果 */
@@ -1810,10 +1831,16 @@ async function handleTaskExecutionResult(task: ApplyTask, result: ExecuteTaskRes
           jobUrl: task.jobUrl,
           platform: task.platform,
           failReason: result.failReason,
+          diagnostics: result.diagnostics,
         }),
       })
+      // 定位失败时把现场 DOM 数字直接摊在 AIbot 日志里，
+      // 不用再进诊断中心翻 context 才知道是「页面没加载」还是「选择器失配」。
+      const diagNote = result.diagnostics
+        ? `｜现场：${describeRunnerDiagnostics(result.diagnostics)}`
+        : ''
       await appendCampaignLog(
-        `❌ 投递未完成：[${task.platform}] ${task.jobTitle} (原因: ${result.failReason || '未知'})`,
+        `❌ 投递未完成：[${task.platform}] ${task.jobTitle} (原因: ${result.failReason || '未知'})${diagNote}`,
         'warn',
       )
     }
