@@ -4,6 +4,13 @@
 
 ### Added
 
+- **第四轮修复已由真实账号验证生效**：扩展本地日志可见 `🧹 已清理 23 条旧版 51job 公司页脏任务`（14:23）、`⏳ 列表页未就绪（岗位卡片尚未渲染），等待页面就绪...`（15:43:01），紧接着 `✅ 投递成功：已向 [51job]「深圳市绿联科技股份有限公司 - 后端采购工程师」发起沟通（平台确认依据：投递成功、点击后出现新的沟通窗口/输入框、已发送话术）`（15:43:09）—— 队列清洗、等待 SPA 渲染后重试、平台确认投递数三条链路都跑通了。
+- **猎聘卡片容器改版兜底（51job 修好后接棒报错）**：现场 `⚠️ 页面未找到岗位卡片：招聘PHP工程师 当前页（页面 www.liepin.com/zhaopin/） 0 张岗位卡片 / 41 个岗位详情链接 / 3 个按钮 / 正文 6993 字`，岗位样例是「商务助理」「AI技术产品化经理」。用同一已登录 Chrome 打开 `www.liepin.com/zhaopin/?key=PHP开发` 读真实 DOM，岗位是 `<a href="https://www.liepin.com/job/1986608107.shtml?…">PHP工程师【上海-虹口区】15-40k…</a>` —— **链接自身承载标题/薪资/地点，但三种卡片容器选择器（job-list-item / job-card-pc-container / data-nick）全没命中**，于是明明有 41 个岗位却报「找不到卡片」。修复：
+  - 新增导出纯函数 `findCardFromDetailLinks()`：按 `jobId → 标题 → 去「招聘/急聘」前缀的标题 → 公司` 从 `a[href]` 里的 `/job/<id>.shtml`、`/a/<id>.shtml` 精确反查，完全不依赖 class 名；找不到返回 `null`，**绝不兜底点第一个岗位**（会投错人）。`activateJobCard()` 在容器选择器落空时调用它
+  - 反查结果是 `<a>` 本身，「聊一聊」按钮通常在更外层卡片容器里：新增逐层向上扩展查找作用域（最多 3 层），仍要求文字精确等于「聊一聊」，不误点别的按钮
+  - 后台诊断补一句 `有岗位链接但卡片容器未命中（疑似站点改版或目标岗位不在本页）`，下次日志能直接区分「页面没岗位」与「选择器失配」
+- **回归测试**：新增 `tests/liepin-detail-link-fallback.test.ts`（10 例：真实 URL 按 jobId / 标题 / 去前缀 / 公司 / 旧版 `/a/` 链接命中、公司主页与频道页不参与、目标不在本页返回 null、全链路静态契约）。`tsc` 0 error、`eslint` 0 error、重建 `dist` 后单线程全量 **90 文件 / 1339 例通过**（含 Chromium E2E）
+
 - **51job 投递成功页补记 + 导航竞态（用户重载后贴回 15:04 日志，新代码已确认生效）**：日志里已带 `页面 xxx` / `个岗位详情链接` / `岗位样例：`，说明扩展重载成功；Chrome 里同时留着一个标题为 `jobs.51job.com/applysuccess.php?jobid=173879321` 的标签 —— **岗位其实投递成功了，插件却没记上**。用同一已登录 Chrome 手动打开 `we.51job.com/pc/search?keyword=php开发`，DOM 里有公司页链接、`投递` 按钮与 `jobs.51job.com/shenzhen/173992381.html` 岗位详情链接，证明不是反爬 / 未登录，而是插件自己的页面时序问题：
   - **整页跳转毁掉回执**：51job 点「投递」不是弹窗，是导航到 `applysuccess.php?jobid=XXX`；页面一跳 content script 上下文被销毁，「点击 → 采集平台确认 → 回传 done」跑不完，任务既不算成功也不计配额，后台 tab 还停在成功页，下一个任务在那儿找岗位卡片 → 连续两次触发 `clearPendingTasks` 自愈清空队列（历史累计 156 次）。新增 `src/shared/agent/apply-success.ts` 纯函数（`isApplySuccessUrl` / `parseApplySuccessJobId` / `findApplySuccessTask`，按 jobid 精确匹配、排除已 done 保证幂等），`background/index.ts` 顶层注册 `chrome.tabs.onUpdated` 捕获成功页，`campaign-service.ts` 新增 `recordApplySuccessFromUrl()` 走统一 `handleTaskExecutionResult` 补记 done（配额 / 日志 / 去重 / L3 回流全复用，不另开一套记账）
   - **空壳页不再被当成「找不到卡片」**：现场 `页面 we.51job.com/pc/search / 0 张岗位卡片 / 0 个岗位详情链接 / 正文 1698 字 / 岗位样例：求职招聘指南` 是 SPA 列表还没渲染出来的空壳。`task-runner.ts` 新增 `waitForJobListReady()`（等待卡片出现后重试一次激活；投递成功页直接判未就绪），仍不就绪时标 **skipped 而不是 failed** —— failed 会被后台判成「连续未找到卡片」而 `clearPendingTasks`，skipped 走回收机制、队列不动；后台 skipped 分支对这类原因写准确日志并重置连续失败计数

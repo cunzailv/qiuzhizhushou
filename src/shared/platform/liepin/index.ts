@@ -35,6 +35,44 @@ const JOB_CARD_SELECTOR = [
   'a[data-nick="job-detail-job-info"]',
 ].join(', ')
 
+/**
+ * 猎聘改版兜底：卡片容器类名全变了也能定位目标岗位。
+ *
+ * 现场日志 `页面 www.liepin.com/zhaopin/ / 0 张岗位卡片 / 41 个岗位详情链接 /
+ * 岗位样例：商务助理… / AI技术产品化经理…` 说明页面上有几十个岗位链接，
+ * 只是 JOB_CARD_SELECTOR 的三个容器选择器一个都没命中 —— 站点改版了。
+ * 详情链接的 `/job/<id>.shtml`（旧版 `/a/<id>.shtml`）结构以及
+ * 「链接文本自带标题+薪资+地点」是稳定的，因此按 jobId → 标题 → 公司精确反查，
+ * 绝不兜底点第一个岗位（那会投错人）。
+ */
+export function findCardFromDetailLinks(
+  jobId: string,
+  expectedTitle = '',
+  expectedCompany = '',
+  root: ParentNode = document,
+): HTMLAnchorElement | null {
+  const anchors = Array.from(root.querySelectorAll<HTMLAnchorElement>('a[href]'))
+    .filter((a) => /\/job\/[\w-]+|\/a\/\d+\.shtml/i.test(a.href))
+  if (anchors.length === 0) return null
+
+  let hit: HTMLAnchorElement | undefined
+  if (jobId) {
+    hit = anchors.find((a) => a.href.includes(`/${jobId}`) || a.href.includes(`jobId=${jobId}`))
+  }
+  if (!hit && expectedTitle) {
+    hit = anchors.find((a) => (a.textContent || '').includes(expectedTitle))
+  }
+  if (!hit && expectedTitle) {
+    // 平台会在标题前加「招聘 / 急聘」等前缀，做一次去前缀的宽松匹配
+    const core = expectedTitle.replace(/^(?:招聘|急聘|诚聘|高薪|急招|招)\s*/, '').trim()
+    if (core.length >= 2) hit = anchors.find((a) => (a.textContent || '').includes(core))
+  }
+  if (!hit && expectedCompany) {
+    hit = anchors.find((a) => (a.textContent || '').includes(expectedCompany))
+  }
+  return hit || null
+}
+
 /** 从卡片元素解析详情链接：卡片自身可能是 a[data-nick]（最新 zhaopin 页） */
 function resolveDetailLink(card: Element): HTMLAnchorElement | null {
   if (card.matches(DETAIL_LINK_SELECTOR)) return card as HTMLAnchorElement
@@ -624,6 +662,16 @@ async function activateJobCard(
   }
 
   if (!card) {
+    // 容器选择器全部失配时（站点改版），改从岗位详情链接精确反查。
+    // 返回的是 <a> 本身，后面的 cardScope 会自动取它的父容器找「聊一聊」。
+    const fallback = findCardFromDetailLinks(jobId, expectedTitle, expectedCompany)
+    if (fallback) {
+      log('[liepin]', 'activateJobCard', `Card resolved via detail-link fallback: ${expectedTitle || jobId}`)
+      card = fallback
+    }
+  }
+
+  if (!card) {
     log('[liepin]', 'activateJobCard', `Card not found: ${expectedTitle}`)
     return null
   }
@@ -659,6 +707,20 @@ async function activateJobCard(
       if (text === '聊一聊') {
         btn = el; break
       }
+    }
+  }
+
+  if (!btn) {
+    // 反查路径可能落在岗位链接本身：「聊一聊」按钮在更外层的卡片容器里。
+    // 逐层向上扩大作用域（最多 3 层），仍要求文字精确等于「聊一聊」，不误点别的按钮。
+    let scope = (card as HTMLElement).parentElement
+    for (let i = 0; i < 3 && scope && !btn; i++) {
+      btn = findButtonByText(scope, ['聊一聊'])
+      if (!btn) {
+        btn = qa<HTMLElement>('span, div, button, a', scope)
+          .find((el) => (el.textContent || '').replace(/\s+/g, '') === '聊一聊') || null
+      }
+      scope = scope.parentElement
     }
   }
 
