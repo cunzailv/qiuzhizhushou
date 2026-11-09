@@ -375,13 +375,136 @@ export async function ensurePlatformTab(
   }
 }
 
-/** 向 Tab 发送消息，带有 Content Script 注入恢复与重试机制 */
+/**
+ * 是不是「扩展重载导致 content script 失联」。
+ *
+ * 现场日志：
+ *   ❌ 任务执行通信异常: Error: Could not establish connection. Receiving end does not exist.
+ *   ⚠️ 【猎聘】自动扫描通信异常: Error: Could not establish connection. Receiving end does not exist.
+ *
+ * 用户在 chrome://extensions 重新加载扩展后，已打开页面里旧 content script 的
+ * extension context 会被 Chrome 置为 invalidated，消息端口被拆除，但页面本身完好。
+ * DEDICATED_TABS_KEY 存在 chrome.storage.local 里、重载不清，于是 ensurePlatformTab()
+ * 仍会复用这个 status=complete、URL 也对的「僵死」tab，直接发消息就抛上面那句。
+ *
+ * 注意：这跟「页面没加载完 / 平台改版」是完全不同的故障，后者靠注入兜底，前者必须 reload。
+ */
+export function isStaleConnectionError(err: unknown): boolean {
+  const text = String(err instanceof Error ? err.message : err ?? '')
+  return /could not establish connection|receiving end does not exist|extension context invalidated|message port closed/i.test(
+    text,
+  )
+}
+
+/** 只有「非活跃 + 五大招聘站」的专用后台 tab 允许 reload，绝不碰用户正在看的页面 */
+const JOB_SITE_HOST_RE = /(?:^|\.)(zhipin\.com|liepin\.com|51job\.com|zhaopin\.com|maimai\.cn)$/i
+
+export function shouldReloadStaleTab(
+  tab: { active?: boolean; url?: string } | null | undefined,
+): boolean {
+  if (!tab || tab.active === true) return false
+  const url = tab.url || ''
+  if (!/^https?:\/\//i.test(url)) return false
+  try {
+    return JOB_SITE_HOST_RE.test(new URL(url).hostname)
+  } catch {
+    return false
+  }
+}
+
+/**
+ * reload 一个僵死的后台 tab，让 MV3 按 manifest 全新注入 content script。
+ *
+ * 为什么不能只靠 chrome.scripting.executeScript 再注入一次：构建产物里的
+ * content script 是动态 import loader：
+ *   await import(chrome.runtime.getURL("assets/index.ts-XXXX.js"))
+ * 同一个 isolated world 里同一模块 URL 已被 import 过，ES module 缓存让模块体
+ * 不会二次执行，模块顶层的 chrome.runtime.onMessage.addListener 自然也不会重新注册。
+ * 注入多少次都救不回来 —— 只有 reload 才会重建 isolated world 与模块缓存。
+ */
+async function reloadStaleTab(tabId: number): Promise<boolean> {
+  try {
+    const tab = await chrome.tabs.get(tabId)
+    if (!shouldReloadStaleTab(tab)) {
+      logWarn(
+        MOD,
+        'reloadStaleTab',
+        `Skip reload for tab ${tabId}: it is the user's active tab or not a job site — ask for a manual refresh instead`,
+      )
+      return false
+    }
+    await chrome.tabs.reload(tabId)
+    // reload 是异步的，返回瞬间 tab.status 往往还是旧页面的 'complete'，
+    // 先留一个短窗口让导航真正开始，再等 complete，避免「假 complete」。
+    await wait(400)
+    const loaded = await waitForTabLoaded(tabId, 20_000)
+    // document_end 注入 → 动态 import → onMessage 注册 → SPA 首屏卡片渲染
+    await wait(loaded ? 1500 : 2500)
+    return loaded
+  } catch (err) {
+    logWarn(MOD, 'reloadStaleTab', `Failed to reload tab ${tabId}: ${String(err)}`)
+    return false
+  }
+}
+
+/**
+ * 扩展重载 / 浏览器启动时，主动复活存量的专用后台 tab。
+ *
+ * 不这样做的话，要等第一次采集或投递真的失败一次才触发自愈，用户会先在日志里
+ * 看到一轮「通信异常」。这里在恢复调度之前先把它们刷新好。
+ * 只处理非活跃、五大招聘站的 tab；用户正在看的页面一律不动。
+ */
+export async function reviveDedicatedTabs(): Promise<number> {
+  let ids: number[] = []
+  try {
+    const res = await chrome.storage.local.get(DEDICATED_TABS_KEY)
+    const map = (res?.[DEDICATED_TABS_KEY] || {}) as Record<string, number>
+    ids = Array.from(new Set(Object.values(map).filter((id) => typeof id === 'number')))
+  } catch {
+    return 0
+  }
+  if (ids.length === 0) return 0
+
+  const targets: number[] = []
+  for (const id of ids) {
+    try {
+      const tab = await chrome.tabs.get(id)
+      if (shouldReloadStaleTab(tab)) targets.push(id)
+    } catch {
+      // tab 已被用户关掉，忽略
+    }
+  }
+  if (targets.length === 0) return 0
+
+  await Promise.all(
+    targets.map(async (id) => {
+      try {
+        await chrome.tabs.reload(id)
+      } catch {
+        // 单页刷新失败不影响其它平台
+      }
+    }),
+  )
+  await wait(500)
+  await Promise.all(targets.map((id) => waitForTabLoaded(id, 15_000)))
+  await wait(1200)
+  log(MOD, 'reviveDedicatedTabs', `Reloaded ${targets.length} dedicated tab(s) after extension restart`)
+  return targets.length
+}
+
+/**
+ * 向 Tab 发送消息，带 Content Script 注入恢复、僵死页面 reload 自愈与重试机制。
+ */
 export async function sendTabMessageWithRetry<T = unknown>(
   tabId: number,
   message: unknown,
   maxAttempts = 5,
 ): Promise<T> {
   let lastError: unknown
+  // 每次调用最多 reload 一次，避免页面本身有问题时陷入无限刷新
+  let revived = false
+  // 记录自愈的真实结果，最终抛错时如实附加，供上层行为日志展示
+  let reviveOutcome: 'none' | 'reloaded' | 'skipped' = 'none'
 
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
@@ -389,7 +512,26 @@ export async function sendTabMessageWithRetry<T = unknown>(
       return response as T
     } catch (err) {
       lastError = err
-      logWarn(MOD, 'sendTabMessageWithRetry', `Attempt ${attempt + 1}/${maxAttempts} failed, injecting fallback script...`)
+      const stale = isStaleConnectionError(err)
+      logWarn(
+        MOD,
+        'sendTabMessageWithRetry',
+        `Attempt ${attempt + 1}/${maxAttempts} failed${stale ? ' (stale content script)' : ''}: ${String(err)}`,
+      )
+
+      // 扩展重载后的僵死 context：重复注入 loader 无效，直接 reload 复活。
+      // 成功后立刻重试发消息，不消耗无意义的退避等待。
+      if (stale && !revived) {
+        revived = true
+        if (await reloadStaleTab(tabId)) {
+          reviveOutcome = 'reloaded'
+          log(MOD, 'sendTabMessageWithRetry', `Revived stale content script on tab ${tabId}`)
+          continue
+        }
+        // 活跃页 / 非招聘站不能替用户刷新。记下真实结果，最终抛错时附加，
+        // 上层日志才不会谎报「已自动刷新」，用户也才知道该手动刷一次页面。
+        reviveOutcome = 'skipped'
+      }
 
       // 页面尚未加载完成时注入必然失败，先等它 complete 再兜底注入
       try {
@@ -398,7 +540,7 @@ export async function sendTabMessageWithRetry<T = unknown>(
         // 忽略等待失败
       }
 
-      // 尝试主动注入 content script（应对热加载后 content script 丢失）
+      // 非僵死场景（新 tab 首屏还没注入完）仍保留主动注入兜底
       try {
         const manifest = chrome.runtime.getManifest()
         const scripts = manifest.content_scripts?.[0]?.js ?? []
@@ -418,5 +560,13 @@ export async function sendTabMessageWithRetry<T = unknown>(
     }
   }
 
+  // 后续重试会把 lastError 覆盖回原始错误，所以自愈结论在这里统一附加一次。
+  // 不虚构结果：刷新过就写「刷新后仍失败」，没刷成就写「请手动刷新」。
+  if (reviveOutcome !== 'none' && lastError != null) {
+    const suffix = reviveOutcome === 'reloaded'
+      ? '（已自动刷新后台页面并重试，仍无法通信，请检查该平台是否需要重新登录）'
+      : '（自动刷新未执行：该页面处于活跃状态或不是招聘站，请手动刷新此页面后继续）'
+    throw new Error(`${String(lastError)}${suffix}`)
+  }
   throw lastError
 }

@@ -54,6 +54,7 @@ import {
   isForegroundMode,
   releaseDedicatedTabs,
   sendTabMessageWithRetry,
+  isStaleConnectionError,
   openPlatformLoginTab,
 } from './tab-manager'
 import { checkPlatformAuth, checkAllPlatformsAuth } from '../shared/platform/auth-checker'
@@ -1176,17 +1177,30 @@ export async function runCampaignTick(): Promise<void> {
       await handleTaskExecutionResult(task, execResult)
     } catch (err) {
       logError(MOD, 'runCampaignTick', err, `Failed to execute task on tab ${tab.id}`)
+      const stale = isStaleConnectionError(err)
       await recordError({
         source: `campaign.tab_comm`,
         message: `向页面派发投递任务通信异常: ${String(err)}`,
         stack: err instanceof Error ? err.stack : undefined,
-        context: JSON.stringify({ taskId: task.id, platform: task.platform, tabId: tab.id }),
+        context: JSON.stringify({ taskId: task.id, platform: task.platform, tabId: tab.id, staleConnection: stale }),
       })
+      // 通信异常是「环境暂时不可用」，不是这个岗位投不了。旧版直接标 failed，
+      // 岗位被永久踢出待投队列，用户看到的是「投了很多轮进度不涨」。
+      // 统一标 skipped 保留任务，下一轮 tick 自动重试；sendTabMessageWithRetry
+      // 已经对扩展重载后的僵死页面做过 reload 自愈。
       await updateTaskResult(task.id, {
-        status: 'failed',
-        failReason: `任务通信异常: ${String(err)}`,
+        status: 'skipped',
+        failReason: stale
+          ? '页面脚本失联（扩展重载），已尝试刷新后台页面，待下轮重试'
+          : `页面通信暂时不可用，待下轮重试: ${String(err)}`,
       })
-      await appendCampaignLog(`❌ 任务执行通信异常: ${String(err)}`, 'error')
+      consecutiveNotFoundMap[task.platform] = 0
+      await appendCampaignLog(
+        stale
+          ? `🔄 任务执行通信异常：[${task.platform}] ${task.jobTitle} — 扩展重载导致页面脚本失联，通信层已尝试自动刷新后台页面，任务保留、下轮自动重试（${String(err)}）`
+          : `⏳ 任务执行通信异常：[${task.platform}] ${task.jobTitle} — 任务保留、下轮自动重试（${String(err)}）`,
+        'warn',
+      )
     }
 
     // 7. 异步预取接下来 2-3 个岗位的 AI 产出
@@ -1642,13 +1656,27 @@ async function autoCollectJobsForCampaign(
       }
     } catch (err) {
       logWarn(MOD, 'autoCollect', err)
+      const stale = isStaleConnectionError(err)
       await recordError({
         source: `campaign.auto_collect`,
         message: `【${pName}】自动扫描岗位异常: ${String(err)}`,
         stack: err instanceof Error ? err.stack : undefined,
-        context: JSON.stringify({ platform, careerLabel }),
+        context: JSON.stringify({ platform, careerLabel, staleConnection: stale }),
       })
-      await appendCampaignLog(`⚠️ 【${pName}】自动扫描通信异常: ${String(err)}，尝试下一平台...`, 'warn')
+      await appendCampaignLog(
+        stale
+          ? `🔄 【${pName}】页面脚本失联（扩展重载导致），已尝试自动刷新后台页面，下轮自动恢复采集（${String(err)}）`
+          : `⚠️ 【${pName}】自动扫描通信异常: ${String(err)}，尝试下一平台...`,
+        'warn',
+      )
+
+      // 僵死 context 已在通信层 reload 自愈，不是「平台挂了 / 站点改版」。
+      // 旧版把它计入连续失败，攒够次数就弹「请打开平台页面检查」的误导性告警，
+      // 用户实际怎么刷新页面都没用 —— 需要刷新的是被扩展重载弄僵死的后台 tab。
+      if (stale) {
+        collectErrorStreak[platform] = 0
+        continue
+      }
 
       const streak = (collectErrorStreak[platform] || 0) + 1
       collectErrorStreak[platform] = streak

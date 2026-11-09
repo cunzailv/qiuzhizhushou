@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1339%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1355%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -31,7 +31,7 @@
 - **会自检也会复盘**：L2 语义相关性自愈、L3 真实回复率回流反哺搜索方向、Planner 防数字幻觉，Tool-Calling 中控对话台支持多轮上下文与危险动作人工审批。
 - **数据留在本地**：简历、画像、队列、日志保存在浏览器本地（Dexie / IndexedDB + `chrome.storage`）；AI 能力走你自己配置的模型接口，不上传第三方服务。
 
-> 当前状态：`90` 个测试文件 / `1339` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
+> 当前状态：`91` 个测试文件 / `1355` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
@@ -141,7 +141,23 @@
 
 **猎聘（2026-11-09 第五轮）**：51job 修好后猎聘接棒报 `0 张岗位卡片 / 41 个岗位详情链接`。真实 DOM 显示岗位是 `<a href="…/job/1986608107.shtml">PHP工程师【上海-虹口区】…</a>`，链接结构稳定、只是卡片容器类名（CSS Modules）改版，三种容器选择器全部落空。现新增 `findCardFromDetailLinks()` 按 `jobId → 标题 → 去「招聘」前缀 → 公司` 从详情链接精确反查（不依赖任何 class、绝不兜底点第一个岗位），并把「聊一聊」按钮查找向更外层卡片容器扩展 3 层；日志会明确提示「有岗位链接但卡片容器未命中」，方便下次一眼区分页面没岗位与选择器失配。
 
-> **真实账号「投递后平台是否真的多一条记录」仍需按上方验收清单第 4–5 步核对**，模拟页面 E2E 不能替代登录态、反爬与平台确认回执。
+**扩展重载后页面脚本失联（2026-11-09 第六轮）**：用户反馈 `1、猎聘不投递 获取列表信息一直报错`、`2、❌ 任务执行通信异常: Error: Could not establish connection. Receiving end does not exist.`。这两个现象是**同一个根因，不是猎聘适配器又坏了**：
+
+| 环节 | 真相 |
+|---|---|
+| 重载扩展 | 旧 service worker 被销毁，已打开页面里的旧 content script 变成 invalidated context，消息端口被拆除，页面本身完好 |
+| 为什么还复用它 | `DEDICATED_TABS_KEY` 存在 `chrome.storage.local`、重载不清；那个 tab `status=complete`、URL 也对，`ensurePlatformTab()` 认为可以直接用 |
+| 旧兜底为什么没用 | 重新 `executeScript` 注入的是动态 import loader：`await import(chrome.runtime.getURL("assets/index.ts-XXXX.js"))`。同一 isolated world 里同一模块 URL 已被 import 过，**ES module 缓存让模块体不会二次执行**，模块顶层的 `onMessage.addListener` 永远注册不回来。注入多少次都白费 |
+
+修复分三层：
+
+- **通信层自愈**：`isStaleConnectionError()` 识别失联错误，`reloadStaleTab()` 只 reload 「非活跃 + 五大招聘站」的后台 tab（重建 isolated world 与模块缓存），成功后立刻重发消息；每次调用最多刷新一次，避免死循环。`shouldReloadStaleTab()` 是安全底线，**绝不刷新用户正在看的活跃页**
+- **启动即复活**：`onInstalled` / `onStartup` 先调 `reviveDedicatedTabs()` 批量刷新存量专用后台 tab，再恢复调度，不用等第一次采集或投递先失败一轮
+- **任务不判死刑**：通信异常是环境故障，旧版直接标 `failed` 把岗位永久踢出待投队列（现场表现就是「投了很多轮进度不涨」）。现统一标 `skipped` 保留任务、重置连续未定位计数、下轮自动重试；采集侧失联错误也不再计入连续失败，不再弹「平台页面改版 / 请手动检查页面」这种误导告警
+
+诚实披露：活跃页不允许自动刷新时，最终错误会明确写「自动刷新未执行…请手动刷新此页面」，日志只说「已尝试自动刷新」，不会谎报已恢复。回归测试 `tests/content-script-revive.test.ts`（16 例）覆盖失联识别、五平台后台页放行 / 活跃页拦截、reload 一次后重试成功、启动批量复活与全链路接线。
+
+> **真实账号「投递后平台是否真的多一条记录」仍需按上方验收清单第 4–5 步核对**，模拟页面 E2E 不能替代登录态、反爬与平台确认回执。第六轮修复同样需要用户手动在 `chrome://extensions` 点一次「重新加载」才会生效。
 
 ### 🦾 E 层 · 自愈韧性智能体架构（M1–M5，2026-11）
 面对 DOM 变动、类名混淆、反爬遮罩与运行时异常，全流程自动降级与兜底：

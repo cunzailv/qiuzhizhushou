@@ -11,6 +11,7 @@ import { log, logError, logGroup, logGroupEnd } from '../shared/utils/logger'
 import { butlerRunDaily, getActiveFollowUps } from '../shared/agent/butler'
 import { campaignService, resumeSchedulerIfNeeded, cleanupDirtyJobTitles, resumeFalseCaptchaPauseIfNeeded, ensureMustAchieveAlive, ensureWatchdogAlarm, recordApplySuccessFromUrl } from './campaign-service'
 import { isApplySuccessUrl } from '../shared/agent/apply-success'
+import { reviveDedicatedTabs } from './tab-manager'
 import { MUST_ACHIEVE_WATCHDOG_ALARM } from '../shared/agent/must-achieve'
 import { migrateDefaultModelName } from '../shared/db/settings-store'
 import {
@@ -146,8 +147,13 @@ chrome.runtime.onInstalled.addListener(() => {
   // 即使 Service Worker 被回收、tick 早退、campaign 被挂起，也会每分钟校验一次目标状态。
   void ensureWatchdogAlarm()
 
-  // 扩展重新加载/更新会清空上一轮注册的 tick alarm：若流水线仍在运行则立即重建调度
-  void resumeSchedulerIfNeeded()
+  // 扩展重新加载会清空上一轮注册的 tick alarm：若流水线仍在运行则立即重建调度。
+  // 但必须先复活专用后台 tab —— 它们页面里的 content script 属于上一代扩展上下文，
+  // 消息端口已失效；不刷新就恢复调度，第一轮采集/投递必然撞上
+  // "Could not establish connection. Receiving end does not exist."
+  void reviveDedicatedTabs().catch(() => 0).finally(() => {
+    void resumeSchedulerIfNeeded()
+  })
 
   // 修复历史脏数据：清洗被 AI 提案/简历项目名写进「岗位名称」的长句
   void cleanupDirtyJobTitles()
@@ -169,9 +175,12 @@ chrome.runtime.onStartup.addListener(() => {
     if (cfg.enabled) return ensureOffscreenDocument()
   }).catch(() => {})
 
-  // 浏览器重启后 alarm 可能已丢失，自愈恢复 AIbot 调度与必达看门狗
+  // 浏览器重启后 alarm 可能已丢失，自愈恢复 AIbot 调度与必达看门狗。
+  // 会话恢复出来的招聘站 tab 同样带着上一代 content script，先刷新再放行调度。
   void ensureWatchdogAlarm()
-  void resumeSchedulerIfNeeded()
+  void reviveDedicatedTabs().catch(() => 0).finally(() => {
+    void resumeSchedulerIfNeeded()
+  })
 })
 
 // Handle alarms
