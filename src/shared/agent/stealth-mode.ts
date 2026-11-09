@@ -43,6 +43,13 @@ function toActiveIdSet(activeTabIds: ActiveTabIds): Set<number> {
 export interface EnsureTabOptions {
   /** 显式指定是否激活标签页；不传则跟随前台可见模式设置 */
   activate?: boolean
+  /**
+   * 执行投递任务时置 true：必须确保标签页停在岗位**列表页**。
+   * 51job 点岗位链接是整页导航，上一个任务结束后专用后台 tab 会停在
+   * 详情页 / 公司页；此时 URL 可能仍被 isOnTargetSearchUrl 误判为「已在目标页」，
+   * 下一个任务就落在没有岗位卡片的页面上，报「未找到对应岗位卡片」并反复清空队列。
+   */
+  requireListPage?: boolean
 }
 
 /** 显式参数优先，否则由设置决定 */

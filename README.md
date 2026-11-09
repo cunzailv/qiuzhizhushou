@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1292%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1310%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -31,7 +31,7 @@
 - **会自检也会复盘**：L2 语义相关性自愈、L3 真实回复率回流反哺搜索方向、Planner 防数字幻觉，Tool-Calling 中控对话台支持多轮上下文与危险动作人工审批。
 - **数据留在本地**：简历、画像、队列、日志保存在浏览器本地（Dexie / IndexedDB + `chrome.storage`）；AI 能力走你自己配置的模型接口，不上传第三方服务。
 
-> 当前状态：`87` 个测试文件 / `1292` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
+> 当前状态：`88` 个测试文件 / `1310` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
@@ -129,7 +129,11 @@
 
 旧的现场诊断只数 Boss 的 `.job-card-box` / `.btn-startchat`，对 51job 恒为 0，虽然记了却没有排查价值；现改为平台无关口径。另外 `reportRunnerError()` 原是 fire-and-forget，MV3 Service Worker 休眠时这条错误会丢，现按 `sendMessage` 结果判定，失败自动降级写 `chrome.storage.local` 共享队列 → 本地 Dexie，保证诊断中心查得到。
 
-> 回归测试：`tests/51job-apply-flow.test.ts`（24 例，用现场复刻 DOM 锁死公司页 / 岗位页分类、精确卡片命中、不 `window.open`、不误点关注、确认弹窗才点确定、UI 快照与错误留痕链路）。Chromium E2E 额外抓到并修掉两处真实回归：`findTargetCard()` 早退让「无岗位详情链接」的老结构整页激活失败、以及快速返回跳过内联 JD 展开导致岗位在打分环节被刷掉；模拟夹具也不再靠旧版恒返回 `true` 的「假成功」过确认层，改为真实吐出 `投递成功` 平台回执。**真实账号「投递后平台是否真的多一条记录」仍需按上方验收清单第 4–5 步核对**，模拟页面 E2E 不能替代。
+> 回归测试：`tests/51job-apply-flow.test.ts`（24 例，用现场复刻 DOM 锁死公司页 / 岗位页分类、精确卡片命中、不 `window.open`、不误点关注、确认弹窗才点确定、UI 快照与错误留痕链路）。Chromium E2E 额外抓到并修掉两处真实回归：`findTargetCard()` 早退让「无岗位详情链接」的老结构整页激活失败、以及快速返回跳过内联 JD 展开导致岗位在打分环节被刷掉；模拟夹具也不再靠旧版恒返回 `true` 的「假成功」过确认层，改为真实吐出 `投递成功` 平台回执。
+
+**真实账号现场复盘（2026-11-09 第二轮）**：接管已登录 Chrome 读取页面 DOM + 扩展本地行为日志后发现，改对适配器**还不够** —— 队列里残留着修复前入队的脏任务（`jobId = jobUrl = 公司页 URL`），它们被反复认领、反复失败，还会触发「连续未定位 → 清空待投缓存」把新岗位一起清掉；同时 51job 点岗位链接是整页导航，后台 tab 会停在详情页，执行器看到 `0 张岗位卡片 / 167 个详情链接 / 正文 11 万字` 就报「未找到岗位卡片」。现已加：队列脏任务幂等清洗 + 入队拦截（`tests/51job-stale-tasks.test.ts` 18 例）、执行前强制导航回岗位列表页（`isPlatformListPageUrl` / `requireListPage`）。**升级后必须在 `chrome://extensions` 点一次「重新加载」**，清洗会在下一轮 tick 自动执行并在行为日志里播报 `🧹 已清理 N 条旧版 51job 公司页脏任务`。回归验证：`tsc` 0 error、`eslint` 0 error、重建 `dist` 后单线程全量 `88` 文件 / `1310` 例通过（含 `multi-platform-flow.test.ts > 51job` Chromium E2E）；旧 `tests/must-achieve-watchdog.test.ts` 静态断言同步改为锁 `requireListPage: true`。
+
+> **真实账号「投递后平台是否真的多一条记录」仍需按上方验收清单第 4–5 步核对**，模拟页面 E2E 不能替代登录态、反爬与平台确认回执。
 
 ### 🦾 E 层 · 自愈韧性智能体架构（M1–M5，2026-11）
 面对 DOM 变动、类名混淆、反爬遮罩与运行时异常，全流程自动降级与兜底：

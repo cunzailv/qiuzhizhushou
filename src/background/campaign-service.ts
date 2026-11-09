@@ -30,6 +30,7 @@ import {
   persistCapacityGoal,
   isRecyclableTask,
   clearPlatformExhausted,
+  purgeStaleJobUrlTasks,
   TASK_RETRY_COOLDOWN_MS,
 } from '../shared/agent/queue-store'
 import {
@@ -758,6 +759,19 @@ export async function runCampaignTick(): Promise<void> {
     if (revived) campaign = await getCampaign()
     if (!campaign || campaign.status !== 'running') return
 
+    // 0.1 清理历史脏任务：修复前 51job 把公司页链接当成岗位链接入队，
+    // 这些任务永远定位不到卡片，还会触发「连续未定位 → 清空待投缓存」把新岗位一起清掉。
+    // 幂等：清完后队列里不再有脏任务，后续 tick 只是一次无写盘的读取。
+    const purged = await purgeStaleJobUrlTasks()
+    if (purged > 0) {
+      campaign = await getCampaign()
+      if (!campaign || campaign.status !== 'running') return
+      await appendCampaignLog(
+        `🧹 已清理 ${purged} 条旧版 51job 公司页脏任务（jobUrl 是公司页而非岗位详情），这些任务从未投递成功，清掉后同名岗位可重新采集入队`,
+        'warn',
+      )
+    }
+
     const goalNow = campaign.capacityGoal
     const progressNow = summarizeQuotaProgress(campaign)
     /** 目标已启用、必达、且平台确认投递数还没到目标 */
@@ -1112,7 +1126,11 @@ export async function runCampaignTick(): Promise<void> {
     const taskKeyword = (task.searchKeyword || '').trim()
     const taskPage = taskKeyword ? (task.searchPage || 1) : 1
     await appendCampaignLog(`🌐 正在连接 ${task.platform} 平台标签页...`, 'info')
-    const tab = await ensurePlatformTab(task.platform, taskKeyword || undefined, taskPage)
+    const tab = await ensurePlatformTab(task.platform, taskKeyword || undefined, taskPage, {
+      // 51job 点岗位链接会整页跳到详情页；上一个任务结束后后台 tab 可能停在那里，
+      // 必须导航回列表页再下发任务，否则 0 张卡片、必然报「未找到对应岗位卡片」。
+      requireListPage: true,
+    })
     if (!tab || !tab.id) {
       logWarn(MOD, 'runCampaignTick', `Cannot open or connect to tab for ${task.platform}`)
       await updateTaskResult(task.id, {

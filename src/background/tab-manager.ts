@@ -166,6 +166,36 @@ async function waitForTabLoaded(tabId: number, timeoutMs = 20_000): Promise<bool
   return false
 }
 
+/**
+ * URL 是否落在「能定位岗位卡片」的列表页。
+ *
+ * `isOnTargetSearchUrl()` 只比对关键词与页码，整页导航到详情页 / 公司页后
+ * 仍可能返回 true（尤其 query 为空时只比页码）。51job 点岗位链接是整页跳转，
+ * 上一个任务结束后专用后台 tab 就停在那里，下一个任务再执行必然找不到卡片。
+ * 执行任务前用它复核，非列表页一律导航回搜索页。
+ */
+export function isPlatformListPageUrl(platform: PlatformId, url?: string | null): boolean {
+  if (!url) return false
+  if (/login|passport|signin/i.test(url)) return false
+  switch (platform) {
+    case '51job':
+      // jobs.51job.com 下是公司页 / 岗位详情页 / 城市聚合页，都没有可激活的列表卡片；
+      // 只有 we.51job.com 搜索页与 search.51job.com 是列表页。
+      if (/jobs\.51job\.com/i.test(url)) return false
+      return /we\.51job\.com|search\.51job\.com|51job\.com\/jobs/i.test(url)
+    case 'boss':
+      return !/\/job_detail\/|\/web\/chat\/|\/user\//i.test(url)
+    case 'liepin':
+      return !/\/job\/\d+|\/a\/\d+|\/chat\//i.test(url)
+    case 'zhaopin':
+      return !/\/job\/\d+|position\.html/i.test(url)
+    case 'maimai':
+      return !/\/jobdetail\/|\/im\//i.test(url)
+    default:
+      return true
+  }
+}
+
 /** 标签页是否已经停留在本次目标关键词/页码的搜索页（避免重复导航刷新；导出以便单测） */
 export function isOnTargetSearchUrl(url: string | undefined, query?: string, page = 1): boolean {
   if (!url) return false
@@ -259,7 +289,10 @@ export async function ensurePlatformTab(
     // 停留在首页 / 上一轮关键词 / 上一页时，导航到本次目标搜索页，否则会一直解析同一批旧卡片。
     // 静默模式下 reusable 已排除用户当前活跃页，所以这里的导航不会改掉用户正在看的内容。
     const hasTarget = Boolean(query && query.trim()) || page > 1
-    if (hasTarget && !isOnTargetSearchUrl(reusable.url, query, page)) {
+    // 执行投递（requireListPage）时，即使关键词/页码都对，只要页面已经整页跳到
+    // 详情页 / 公司页也必须导航回列表页，否则执行器拿不到任何岗位卡片。
+    const offListPage = opts.requireListPage === true && !isPlatformListPageUrl(platform, reusable.url)
+    if ((hasTarget && !isOnTargetSearchUrl(reusable.url, query, page)) || offListPage) {
       const targetUrl = getPlatformSearchUrl(platform, query, page)
       log(MOD, 'ensurePlatformTab', `Navigating reused tab to target search url: ${targetUrl}`)
       try {

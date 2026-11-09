@@ -484,12 +484,58 @@ export function isRecyclableTask(
   return now - createdAt >= cooldownMs
 }
 
+/**
+ * 旧版 51job 适配器把**公司页链接**当成岗位详情链接入队，现场队列里长这样：
+ *   jobId = jobUrl = "https://jobs.51job.com/all/coUzxRPVA2VmkAYQdlVjY.html"
+ * 这类任务永远不可能定位到岗位卡片：每次认领都报「未找到对应岗位卡片」→ failed，
+ * 又触发「连续未能定位，清空待投缓存」自愈，把新采到的岗位一起清掉，
+ * 流水线反复空转。适配器修好之后这些**历史脏任务仍在队列里**，必须显式清掉。
+ *
+ * 只识别 51job 公司页 / 整条 URL 当 ID 的旧数据；新版空 jobUrl 走 data-jobid
+ * 的老结构任务、以及数字 ID 岗位详情 URL 都不受影响。
+ */
+export function isStaleNonJobUrlTask(
+  task: Pick<ApplyTask, 'platform' | 'jobUrl' | 'jobId'>,
+): boolean {
+  if (task.platform !== '51job') return false
+  const url = (task.jobUrl || '').trim()
+  const id = (task.jobId || '').trim()
+  if (!url) return false
+  const isCompanyPage = /jobs\.51job\.com\/[^/]*\/co[A-Za-z0-9]+\.html/i.test(url)
+    || /jobs\.51job\.com\/all\//i.test(url)
+    || /jobs\.51job\.com\/[^/]*\/co[A-Za-z0-9]+\.html/i.test(id)
+  const isJobDetail = /jobs\.51job\.com\/[^/]+\/\d+\.html/i.test(url)
+    || /[?&](?:jobid|jobId|job_id)=\d+/i.test(url)
+  // 旧版 extractIdFromUrl 会把整条 URL 当 jobId
+  const urlUsedAsId = /^https?:\/\//i.test(id) && id === url && !isJobDetail
+  return isCompanyPage || urlUsedAsId
+}
+
+/**
+ * 清掉历史遗留的 51job 公司页脏任务。返回删除条数（0 表示无需写盘）。
+ * 这些任务从未成功投递过，删除既不会造成重复投递，也能让同名岗位重新入队。
+ */
+export async function purgeStaleJobUrlTasks(): Promise<number> {
+  const campaign = await getCampaign()
+  if (!campaign || !Array.isArray(campaign.tasks)) return 0
+  const before = campaign.tasks.length
+  campaign.tasks = campaign.tasks.filter((t) => !isStaleNonJobUrlTask(t))
+  const purged = before - campaign.tasks.length
+  if (purged > 0) await saveCampaign(campaign)
+  return purged
+}
+
 export async function appendTasksToCampaign(
   tasks: Omit<ApplyTask, 'status' | 'attempts' | 'createdAt'>[],
   opts: AppendTasksOptions = {},
 ): Promise<number> {
   const campaign = await getCampaign()
   if (!campaign) return 0
+
+  // 采集层已修好 URL 分类，这里再拦一道：任何历史路径都不能把公司页链接
+  // 重新写成 51job 任务，否则又会回到「反复认领 → 找不到卡片 → 清空队列」的死循环。
+  tasks = tasks.filter((t) => !isStaleNonJobUrlTask(t))
+  if (tasks.length === 0) return 0
 
   const now = Date.now()
   const cooldownMs = Math.max(0, opts.retryCooldownMs ?? TASK_RETRY_COOLDOWN_MS)

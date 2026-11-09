@@ -203,7 +203,10 @@ describe('目标必达看门狗：真实接线契约', () => {
     const service = read(SERVICE)
     const content = read(CONTENT)
     const store = read(STORE)
-    expect(service).toContain('ensurePlatformTab(task.platform, taskKeyword || undefined, taskPage)')
+    expect(service).toContain('ensurePlatformTab(task.platform, taskKeyword || undefined, taskPage, {')
+    // 51job 点岗位链接会整页导航到详情页/公司页，只比关键词与页码会把详情页误判为「已对齐」；
+    // 执行前必须强制要求列表页，否则现场 0 张岗位卡片、必然报「未找到对应岗位卡片」。
+    expect(service).toContain('requireListPage: true')
     expect(service).toContain('page: currentPage')
     expect(content).toContain('const searchPage = Math.max(1, Math.round(Number(message.payload?.page) || 1))')
     expect(content).toContain('searchPage: searchKeyword && searchPage > 1 ? searchPage : undefined')
