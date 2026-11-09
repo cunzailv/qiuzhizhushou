@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1314%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1329%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -31,7 +31,7 @@
 - **会自检也会复盘**：L2 语义相关性自愈、L3 真实回复率回流反哺搜索方向、Planner 防数字幻觉，Tool-Calling 中控对话台支持多轮上下文与危险动作人工审批。
 - **数据留在本地**：简历、画像、队列、日志保存在浏览器本地（Dexie / IndexedDB + `chrome.storage`）；AI 能力走你自己配置的模型接口，不上传第三方服务。
 
-> 当前状态：`88` 个测试文件 / `1314` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
+> 当前状态：`89` 个测试文件 / `1329` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
@@ -131,9 +131,11 @@
 
 > 回归测试：`tests/51job-apply-flow.test.ts`（24 例，用现场复刻 DOM 锁死公司页 / 岗位页分类、精确卡片命中、不 `window.open`、不误点关注、确认弹窗才点确定、UI 快照与错误留痕链路）。Chromium E2E 额外抓到并修掉两处真实回归：`findTargetCard()` 早退让「无岗位详情链接」的老结构整页激活失败、以及快速返回跳过内联 JD 展开导致岗位在打分环节被刷掉；模拟夹具也不再靠旧版恒返回 `true` 的「假成功」过确认层，改为真实吐出 `投递成功` 平台回执。
 
-**真实账号现场复盘（2026-11-09 第二轮）**：接管已登录 Chrome 读取页面 DOM + 扩展本地行为日志后发现，改对适配器**还不够** —— 队列里残留着修复前入队的脏任务（`jobId = jobUrl = 公司页 URL`），它们被反复认领、反复失败，还会触发「连续未定位 → 清空待投缓存」把新岗位一起清掉；同时 51job 点岗位链接是整页导航，后台 tab 会停在详情页，执行器看到 `0 张岗位卡片 / 167 个详情链接 / 正文 11 万字` 就报「未找到岗位卡片」。现已加：队列脏任务幂等清洗 + 入队拦截（`tests/51job-stale-tasks.test.ts` 18 例）、执行前强制导航回岗位列表页（`isPlatformListPageUrl` / `requireListPage`）。**升级后必须在 `chrome://extensions` 点一次「重新加载」**，清洗会在下一轮 tick 自动执行并在行为日志里播报 `🧹 已清理 N 条旧版 51job 公司页脏任务`。回归验证：`tsc` 0 error、`eslint` 0 error、重建 `dist` 后单线程全量 `88` 文件 / `1314` 例通过（含 `multi-platform-flow.test.ts > 51job` Chromium E2E）；旧 `tests/must-achieve-watchdog.test.ts` 静态断言同步改为锁 `requireListPage: true`。
+**真实账号现场复盘（2026-11-09 第二轮）**：接管已登录 Chrome 读取页面 DOM + 扩展本地行为日志后发现，改对适配器**还不够** —— 队列里残留着修复前入队的脏任务（`jobId = jobUrl = 公司页 URL`），它们被反复认领、反复失败，还会触发「连续未定位 → 清空待投缓存」把新岗位一起清掉；同时 51job 点岗位链接是整页导航，后台 tab 会停在详情页，执行器看到 `0 张岗位卡片 / 167 个详情链接 / 正文 11 万字` 就报「未找到岗位卡片」。现已加：队列脏任务幂等清洗 + 入队拦截（`tests/51job-stale-tasks.test.ts` 18 例）、执行前强制导航回岗位列表页（`isPlatformListPageUrl` / `requireListPage`）。**升级后必须在 `chrome://extensions` 点一次「重新加载」**，清洗会在下一轮 tick 自动执行并在行为日志里播报 `🧹 已清理 N 条旧版 51job 公司页脏任务`。回归验证：`tsc` 0 error、`eslint` 0 error、重建 `dist` 后单线程全量 `88` 文件 / `1329` 例通过（含 `multi-platform-flow.test.ts > 51job` Chromium E2E）；旧 `tests/must-achieve-watchdog.test.ts` 静态断言同步改为锁 `requireListPage: true`。
 
 **现场日志口径修正**：用户在 11:23 贴回的 `0 张岗位卡片 / 85 个详情链接 / 链接样例：求职招聘指南 / 我的51job` 暴露出诊断数字本身会骗人 —— 旧口径把 `jobs.51job.com/all/coXXX.html` 公司页、城市聚合页和页脚导航都算作「详情链接」，看着像有 85 个岗位，实际一张卡片都没有；链接样例取页面前三个锚点，采到的全是页脚文字。现 `detailLinks` 只数真正的岗位详情页（Boss `/job_detail/`、猎聘 `/job/\d+`、51job 数字 ID 页 / `jobid=`、脉脉 `/jobdetail/`），公司页链接单列为 `companyLinks`，链接样例优先取岗位标题；行为日志补上 `页面 <域名+路径>` 与公司页链接成堆时的「疑似不是列表页」提示。下次再看到 `0 张卡片`，一眼就能分清是列表页没渲染好，还是后台标签停在详情页 / 公司页。
+
+**重载后真实账号现场复盘（2026-11-09 第四轮）**：新代码确认已生效（日志带 `页面 xxx` / `个岗位详情链接` / `岗位样例：`），但暴露出**「投成功了却没记上」**——Chrome 里留着一个 `jobs.51job.com/applysuccess.php?jobid=173879321` 标签，那是 51job 的投递成功回执页。51job 点「投递」是整页跳转，content script 上下文随之销毁，「点击 → 采集平台确认 → 回传 done」跑不完；后台 tab 停在成功页，下一个任务在那儿找岗位卡片，连续两次就触发清空队列自愈。现由后台 `chrome.tabs.onUpdated` 捕获成功页，按 jobid 精确匹配任务并走统一结果处理补记 done（幂等，不重复计配额）。另一条 `页面 we.51job.com/pc/search / 0 张岗位卡片 / 0 个岗位详情链接 / 正文 1698 字` 是 SPA 列表尚未渲染的空壳页：现新增 `waitForJobListReady()` 等待渲染并重试，仍不就绪则标 `skipped` 保留任务待重试（不再误判成 failed 去清空队列）；同时修掉 `chrome.tabs.update` 后只看 `status=complete`、把任务下发到旧页面的导航竞态。
 
 > **真实账号「投递后平台是否真的多一条记录」仍需按上方验收清单第 4–5 步核对**，模拟页面 E2E 不能替代登录态、反爬与平台确认回执。
 

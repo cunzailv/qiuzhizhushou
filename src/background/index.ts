@@ -9,7 +9,8 @@ import { setSharedResumeSummary } from '../shared/db/shared-state'
 import { resetDailyCounter } from '../shared/antiBot'
 import { log, logError, logGroup, logGroupEnd } from '../shared/utils/logger'
 import { butlerRunDaily, getActiveFollowUps } from '../shared/agent/butler'
-import { campaignService, resumeSchedulerIfNeeded, cleanupDirtyJobTitles, resumeFalseCaptchaPauseIfNeeded, ensureMustAchieveAlive, ensureWatchdogAlarm } from './campaign-service'
+import { campaignService, resumeSchedulerIfNeeded, cleanupDirtyJobTitles, resumeFalseCaptchaPauseIfNeeded, ensureMustAchieveAlive, ensureWatchdogAlarm, recordApplySuccessFromUrl } from './campaign-service'
+import { isApplySuccessUrl } from '../shared/agent/apply-success'
 import { MUST_ACHIEVE_WATCHDOG_ALARM } from '../shared/agent/must-achieve'
 import { migrateDefaultModelName } from '../shared/db/settings-store'
 import {
@@ -98,6 +99,17 @@ async function ensureOffscreenDocument(): Promise<void> {
 
 // 全局捕获 background 抛出的异常与未处理 Promise rejection
 installGlobalErrorCapture()
+
+// 51job 投递是整页跳转到 applysuccess.php?jobid=XXX，content script 上下文会被销毁，
+// 「点击 → 采集平台确认 → 回传 done」跑不完，岗位上其实投成功了却没记配额。
+// 在后台按 URL 补记，完全不依赖 content script 生命周期；纯函数保证幂等。
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+  const url = changeInfo.url || (changeInfo.status === 'complete' ? tab?.url : '')
+  if (!url || !isApplySuccessUrl(url)) return
+  void recordApplySuccessFromUrl(url).catch((err) => {
+    logError(MOD, 'applySuccessWatcher', err, 'Failed to record apply-success page')
+  })
+})
 
 // Listen for installation
 chrome.runtime.onInstalled.addListener(() => {

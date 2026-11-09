@@ -24,6 +24,7 @@ import {
   isChatPageUrl,
   type ApplyVerification,
 } from '../shared/agent/apply-verification'
+import { isApplySuccessUrl } from '../shared/agent/apply-success'
 
 const MOD = 'TaskRunner'
 
@@ -208,6 +209,29 @@ export function collectPageDomDiagnostics(): Record<string, unknown> {
   }
 }
 
+/**
+ * 等列表页真正渲染出岗位卡片。
+ *
+ * 51job 搜索页是 SPA：`chrome.tabs` 的 status=complete 只代表文档加载完，
+ * 岗位列表还要等 XHR + 前端渲染；后台非活跃标签页还会被浏览器节流，
+ * 固定等 1.2 秒远远不够。现场日志 `we.51job.com/pc/search / 0 张岗位卡片 /
+ * 0 个岗位详情链接 / 正文 1698 字 / 岗位样例：求职招聘指南` 就是渲染前的空壳。
+ *
+ * 投递成功页必须直接判未就绪：那是上一个任务的回执，不是本任务该执行的列表页。
+ */
+export async function waitForJobListReady(maxMs = 9000, currentHref?: string): Promise<boolean> {
+  if (typeof document === 'undefined') return false
+  const deadline = Date.now() + maxMs
+  while (Date.now() < deadline) {
+    const href = currentHref ?? (typeof window !== 'undefined' ? window.location.href : '')
+    if (isApplySuccessUrl(href)) return false
+    const diag = collectPageDomDiagnostics()
+    if ((Number(diag.jobCards) || 0) > 0 || (Number(diag.detailLinks) || 0) > 0) return true
+    await new Promise((resolve) => setTimeout(resolve, 300))
+  }
+  return false
+}
+
 /** 给用户看的短诊断，直接进行为日志，不用再进诊断中心翻 */
 export function describePageDomDiagnostics(diag: Record<string, unknown>): string {
   const where = diag.pageUrlShort ? `（页面 ${diag.pageUrlShort}）` : ''
@@ -380,32 +404,70 @@ export async function executeCampaignTask(
       detailEl = await adapter.activateJobCard(task.jobUrl, task.jobId, task.jobTitle, task.company)
     }
     if (!detailEl) {
-      logWarn(MOD, 'executeCampaignTask', `Cannot open job detail element for: ${task.jobTitle}`)
       // 旧诊断只数 Boss 的 .job-card-box / .btn-startchat，对 51job 恒为 0，
       // 记录虽然进了诊断中心却没有任何排查价值。现在按平台无关的口径采现场。
-      const diag = collectPageDomDiagnostics()
-      const diagText = describePageDomDiagnostics(diag)
-      notifyLog(`⚠️ 页面未找到岗位卡片：${task.jobTitle}（${diagText}）`, 'warn')
-      reportRunnerError({
-        source: `runner.${task.platform}`,
-        message: `页面中未找到对应岗位卡片或详情无法展开: [${task.platform}] ${task.jobTitle} @ ${task.company}`,
-        context: JSON.stringify({
-          jobUrl: task.jobUrl,
-          jobId: task.jobId,
-          jobTitle: task.jobTitle,
-          company: task.company,
-          currentUrl: window.location.href,
-          diagText,
-          ...diag,
-        }),
-      })
-      result = {
-        taskId: task.id,
-        status: 'failed',
-        failReason: '页面中未找到对应岗位卡片或详情无法展开',
-        diagnostics: JSON.stringify(diag),
+      const firstDiag = collectPageDomDiagnostics()
+      const onSuccessPage = typeof window !== 'undefined' && isApplySuccessUrl(window.location.href)
+      const isEmptyShell =
+        (Number(firstDiag.jobCards) || 0) === 0 &&
+        (Number(firstDiag.detailLinks) || 0) === 0
+
+      if (onSuccessPage || isEmptyShell) {
+        // 页面根本不是可执行的列表页：可能停在上一单的投递成功回执页，
+        // 也可能搜索页 SPA 还在等 XHR（后台标签会被浏览器节流）。
+        // 先给渲染一个窗口，再重试一次卡片激活。
+        notifyLog(
+          `⏳ 列表页未就绪（${onSuccessPage ? '当前停在投递成功页' : '岗位卡片尚未渲染'}），等待页面就绪...`,
+          'info',
+        )
+        const ready = await waitForJobListReady()
+        if (ready) {
+          detailEl = typeof adapter.activateJobCardWithFallback === 'function'
+            ? await adapter.activateJobCardWithFallback(task.jobUrl, task.jobId, task.jobTitle, task.company)
+            : await adapter.activateJobCard(task.jobUrl, task.jobId, task.jobTitle, task.company)
+        }
+        if (!detailEl) {
+          // 关键：标 skipped 而不是 failed。failed 会被后台判成「连续未找到卡片」，
+          // 触发 clearPendingTasks 自愈把新采到的岗位一起清掉（现场 156 次空转）。
+          // skipped 走回收机制，任务保留、下一轮重试，队列不动。
+          const latest = collectPageDomDiagnostics()
+          notifyLog(`⏳ 页面仍未就绪：${task.jobTitle} ${describePageDomDiagnostics(latest)}（任务保留待重试）`, 'warn')
+          result = {
+            taskId: task.id,
+            status: 'skipped',
+            failReason: '列表页未就绪（页面无岗位卡片，等待渲染或重新导航）',
+            diagnostics: JSON.stringify(latest),
+          }
+          return result
+        }
       }
-      return result
+
+      if (!detailEl) {
+        logWarn(MOD, 'executeCampaignTask', `Cannot open job detail element for: ${task.jobTitle}`)
+        const diag = collectPageDomDiagnostics()
+        const diagText = describePageDomDiagnostics(diag)
+        notifyLog(`⚠️ 页面未找到岗位卡片：${task.jobTitle} ${diagText}`, 'warn')
+        reportRunnerError({
+          source: `runner.${task.platform}`,
+          message: `页面中未找到对应岗位卡片或详情无法展开: [${task.platform}] ${task.jobTitle} @ ${task.company}`,
+          context: JSON.stringify({
+            jobUrl: task.jobUrl,
+            jobId: task.jobId,
+            jobTitle: task.jobTitle,
+            company: task.company,
+            currentUrl: window.location.href,
+            diagText,
+            ...diag,
+          }),
+        })
+        result = {
+          taskId: task.id,
+          status: 'failed',
+          failReason: '页面中未找到对应岗位卡片或详情无法展开',
+          diagnostics: JSON.stringify(diag),
+        }
+        return result
+      }
     }
 
     // 智能拦截：若详情面板提示职位已下线/已停止招聘，直接标记为跳过，避免作为执行失败计入

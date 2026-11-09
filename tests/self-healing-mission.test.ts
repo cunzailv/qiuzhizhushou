@@ -145,7 +145,11 @@ describe('M3 · 任务优先保障与单岗位故障隔离 (try-finally Mission 
       expect(document.activeElement).not.toBe(input)
     })
 
-    it('1.3 风控暂停 / 卡片缺失等提前 return 分支也执行 finally', async () => {
+    it('1.3 列表页已就绪、目标岗位不在当前页 → failed，且 finally 仍执行', async () => {
+      // 页面必须先有卡片：空壳页（0 卡片 / 0 详情链接）在新版会被判为
+      // 「列表页未就绪」→ skipped 待重试，不走 failed，避免触发清空队列自愈。
+      // 这里锁的是另一种情况：页面正常，只是这个岗位找不到。
+      document.body.innerHTML = '<div class="joblist"><div class="joblist-item">其它岗位</div></div>'
       const noCard = makeAdapter({ activateJobCardWithFallback: async () => null })
       const res = await executeCampaignTask(makeTask(), noCard, resume)
       expect(res.status).toBe('failed')

@@ -4,6 +4,12 @@
 
 ### Added
 
+- **51job 投递成功页补记 + 导航竞态（用户重载后贴回 15:04 日志，新代码已确认生效）**：日志里已带 `页面 xxx` / `个岗位详情链接` / `岗位样例：`，说明扩展重载成功；Chrome 里同时留着一个标题为 `jobs.51job.com/applysuccess.php?jobid=173879321` 的标签 —— **岗位其实投递成功了，插件却没记上**。用同一已登录 Chrome 手动打开 `we.51job.com/pc/search?keyword=php开发`，DOM 里有公司页链接、`投递` 按钮与 `jobs.51job.com/shenzhen/173992381.html` 岗位详情链接，证明不是反爬 / 未登录，而是插件自己的页面时序问题：
+  - **整页跳转毁掉回执**：51job 点「投递」不是弹窗，是导航到 `applysuccess.php?jobid=XXX`；页面一跳 content script 上下文被销毁，「点击 → 采集平台确认 → 回传 done」跑不完，任务既不算成功也不计配额，后台 tab 还停在成功页，下一个任务在那儿找岗位卡片 → 连续两次触发 `clearPendingTasks` 自愈清空队列（历史累计 156 次）。新增 `src/shared/agent/apply-success.ts` 纯函数（`isApplySuccessUrl` / `parseApplySuccessJobId` / `findApplySuccessTask`，按 jobid 精确匹配、排除已 done 保证幂等），`background/index.ts` 顶层注册 `chrome.tabs.onUpdated` 捕获成功页，`campaign-service.ts` 新增 `recordApplySuccessFromUrl()` 走统一 `handleTaskExecutionResult` 补记 done（配额 / 日志 / 去重 / L3 回流全复用，不另开一套记账）
+  - **空壳页不再被当成「找不到卡片」**：现场 `页面 we.51job.com/pc/search / 0 张岗位卡片 / 0 个岗位详情链接 / 正文 1698 字 / 岗位样例：求职招聘指南` 是 SPA 列表还没渲染出来的空壳。`task-runner.ts` 新增 `waitForJobListReady()`（等待卡片出现后重试一次激活；投递成功页直接判未就绪），仍不就绪时标 **skipped 而不是 failed** —— failed 会被后台判成「连续未找到卡片」而 `clearPendingTasks`，skipped 走回收机制、队列不动；后台 skipped 分支对这类原因写准确日志并重置连续失败计数
+  - **导航竞态**：`waitForTabLoaded()` 只看 `status === 'complete'`，而 `chrome.tabs.update({url})` 是异步的，紧接着查到的可能是**旧页面**的 complete，任务就下发到旧页面。新增 `waitForTabNavigation()`，必须等 URL 的 origin+pathname 变成目标且 complete 才放行（只比 pathname 是因为 SPA 会改写 query）
+- **回归测试**：新增 `tests/51job-apply-success.test.ts`（15 例：成功页识别 / jobid 提取 / 精确匹配与幂等 / 不误伤其它平台 / 列表页就绪等待 4 例 / 全链路静态契约），`tests/self-healing-mission.test.ts` 1.3 随新语义改为「列表页已就绪但目标岗位不在 → failed」。`tsc` 0 error、`eslint` 0 error、重建 `dist` 后单线程全量 **89 文件 / 1329 例通过**（含 Chromium E2E）
+
 - **现场日志口径修正 + 重载状态取证（用户贴回 `11:23:20` 的 `0 张岗位卡片 / 85 个详情链接 / 链接样例：求职招聘指南 / 我的51job`）**：先确认这不是「修完又复发」—— 扫扩展本地 `chrome.storage.local` leveldb，该时间戳属于重载前的历史行，而实时日志已跑到 `12:22`；其中旧自愈 `🧹 已清空 [51job] N 个旧页面的待投缓存任务` 累计 **156 次**，新代码关键字 `已清理` / `脏任务` / `旧版` 均为 **0 次**，证明**扩展尚未重新加载、浏览器里仍在跑旧代码**，那个「脏任务反复失败 → 清空待投缓存 → 把新岗位一起清掉」的死循环此刻还在发生。同时这行日志暴露诊断数字本身会骗人：
   - **旧口径**：`detailLinks: count('a[href*="jobs.51job.com"], …')` 把公司页 `/all/coXXX.html`、城市聚合页与页脚导航全算成岗位详情链接，空壳页也能报「85 个详情链接」；`sampleLinkTexts` 取页面前三个锚点，采到的全是「求职招聘指南 / 我的51job」这类页脚文字，对排查零价值
   - **新口径**：新增平台无关纯函数 `isJobDetailHref()`（Boss `/job_detail/`、猎聘与智联 `/job/\d+`、51job 数字 ID 页与 `jobid=` query、脉脉 `/jobdetail/`，且**先排除** 51job 公司页）与 `isCompanyPageHref()`；`detailLinks` 只数真正的岗位详情页，公司页链接单列 `companyLinks`，链接样例优先取岗位标题；诊断新增 `pageUrlShort`（域名 + 路径、去 query）

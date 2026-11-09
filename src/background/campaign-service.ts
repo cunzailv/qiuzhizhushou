@@ -15,6 +15,11 @@ import {
 import type { Campaign, ApplyTask } from '../shared/agent/queue-store'
 import type { ApplyVerification } from '../shared/agent/apply-verification'
 import {
+  isApplySuccessUrl,
+  parseApplySuccessJobId,
+  findApplySuccessTask,
+} from '../shared/agent/apply-success'
+import {
   getCampaign,
   saveCampaign,
   claimNextTask,
@@ -1817,10 +1822,21 @@ async function handleTaskExecutionResult(task: ApplyTask, result: ExecuteTaskRes
       'success',
     )
   } else if (result.status === 'skipped') {
-    await appendCampaignLog(
-      `⏭️ 智能跳过：[${task.platform}] ${task.jobTitle} (匹配分: ${result.matchScore ?? '低'}，未达到投递门槛)`,
-      'info',
-    )
+    if (result.failReason?.includes('列表页未就绪')) {
+      // 空壳页 / 投递成功遗留页：岗位本身没问题，只是页面还没渲染好。
+      // 标 skipped 让任务按回收机制重试，**不**计入「连续找不到卡片」自愈，
+      // 否则会误判成站点改版去 clearPendingTasks，把新采到的岗位一起清掉。
+      await appendCampaignLog(
+        `⏳ [${task.platform}] ${task.jobTitle} 暂缓：${result.failReason}（任务保留待重试，不清空队列）${result.diagnostics ? `｜现场：${describeRunnerDiagnostics(result.diagnostics)}` : ''}`,
+        'info',
+      )
+      consecutiveNotFoundMap[task.platform] = 0
+    } else {
+      await appendCampaignLog(
+        `⏭️ 智能跳过：[${task.platform}] ${task.jobTitle} (匹配分: ${result.matchScore ?? '低'}，未达到投递门槛)`,
+        'info',
+      )
+    }
   } else if (result.status === 'failed') {
     const unverified = !!result.verification && result.verification.level !== 'confirmed'
 
@@ -1903,6 +1919,42 @@ async function handleTaskExecutionResult(task: ApplyTask, result: ExecuteTaskRes
       consecutiveNotFoundMap[task.platform] = 0
     }
   }
+}
+
+/**
+ * 补记 51job 整页跳转型投递成功。
+ *
+ * 51job 点「投递」会导航到 applysuccess.php?jobid=XXX，content script 上下文随之销毁，
+ * 正常的「点击 → 采集平台确认 → 回传 done」链路跑不完。后台监听 tab URL 变化后调这里，
+ * 复用 handleTaskExecutionResult 统一落配额 / 日志 / 去重 / L3 回流，不另开一套记账。
+ *
+ * 幂等：findApplySuccessTask 排除已 done 的任务，同一成功页重复触发不会重复计数。
+ */
+export async function recordApplySuccessFromUrl(url: string): Promise<boolean> {
+  if (!isApplySuccessUrl(url)) return false
+  const campaign = await getCampaign()
+  if (!campaign || campaign.status !== 'running') return false
+  const task = findApplySuccessTask(campaign.tasks, url)
+  if (!task) return false
+
+  const jobId = parseApplySuccessJobId(url)
+  log(MOD, 'recordApplySuccessFromUrl', `Apply-success page detected: ${url} -> task ${task.id}`)
+  await handleTaskExecutionResult(task, {
+    taskId: task.id,
+    status: 'done',
+    appliedAt: new Date().toISOString(),
+    verification: {
+      level: 'confirmed',
+      signals: ['投递成功页'],
+      blockers: [],
+      reason: `平台确认依据：投递成功页${jobId ? ` (jobid=${jobId})` : ''}`,
+    },
+  })
+  await appendCampaignLog(
+    `🧾 已从平台投递成功页补记：[51job] ${task.jobTitle} @ ${task.company}（整页跳转导致 content 回执丢失，后台按 URL 确认）`,
+    'success',
+  )
+  return true
 }
 
 // 统一服务导出接口

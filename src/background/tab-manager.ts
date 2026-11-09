@@ -167,6 +167,42 @@ async function waitForTabLoaded(tabId: number, timeoutMs = 20_000): Promise<bool
 }
 
 /**
+ * 导航后等「URL 真的变成目标页」且 status=complete。
+ *
+ * 旧版只看 status 有个真实竞态：`chrome.tabs.update({url})` 是异步的，紧接着查询时
+ * tab 可能还停在旧页面、且旧页面 status 恰好是 'complete'，于是等待瞬间返回，
+ * 任务被下发到旧页面。现场表现就是后台 tab 停在 applysuccess.php 投递成功页，
+ * 执行器却在那儿找岗位卡片 → 0 张 → 失败 → 清空队列自愈。
+ *
+ * 只比 origin + pathname：51job 等 SPA 会自行改写 query，不能用整串 URL 比对。
+ */
+async function waitForTabNavigation(
+  tabId: number,
+  targetUrl: string,
+  timeoutMs = 25_000,
+): Promise<boolean> {
+  let expected = ''
+  try {
+    const u = new URL(targetUrl)
+    expected = `${u.origin}${u.pathname}`
+  } catch {
+    expected = targetUrl.split('?')[0]
+  }
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      const tab = await chrome.tabs.get(tabId)
+      const current = tab.url || tab.pendingUrl || ''
+      if (current.startsWith(expected) && tab.status === 'complete') return true
+    } catch {
+      return false
+    }
+    await wait(300)
+  }
+  return false
+}
+
+/**
  * URL 是否落在「能定位岗位卡片」的列表页。
  *
  * `isOnTargetSearchUrl()` 只比对关键词与页码，整页导航到详情页 / 公司页后
@@ -297,8 +333,9 @@ export async function ensurePlatformTab(
       log(MOD, 'ensurePlatformTab', `Navigating reused tab to target search url: ${targetUrl}`)
       try {
         await chrome.tabs.update(tabId, { url: targetUrl })
-        const loaded = await waitForTabLoaded(tabId, 25_000)
-        // 页面完成加载后再留一点时间给 content script 注入与首屏卡片渲染
+        const loaded = await waitForTabNavigation(tabId, targetUrl, 25_000)
+        // 页面完成加载后再留一点时间给 content script 注入与首屏卡片渲染；
+        // SPA 的岗位列表可能更晚才出，由 content 侧 waitForJobListReady() 兜底。
         await wait(loaded ? 1200 : 2000)
       } catch (err) {
         logWarn(MOD, 'ensurePlatformTab', `Navigate failed for ${platform}: ${String(err)}`)
