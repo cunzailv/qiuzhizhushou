@@ -151,21 +151,56 @@ function reportRunnerError(params: RunnerErrorParams) {
  * 是站点改版、页面没加载、还是任务来源页不对。这些数字会同时进
  * 诊断中心的 context 和 AIbot 行为日志。
  */
+/**
+ * 只把「真正的岗位详情页」算作详情链接。
+ *
+ * 旧口径 `a[href*="jobs.51job.com"]` 把公司页（/all/coXXX.html）、城市聚合页、
+ * 页脚导航全算进去：真实现场曾报「85 个详情链接」，看着像有 85 个岗位，
+ * 实际一张卡片都没有，反而误导排查。公司页必须先排除。
+ */
+export function isJobDetailHref(href: string): boolean {
+  if (!href) return false
+  if (/jobs\.51job\.com\/[^/]*\/co[A-Za-z0-9]+\.html|jobs\.51job\.com\/all\//i.test(href)) return false
+  return /\/job_detail\/|\/job-detail\/|\/jobdetail\/|\/job\/\d+|\/position\/\d+|[?&](?:jobid|jobId|job_id|positionId)=\d+|jobs\.51job\.com\/[^/]+\/\d+\.html/i.test(href)
+}
+
+/** 51job 公司页链接：出现在搜索结果里是正常现象，但出现在「执行页」就说明 tab 跑偏了 */
+export function isCompanyPageHref(href: string): boolean {
+  return /jobs\.51job\.com\/[^/]*\/co[A-Za-z0-9]+\.html/i.test(href)
+}
+
 export function collectPageDomDiagnostics(): Record<string, unknown> {
   if (typeof document === 'undefined') return {}
   const count = (selector: string): number => {
     try { return document.querySelectorAll(selector).length } catch { return -1 }
   }
-  const sampleLinkTexts = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]'))
+  const anchors = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href]'))
+  const detailAnchors = anchors.filter((a) => isJobDetailHref(a.href))
+  const companyAnchors = anchors.filter((a) => isCompanyPageHref(a.href))
+  // 优先采样岗位链接标题；一条岗位链接都没有时再退回普通链接。
+  // 否则现场只会采到「求职招聘指南 / 我的51job」这类页脚文字，毫无排查价值。
+  const samplePool = detailAnchors.length > 0 ? detailAnchors : anchors
+  const sampleLinkTexts = samplePool
     .map((a) => (a.textContent || '').replace(/\s+/g, ' ').trim())
     .filter((t) => t.length > 4 && t.length < 60)
     .slice(0, 3)
+  const pageUrl = typeof window !== 'undefined' ? window.location.href : ''
+  let pageUrlShort = ''
+  try {
+    const u = new URL(pageUrl)
+    pageUrlShort = `${u.host}${u.pathname}`
+  } catch {
+    pageUrlShort = pageUrl.split('?')[0]
+  }
   return {
-    pageUrl: typeof window !== 'undefined' ? window.location.href : '',
+    pageUrl,
+    /** 只保留域名 + 路径，去掉 query，便于日志里一眼看出当前是不是列表页 */
+    pageUrlShort,
     listContainers: count('.joblist, [class*="joblist"], [class*="job-list"], [class*="job-card"]'),
     jobCards: count('.joblist-item, [class*="joblist-item"], [class*="job-card"], [class*="job-item"]'),
-    anchors: count('a[href]'),
-    detailLinks: count('a[href*="jobs.51job.com"], a[href*="/job_detail/"], a[href*="job-detail"]'),
+    anchors: anchors.length,
+    detailLinks: detailAnchors.length,
+    companyLinks: companyAnchors.length,
     buttons: count('button, [role="button"]'),
     visibleDialogs: count('[role="dialog"], [class*="dialog"], [class*="modal"]'),
     bodyTextLength: (document.body?.textContent || '').length,
@@ -175,7 +210,10 @@ export function collectPageDomDiagnostics(): Record<string, unknown> {
 
 /** 给用户看的短诊断，直接进行为日志，不用再进诊断中心翻 */
 export function describePageDomDiagnostics(diag: Record<string, unknown>): string {
-  return `当前页 ${diag.jobCards ?? 0} 张岗位卡片 / ${diag.detailLinks ?? 0} 个详情链接 / ${diag.buttons ?? 0} 个按钮 / 正文 ${diag.bodyTextLength ?? 0} 字`
+  const where = diag.pageUrlShort ? `（页面 ${diag.pageUrlShort}）` : ''
+  const company = Number(diag.companyLinks) || 0
+  const companyNote = company > 0 ? ` / 公司页链接 ${company} 个` : ''
+  return `当前页${where} ${diag.jobCards ?? 0} 张岗位卡片 / ${diag.detailLinks ?? 0} 个岗位详情链接${companyNote} / ${diag.buttons ?? 0} 个按钮 / 正文 ${diag.bodyTextLength ?? 0} 字`
 }
 
 export interface TaskExecutionResponse {

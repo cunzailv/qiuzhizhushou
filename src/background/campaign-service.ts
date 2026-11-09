@@ -300,13 +300,19 @@ function describeRunnerDiagnostics(raw: string): string {
   try {
     const d = JSON.parse(raw) as Record<string, unknown>
     const parts = [
+      `页面 ${String(d.pageUrlShort || '未知')}`,
       `${Number(d.jobCards) || 0} 张岗位卡片`,
-      `${Number(d.detailLinks) || 0} 个详情链接`,
+      `${Number(d.detailLinks) || 0} 个岗位详情链接`,
       `${Number(d.buttons) || 0} 个按钮`,
       `正文 ${Number(d.bodyTextLength) || 0} 字`,
     ]
+    const company = Number(d.companyLinks) || 0
+    if (company > 0) {
+      // 公司页链接成堆、岗位卡片为 0，几乎一定是后台 tab 停在详情页 / 公司页而非搜索列表页
+      parts.push(`公司页链接 ${company} 个（疑似不是列表页）`)
+    }
     if (Array.isArray(d.sampleLinkTexts) && d.sampleLinkTexts.length > 0) {
-      parts.push(`链接样例：${d.sampleLinkTexts.slice(0, 2).join(' / ')}`)
+      parts.push(`岗位样例：${d.sampleLinkTexts.slice(0, 2).join(' / ')}`)
     }
     return parts.join(' / ')
   } catch {

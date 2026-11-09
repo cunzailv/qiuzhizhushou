@@ -26,6 +26,8 @@ import {
 import {
   collectPageDomDiagnostics,
   describePageDomDiagnostics,
+  isJobDetailHref,
+  isCompanyPageHref,
 } from '../src/content/task-runner'
 
 const ROOT = process.cwd()
@@ -270,6 +272,54 @@ describe('bot 是否记录了问题：现场诊断与留痕链路', () => {
     expect(Number(diag.buttons)).toBeGreaterThan(0)
     expect(Array.isArray(diag.sampleLinkTexts)).toBe(true)
     expect(describePageDomDiagnostics(diag)).toContain('张岗位卡片')
+  })
+
+  it('旧口径把公司页/城市页算成「详情链接」的误导已修正', () => {
+    expect(isCompanyPageHref(COMPANY_URL)).toBe(true)
+    expect(isJobDetailHref(COMPANY_URL)).toBe(false)
+    expect(isJobDetailHref('https://jobs.51job.com/shantou/')).toBe(false)
+    expect(isJobDetailHref('https://www.51job.com/')).toBe(false)
+    expect(isJobDetailHref(JOB_URL)).toBe(true)
+    expect(isJobDetailHref('https://we.51job.com/pc/search?jobid=173795328')).toBe(true)
+    // 其他平台的岗位详情链接仍然认得，不能为了 51job 把通用口径改窄
+    expect(isJobDetailHref('https://www.zhipin.com/job_detail/abc123.html')).toBe(true)
+    expect(isJobDetailHref('https://www.liepin.com/job/19876543.shtml')).toBe(true)
+    expect(isJobDetailHref('https://maimai.cn/jobdetail/12345')).toBe(true)
+  })
+
+  it('真实搜索页：公司页链接单列，详情链接只数岗位页，样例优先取岗位标题', () => {
+    const diag = collectPageDomDiagnostics()
+    expect(Number(diag.detailLinks)).toBe(2)
+    expect(Number(diag.companyLinks)).toBe(2)
+    expect(Number(diag.anchors)).toBe(4)
+    expect((diag.sampleLinkTexts as string[])[0]).toContain('PHP开发工程师')
+    expect(String(diag.pageUrlShort)).not.toContain('?')
+    const text = describePageDomDiagnostics(diag)
+    expect(text).toContain('页面 ')
+    expect(text).toContain('公司页链接 2 个')
+  })
+
+  it('停在公司页/页脚空壳页：详情链接归零并明确提示公司页链接', () => {
+    document.body.innerHTML = `
+      <div class="footer">
+        <a href="${COMPANY_URL}">深圳某某科技有限公司 计算机软件 民营</a>
+        <a href="https://jobs.51job.com/all/coABCDEF.html">求职招聘指南</a>
+        <a href="https://www.51job.com/">我的51job</a>
+      </div>`
+    const diag = collectPageDomDiagnostics()
+    expect(Number(diag.jobCards)).toBe(0)
+    expect(Number(diag.detailLinks)).toBe(0)
+    expect(Number(diag.companyLinks)).toBeGreaterThan(0)
+    expect(describePageDomDiagnostics(diag)).toContain('0 个岗位详情链接')
+    expect(describePageDomDiagnostics(diag)).toContain('公司页链接')
+  })
+
+  it('后台把现场压成人话时也带上页面地址与「疑似不是列表页」提示', () => {
+    const service = read(SERVICE)
+    expect(service).toContain('pageUrlShort')
+    expect(service).toContain('companyLinks')
+    expect(service).toContain('疑似不是列表页')
+    expect(service).toContain('岗位详情链接')
   })
 
   it('适配器源码里不再有 window.open', () => {
