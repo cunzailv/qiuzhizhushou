@@ -187,11 +187,13 @@ describe('必达模式 · 工作时段 / 采集 / 门槛 / 关键词锁', () => 
     expect(resolveMustAchieveMatchThreshold(-5, false)).toBe(0)
   })
 
-  it('必达模式放宽本地语义闸门，但技术栈硬约束仍由采集层独立保留', () => {
-    expect(shouldBypassRelevanceGate(true)).toBe(true)
+  it('岗位名称是不可让渡的硬约束：必达 / 海投都不再绕过语义闸门', () => {
+    expect(shouldBypassRelevanceGate(true)).toBe(false)
     expect(shouldBypassRelevanceGate(false)).toBe(false)
     expect(read(CONTENT)).toContain('isCrossStackJob')
-    expect(read(CONTENT)).toContain('shouldBypassRelevanceGate(mustAchieve)')
+    expect(read(CONTENT)).toContain('isJobTitleAllowed(job.title, targetCareers)')
+    expect(read(CONTENT)).toContain('const strictRelevanceGate = !!searchKeyword')
+    expect(read(CONTENT)).not.toContain('shouldBypassRelevanceGate(mustAchieve)')
   })
 
   it('关键词全部无效时不停机，也不再写 24 小时无效标记', () => {

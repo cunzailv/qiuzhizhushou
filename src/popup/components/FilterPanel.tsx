@@ -45,7 +45,7 @@ export default function FilterPanel({ filters, onChange, collapsed, onToggleColl
       {!collapsed && (
         <div className="space-y-2.5 p-3 bg-black/[0.02] rounded-xl border border-surface-hairline">
           <p className="text-xs leading-relaxed text-text-muted rounded-lg bg-surface-dark border border-surface-hairline px-2 py-1.5">
-            此配置<strong className="text-primary-light">同时作用于概览半自动与 AIbot 全自动流水线</strong>，改一次两边同时生效。岗位名称是 bot 搜索岗位用的关键词，<strong className="text-primary-light">多个岗位名请用逗号或顿号分隔</strong>；空格会被拆成短词。
+            此配置<strong className="text-primary-light">同时作用于概览半自动与 AIbot 全自动流水线</strong>，改一次两边同时生效。岗位名称是 bot 搜索岗位用的关键词，<strong className="text-primary-light">多个岗位名请用逗号或顿号分隔</strong>；空格会被拆成短词。<strong className="text-primary-light">它是硬闸门，海投 / 必达模式也不会放宽</strong>：只投这个方向的岗位，产品经理、销售等不会进队列；想扩大范围请补充新的职位词。
           </p>
 
           {/* Job Title */}

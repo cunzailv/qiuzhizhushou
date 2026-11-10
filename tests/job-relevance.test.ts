@@ -82,6 +82,20 @@ describe('本地语义相关性 computeLocalRelevance', () => {
     }
   })
 
+  it('泛词 AI 不能把「AI产品经理」判成 AI 开发岗（海投乱投根因）', () => {
+    const aiInput: JobRelevanceInput = {
+      keyword: 'AI',
+      targetCareers: ['php', '后台', 'AI', '全栈开发'],
+      jobs: [],
+    }
+    expect(computeLocalRelevance(job('a1', 'AI产品经理'), aiInput)).toBe(false)
+    expect(computeLocalRelevance(job('a2', 'AI销售顾问'), aiInput)).toBe(false)
+    expect(computeLocalRelevance(job('a3', 'AI算法工程师'), aiInput)).toBe(true)
+    expect(computeLocalRelevance(job('a4', 'PHP开发工程师'), aiInput)).toBe(true)
+    // 硬闸门确认是同方向技术岗后，别让字面启发式砍掉必达模式的供给
+    expect(computeLocalRelevance(job('a5', '高级软件工程师'), aiInput)).toBe(true)
+  })
+
   it('用户主动找非开发职能时按职能词放行，不被负向词误杀', () => {
     const pm: JobRelevanceInput = { keyword: '产品经理', targetCareers: ['产品经理'], jobs: [] }
     expect(computeLocalRelevance(job('p1', '高级产品经理'), pm)).toBe(true)

@@ -4,7 +4,11 @@ import type { PlatformAdapter } from '../shared/platform/types'
 import { resolvePanelPresence } from '../shared/assistant-entry'
 import { executeCampaignTask } from './task-runner'
 import { appendTasksToCampaign } from '../shared/agent/queue-store'
-import { shouldBypassRelevanceGate } from '../shared/agent/must-achieve'
+import {
+  isCareerGateActive,
+  isJobTitleAllowed,
+  describeCareerGate,
+} from '../shared/agent/career-gate'
 import {
   collectApplyPageTexts,
   decideApplyVerification,
@@ -536,7 +540,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
 
       const stackLabel = describeTargetStacks(targetStacks)
+      const careerGateActive = isCareerGateActive(targetCareers)
       const careerLabel = `${targetCareers.length > 0 ? targetCareers.join(' / ') : '全量职业'}${stackLabel ? ` · 限 ${stackLabel}` : ''}`
+      const directionModeLabel = relaxCareerFilter ? ' · 同义放宽（方向硬闸门仍生效）' : ' · 精准方向'
       const freshnessLabel =
         effectiveFilters.publishTime === 'today'
           ? '今日活跃'
@@ -552,7 +558,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       updatePanelContent(panelHost!, {
         mode: currentMode,
         status: 'scanning',
-        message: `🤖 AIbot 正在按【${careerLabel} · ${freshnessLabel}】精准扫描最新职位入队…`,
+        message: `🤖 AIbot 正在按【${careerLabel} · ${freshnessLabel}${directionModeLabel}】${careerGateActive ? '按岗位名称硬闸门' : ''}扫描最新职位入队…`,
         filters: effectiveFilters,
         resumeMode: liepinResumeMode,
       })
@@ -614,24 +620,24 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       // 推荐流里的前端 / Java 岗位会整页进队列，这正是「精投也乱投」的主因。
       const aiRelevanceGate = relevance.source === 'ai' && relevance.confidence >= 0.6
       /**
-       * 必达模式把「本地语义硬闸门」降级为只统计不否决：供给不足时不能再用
-       * 关键词字面匹配把同栈岗位整页筛光。技术栈硬约束在 evaluateJobCandidate
-       * 里独立生效，前端 / Java 等跨栈岗位依旧被硬拦，不会退回「精投乱投」。
+       * 语义闸门与运行模式解耦：只要有搜索词就生效，不再被 mustAchieve /
+       * fastModeForRelevance / relaxCareerFilter 关掉。旧版这三处开关一开，
+       * 海投 / 必达就把整页推荐流原样放行，产品经理 / 销售岗直接进队列。
+       * 必达模式能自动接管的是配额、活跃时间、匹配分、页码、频次，
+       * 不是「用户想找什么岗位」。
        */
-      const strictRelevanceGate =
-        !!searchKeyword && !fastModeForRelevance && !relaxCareerFilter &&
-        !shouldBypassRelevanceGate(mustAchieve)
+      const strictRelevanceGate = !!searchKeyword
       const relevanceGate = aiRelevanceGate || strictRelevanceGate
       const irrelevantJobIds = new Set(relevance.irrelevantJobIds)
 
       // 对采集到的卡片进行过滤。
-      // 关键策略：只有「硬条件」（黑名单、无关行业、时间/薪资等）才直接丢弃；
-      // 「职业方向不匹配」降级为软过滤 —— 先记下来，严格通过的不够时再用它补足名额。
-      // 否则方向白名单会一刀切掉 80%+ 的候选，AI 匹配分根本没机会参与判断，
-      // 表现为「抓了 60 个岗位却只入队 1 个」的长期空转。
+      // 岗位名称硬闸门（career-gate）是第一条、也是不可绕过的关卡：
+      // 用户填了「php 后台 AI 全栈开发」就不能投产品经理 / 销售 / 客服。
+      // 旧版把「职业方向不匹配」标成 soft 再用 softMatchedJobs 补足名额，
+      // 等于方向白名单一句都不算数；这里彻底去掉软补足。
       const filteredJobs: JobCard[] = []
-      const softMatchedJobs: JobCard[] = []
       let filteredByCareer = 0
+      let filteredByCareerGate = 0
       let filteredByTime = 0
       let filteredByBlacklist = 0
       let filteredByRelevance = 0
@@ -639,6 +645,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       let filteredOther = 0
 
       for (const job of rawJobs) {
+        // 岗位名称硬闸门：精投 / 海投 / 极速 / 必达 / 放宽模式一视同仁
+        if (careerGateActive) {
+          const verdict = isJobTitleAllowed(job.title, targetCareers)
+          if (!verdict.allowed) {
+            filteredByCareer++
+            filteredByCareerGate++
+            continue
+          }
+        }
         // 语义复核判定为「不是这个方向的岗位」→ 直接丢弃，不再进队列浪费投递额度
         if (relevanceGate && irrelevantJobIds.has(job.id)) {
           filteredByRelevance++
@@ -649,16 +664,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           targetCareers,
           targetStacks,
           blacklist: blacklistSet,
+          // 方向已由硬闸门判定，跳过族谱白名单，避免「后台开发」把「PHP开发工程师」二次误杀
+          careerGateChecked: careerGateActive,
         })
         if (!evalRes.pass) {
           if (evalRes.reason?.includes('技术栈')) {
             filteredByStack++
           } else if (evalRes.reason?.includes('职业方向')) {
             filteredByCareer++
-            // 语义不相关的岗位不能靠软补足偷偷回到队列
-            if (evalRes.soft && !irrelevantJobIds.has(job.id)) {
-              softMatchedJobs.push(job)
-            }
           } else if (evalRes.reason?.includes('活跃度') || evalRes.reason?.includes('时间')) filteredByTime++
           else if (evalRes.reason?.includes('黑名单')) filteredByBlacklist++
           else filteredOther++
@@ -666,15 +679,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         }
         filteredJobs.push(job)
         if (filteredJobs.length >= maxJobs) break
-      }
-
-      // 严格通过的不够时，只用「字符串没对上、但语义确实相关」的岗位补足名额。
-      // 跨栈岗位在 evaluateJobCandidate 里已硬否决，永远进不了这里。
-      if (filteredJobs.length < maxJobs && softMatchedJobs.length > 0) {
-        for (const job of softMatchedJobs) {
-          if (filteredJobs.length >= maxJobs) break
-          filteredJobs.push(job)
-        }
       }
 
       const tasks = filteredJobs.map((j) => ({
@@ -705,10 +709,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         duplicatesAtAppend: Math.max(0, tasks.length - added),
         filteredOther,
         filteredByCareer,
+        filteredByCareerGate,
         filteredByTime,
         filteredByBlacklist,
         filteredByRelevance,
         filteredByStack,
+        careerGate: describeCareerGate(targetCareers),
         targetStackLabels: targetStacks.map((s) => STACK_LABELS[s]),
         pageCardTotal,
         excludedOnPage,

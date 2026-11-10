@@ -1,0 +1,233 @@
+/**
+ * 回归用户反馈：「海投也要根据岗位名字才行啊，不能我写了 php 后台 AI 全栈开发
+ * 不投，投了产品经理 销售 啥的」。
+ *
+ * 旧链路的三处漏点：
+ *  1. content 的 strictRelevanceGate 被 mustAchieve / fastMode / relaxCareerFilter 关掉；
+ *  2. job-filter 把「职业方向不匹配」标 soft，采集层再用 softMatchedJobs 补回队列；
+ *  3. isJobMatchingCareer 的包含规则让泛词「AI」把「AI产品经理」判成对口。
+ *
+ * 本文件锁死：岗位名称是硬闸门，任何模式都不绕过；海投 / 必达只放宽可控参数。
+ */
+import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import {
+  isJobTitleAllowed,
+  isCareerGateActive,
+  describeCareerGate,
+  isGenericCareerToken,
+} from '../src/shared/agent/career-gate'
+import {
+  normalizeCareerTokens,
+  extractTargetCareers,
+  isJobMatchingCareer,
+  evaluateJobCandidate,
+} from '../src/shared/agent/job-filter'
+import { shouldBypassRelevanceGate } from '../src/shared/agent/must-achieve'
+
+const ROOT = process.cwd()
+const read = (rel: string) => readFileSync(join(ROOT, rel), 'utf-8')
+
+/** 用户在「岗位名称」里的真实填法 */
+const USER_DIRECTIONS = normalizeCareerTokens('php 后台 AI  全栈开发')
+
+const job = (title: string) =>
+  ({ id: '1', title, companyName: 'C', tags: [], jobUrl: 'u' }) as any
+
+describe('用户填写的岗位名称解析', () => {
+  it('空格会把「php 后台 AI 全栈开发」拆成四个独立方向，且不会被长句清洗掉', () => {
+    expect(USER_DIRECTIONS).toEqual(['php', '后台', 'AI', '全栈开发'])
+    expect(isCareerGateActive(USER_DIRECTIONS)).toBe(true)
+  })
+
+  it('FilterPanel 的岗位名称优先于简历推断', () => {
+    const careers = extractTargetCareers(null, { jobTitles: 'php 后台 AI 全栈开发' } as any)
+    expect(careers).toEqual(USER_DIRECTIONS)
+  })
+
+  it('没填方向时不启用硬闸门，也不擅自否决整页', () => {
+    expect(isCareerGateActive([])).toBe(false)
+    expect(isJobTitleAllowed('产品经理', []).allowed).toBe(true)
+    expect(describeCareerGate([])).toContain('未填写岗位名称')
+  })
+})
+
+describe('岗位名称硬闸门：用户填了 php / 后台 / AI / 全栈开发', () => {
+  it('对口的开发岗全部放行（含同义不同字与括号补充说明）', () => {
+    const allowed = [
+      'PHP开发工程师',
+      'php后台开发',
+      '后端开发工程师',
+      '全栈开发工程师',
+      '服务端研发工程师（Go）',
+      'AI算法工程师',
+      '高级PHP后台开发工程师',
+      'PHP开发工程师（销售系统方向）',
+      '电商销售系统开发工程师',
+      '兼职Java后端开发工程师',
+      '技术总监',
+    ]
+    for (const title of allowed) {
+      expect(isJobTitleAllowed(title, USER_DIRECTIONS).allowed, title).toBe(true)
+    }
+  })
+
+  it('产品经理 / 销售 / 客服等不对口岗位一律否决，标题里带 AI 也不行', () => {
+    const denied = [
+      '产品经理',
+      'AI产品经理',
+      'WMS 产品经理',
+      '高级产品总监',
+      '销售',
+      '销售经理',
+      '电话销售',
+      '销售工程师',
+      '客户成功经理',
+      '客服专员',
+      '行政专员',
+      '运营专员',
+      '新媒体运营',
+      '市场经理',
+      '项目经理',
+      'UI设计师',
+      '课程顾问',
+      'PHP技术支持',
+      'AI训练师',
+      '招聘PHP培训讲师',
+    ]
+    for (const title of denied) {
+      expect(isJobTitleAllowed(title, USER_DIRECTIONS).allowed, title).toBe(false)
+    }
+  })
+
+  it('否决原因带上用户填的方向，便于日志里核对到底按什么在筛', () => {
+    const verdict = isJobTitleAllowed('AI产品经理', USER_DIRECTIONS)
+    expect(verdict.allowed).toBe(false)
+    expect(verdict.reason).toContain('产品经理')
+    expect(verdict.reason).toContain('php / 后台 / AI / 全栈开发')
+  })
+
+  it('用户自己就在找产品经理时，方向按职能词严格匹配，不再塞开发岗', () => {
+    expect(isJobTitleAllowed('高级产品经理', ['产品经理']).allowed).toBe(true)
+    expect(isJobTitleAllowed('AI产品经理', ['产品经理']).allowed).toBe(true)
+    expect(isJobTitleAllowed('PHP开发工程师', ['产品经理']).allowed).toBe(false)
+    expect(isJobTitleAllowed('销售经理', ['产品经理']).allowed).toBe(false)
+  })
+
+  it('空标题不蒙混过关', () => {
+    expect(isJobTitleAllowed('', USER_DIRECTIONS).allowed).toBe(false)
+    expect(isJobTitleAllowed('（急聘）', USER_DIRECTIONS).allowed).toBe(false)
+  })
+
+  it('方向是「研发助理」时不把它误判成非开发职能', () => {
+    expect(isJobTitleAllowed('PHP开发工程师', ['研发助理']).allowed).toBe(true)
+    expect(isJobTitleAllowed('产品经理', ['研发助理']).allowed).toBe(false)
+  })
+
+  it('「前台开发工程师」是前端开发岗，不被行政职能词误杀', () => {
+    expect(isJobTitleAllowed('前台开发工程师', ['后台开发']).allowed).toBe(true)
+    expect(isJobTitleAllowed('行政前台', USER_DIRECTIONS).allowed).toBe(false)
+  })
+})
+
+describe('泛词误命中修复', () => {
+  it('AI / 大模型这类泛词被识别为修饰词，不能单独代表岗位方向', () => {
+    expect(isGenericCareerToken('AI')).toBe(true)
+    expect(isGenericCareerToken('大模型')).toBe(true)
+    expect(isGenericCareerToken('后台开发')).toBe(false)
+    expect(isGenericCareerToken('全栈开发')).toBe(false)
+    expect(isGenericCareerToken('PHP')).toBe(false)
+  })
+
+  it('isJobMatchingCareer 不再把「AI产品经理」当成 AI 开发岗', () => {
+    expect(isJobMatchingCareer('AI产品经理', USER_DIRECTIONS)).toBe(false)
+    expect(isJobMatchingCareer('AI算法工程师', ['AI'])).toBe(true)
+    expect(isJobMatchingCareer('PHP开发工程师', ['PHP开发'])).toBe(true)
+    expect(isJobMatchingCareer('销售工程师', ['PHP开发'])).toBe(false)
+  })
+})
+
+describe('入队评估：方向不符是硬拦截，不再标 soft 被补回队列', () => {
+  it('不对口岗位 pass=false 且不带 soft', () => {
+    for (const title of ['AI产品经理', '销售经理', '客服专员']) {
+      const res = evaluateJobCandidate(job(title), {
+        filters: null,
+        targetCareers: USER_DIRECTIONS,
+        blacklist: new Set(),
+      })
+      expect(res.pass, title).toBe(false)
+      expect(res.soft, title).toBeUndefined()
+    }
+  })
+
+  it('启用硬闸门后跳过族谱白名单，同义不同字的开发岗照样入队', () => {
+    const res = evaluateJobCandidate(job('PHP开发工程师'), {
+      filters: null,
+      targetCareers: ['后台开发'],
+      blacklist: new Set(),
+      careerGateChecked: true,
+    })
+    expect(res.pass).toBe(true)
+  })
+
+  it('历史调用点仍保留软过滤语义（不破坏既有 API）', () => {
+    const res = evaluateJobCandidate(job('Java开发工程师'), {
+      filters: null,
+      targetCareers: ['PHP开发'],
+      blacklist: new Set(),
+    })
+    expect(res.pass).toBe(false)
+    expect(res.soft).toBe(true)
+  })
+})
+
+describe('运行模式不允许绕过岗位方向', () => {
+  it('必达 / 海投的语义闸门绕过开关恒为 false', () => {
+    expect(shouldBypassRelevanceGate(true)).toBe(false)
+    expect(shouldBypassRelevanceGate(false)).toBe(false)
+  })
+})
+
+describe('静态契约：防止旧逻辑回退', () => {
+  it('采集层把硬闸门放在循环第一条，并彻底删掉方向软补足', () => {
+    const src = read('src/content/index.ts')
+    expect(src).toContain('isJobTitleAllowed(job.title, targetCareers)')
+    expect(src).toContain('filteredByCareerGate')
+    expect(src).toContain('careerGateChecked: careerGateActive')
+    expect(src).not.toContain('const softMatchedJobs')
+    expect(src).not.toContain('softMatchedJobs.push')
+    expect(src).not.toContain('shouldBypassRelevanceGate(mustAchieve)')
+  })
+
+  it('语义闸门与模式解耦，只要有搜索词就生效', () => {
+    const src = read('src/content/index.ts')
+    expect(src).toContain('const strictRelevanceGate = !!searchKeyword')
+    expect(src).toContain('const relevanceGate = aiRelevanceGate || strictRelevanceGate')
+    expect(src).toContain('const targetCareers: string[] =')
+    expect(src).not.toMatch(/relaxCareerFilter\s*\?\s*\[\]/)
+    expect(src).not.toContain('!fastModeForRelevance && !relaxCareerFilter')
+  })
+
+  it('后台认领任务时复核岗位名称，拦截历史脏任务', () => {
+    const src = read('src/background/campaign-service.ts')
+    expect(src).toContain('readCareerGateDirections')
+    expect(src).toContain('isJobTitleAllowed(task.jobTitle, gateCareers)')
+    expect(src).toContain("status: 'skipped'")
+    expect(src).toContain('岗位名称硬闸门：')
+    expect(src).not.toContain('本轮立即放宽方向限制重采一次')
+  })
+
+  it('设置页明确告知：岗位名称是硬闸门，海投 / 必达都不放宽', () => {
+    const panel = read('src/popup/components/FilterPanel.tsx')
+    expect(panel).toContain('它是硬闸门，海投 / 必达模式也不会放宽')
+    expect(panel).toContain('产品经理、销售等不会进队列')
+  })
+
+  it('入队评估与本地语义判定都接上硬闸门', () => {
+    expect(read('src/shared/agent/job-filter.ts')).toContain('isJobTitleAllowed(job.title, targetCareers)')
+    expect(read('src/shared/ai/job-relevance.ts')).toContain("isJobTitleAllowed(job.title || '', dirs)")
+    expect(read('src/shared/ai/job-relevance.ts')).toContain('return isCareerGateActive(dirs)')
+    expect(read('src/shared/agent/must-achieve.ts')).toContain('岗位名称属于用户真实意愿')
+  })
+})

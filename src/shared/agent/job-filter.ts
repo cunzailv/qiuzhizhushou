@@ -9,6 +9,14 @@ import {
   describeCrossStackReason,
   type TechStack,
 } from './stack-guard'
+import {
+  NON_DEV_ROLE_RE,
+  STRONG_DEV_ROLE_RE,
+  DEV_SEMANTIC_RE,
+  isGenericCareerToken,
+  isJobTitleAllowed,
+  isCareerGateActive,
+} from './career-gate'
 
 /**
  * 从简历或筛选设置中提取期望的岗位职业名称清单
@@ -174,6 +182,8 @@ export function isUnrelatedCareer(jobTitle: string, targetCareers: string[] = []
     .replace(/[（(].*?[)）)]/g, '')
     .replace(/[\s\-_/\\|]/g, '')
   if (!UNRELATED_CAREER_RE.test(cleanTitle)) return false
+  // 「前台开发工程师」「销售系统开发工程师」是开发岗，别被行政/销售字样误杀
+  if (STRONG_DEV_ROLE_RE.test(cleanTitle)) return false
   // 用户目标方向本身就包含这类词时放行（例如他就是要找销售岗）
   return !targetCareers.some((t) => UNRELATED_CAREER_RE.test(t))
 }
@@ -193,13 +203,26 @@ export function isJobMatchingCareer(jobTitle: string, targetCareers: string[]): 
     return false
   }
 
+  // 1.2 岗位名称硬闸门的负向职能否决：
+  // 「AI产品经理」含 ai、「销售工程师」含工程师，旧版靠包含规则会被判成方向匹配。
+  // 只有标题主部确实是开发岗（「XX系统开发工程师」）才继续走族谱判定。
+  const nonDevHit = cleanTitle.match(NON_DEV_ROLE_RE)?.[0] || ''
+  if (nonDevHit) {
+    const userWantsIt = targetCareers.some((c) =>
+      c.toLowerCase().includes(nonDevHit.toLowerCase()),
+    )
+    if (!userWantsIt && !STRONG_DEV_ROLE_RE.test(cleanTitle)) return false
+  }
+
   // 2. 正向多方向判定
   for (const rawTarget of targetCareers) {
     const target = rawTarget.toLowerCase().replace(/[\s\-_/\\|（）()]/g, '')
     if (!target) continue
 
-    // 2.1 包含或被包含
+    // 2.1 包含或被包含：泛词（AI / 大模型 / 数据 …）不能单独证明岗位对口，
+    //     必须同时具备技术岗语义，否则「AI产品经理」会因为含 ai 被误判为相关。
     if (cleanTitle.includes(target) || target.includes(cleanTitle)) {
+      if (isGenericCareerToken(rawTarget) && !DEV_SEMANTIC_RE.test(cleanTitle)) continue
       return true
     }
 
@@ -270,6 +293,8 @@ export function isJobMatchingCareer(jobTitle: string, targetCareers: string[]): 
         cleanTitle.includes('llm') ||
         cleanTitle.includes('aigc'))
     ) {
+      // 泛 AI 方向同样要求岗位本身是技术岗，别把「AI产品经理」算成 AI 开发岗
+      if (isGenericCareerToken(rawTarget) && !DEV_SEMANTIC_RE.test(cleanTitle)) continue
       return true
     }
 
@@ -327,9 +352,20 @@ export function evaluateJobCandidate(
     /** 用户方向里明确的技术栈（PHP / Java / 前端…），用于硬否决跨栈岗位 */
     targetStacks?: TechStack[]
     blacklist?: Set<string>
+    /**
+     * 采集层已用 career-gate 做过岗位名称硬闸门时置 true，
+     * 跳过下面这条族谱白名单（同义不同字会被它误杀），但硬闸门本身仍会再跑一次兜底。
+     */
+    careerGateChecked?: boolean
   },
 ): { pass: boolean; reason?: string; soft?: boolean } {
-  const { filters, targetCareers = [], targetStacks = [], blacklist = new Set() } = options
+  const {
+    filters,
+    targetCareers = [],
+    targetStacks = [],
+    blacklist = new Set(),
+    careerGateChecked = false,
+  } = options
 
   // 1. 黑名单公司检查
   if (job.companyName && blacklist.has(job.companyName.trim())) {
@@ -352,8 +388,20 @@ export function evaluateJobCandidate(
     }
   }
 
+  // 1.7 岗位名称硬闸门：任何模式（精投 / 海投 / 极速 / 必达 / 放宽）都不可绕过。
+  //     采集层会前置跑一次以便单独统计，这里再兜底一次防止其它调用方漏掉。
+  //     注意：这里绝不返回 soft —— 方向不匹配的岗位不允许被软补足偷偷塞回队列。
+  if (isCareerGateActive(targetCareers)) {
+    const verdict = isJobTitleAllowed(job.title, targetCareers)
+    if (!verdict.allowed) {
+      return { pass: false, reason: `职业方向（岗位名称硬闸门）：${verdict.reason}` }
+    }
+  }
+
   // 2. 职业方向检查（软过滤：不匹配不等于不可投，交由 AI 匹配分最终把关）
-  if (targetCareers.length > 0 && !isJobMatchingCareer(job.title, targetCareers)) {
+  //    采集层已启用硬闸门时跳过：族谱白名单会把「后台开发」搜到的「PHP开发工程师」
+  //    误判为不匹配，重复过滤只会砍掉供给，方向正确性已由 1.7 保证。
+  if (!careerGateChecked && targetCareers.length > 0 && !isJobMatchingCareer(job.title, targetCareers)) {
     return {
       pass: false,
       soft: true,

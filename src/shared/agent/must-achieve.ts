@@ -175,12 +175,19 @@ export function resolveMustAchieveMatchThreshold(
 }
 
 /**
- * 精投的本地语义硬闸门在必达模式下降级为「只统计不否决」。
- * 注意：技术栈硬约束在 evaluateJobCandidate 里独立生效，Java / 前端岗位依然被拦，
- * 所以放宽语义闸门不会退回「精投乱投前端 / Java」的老问题。
+ * 语义闸门是否允许被运行模式绕过 —— 永远不允许。
+ *
+ * 历史实现返回 mustAchieve：必达 / 海投时把本地语义硬闸门降级为「只统计不否决」，
+ * 结果用户填了「php 后台 AI 全栈开发」，bot 却把「AI产品经理」「销售」整页灌进队列。
+ * 岗位名称属于用户真实意愿，不是系统可自动接管的可控参数：必达模式能放宽的只有
+ * 配额、活跃时间、匹配分、页码和巡检频次，方向本身一律不放宽。
+ *
+ * 保留这个导出是为了让旧调用点与静态契约测试显式看到「不再绕过」这个决定，
+ * 而不是悄悄删掉函数导致后来有人再加回来。
  */
-export function shouldBypassRelevanceGate(mustAchieve: boolean): boolean {
-  return mustAchieve
+export function shouldBypassRelevanceGate(_mustAchieve: boolean): boolean {
+  void _mustAchieve
+  return false
 }
 
 /** 「所有关键词都搜不到」时是否停机：必达模式永不停机，清掉无效标记继续换词 */

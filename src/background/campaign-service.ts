@@ -69,6 +69,11 @@ import { generateDailyButlerReport } from '../shared/agent/butler/daily-report-g
 import { getDailyReportConfig } from '../shared/db/butler-evolution-store'
 import { recordError } from '../shared/db/error-store'
 import { extractTargetCareers, diagnoseCareerTokens, normalizeCareerTokens } from '../shared/agent/job-filter'
+import {
+  isCareerGateActive,
+  isJobTitleAllowed,
+  describeCareerGate,
+} from '../shared/agent/career-gate'
 import { loadSharedApplyFilters } from '../shared/agent/filter-config'
 import { replanIfNeeded } from '../shared/agent/planner'
 import { sendWebhookNotification } from '../shared/notification/webhook-notifier'
@@ -142,11 +147,13 @@ const UNVERIFIED_ALERT_THRESHOLD = 3
 let lastProtectedPlatformsNoteAt = 0
 
 /**
- * 连续因“职业方向”过滤导致零新增的轮次。
- * 达到阈值后自动放宽方向限制，改由 AI 匹配分把关，避免方向清单配置不当把产量打成 0。
+ * 连续因「岗位名称硬闸门」过滤导致零新增的轮次。
+ * 达到阈值后只放宽同义匹配严格度 / 活跃时间等可控参数，方向本身永不放宽。
  */
 let careerFilterMissStreak = 0
 let careerRelaxAnnounced = false
+/** 「整页岗位都不在填写的方向里」提示的节流，避免每轮刷屏 */
+let lastCareerGateWarnAt = 0
 const CAREER_RELAX_THRESHOLD = 3
 
 /**
@@ -347,6 +354,10 @@ interface CollectJobsResult {
   collected?: number
   added?: number
   filteredByCareer?: number
+  /** 其中被「岗位名称硬闸门」直接拦下的数量（销售 / 产品经理 / 客服等） */
+  filteredByCareerGate?: number
+  /** 本轮生效的岗位名称硬闸门描述，写进日志让用户看见方向确实生效 */
+  careerGate?: string
   filteredByTime?: number
   filteredByBlacklist?: number
   pageCardTotal?: number
@@ -787,6 +798,27 @@ export async function resumeSchedulerIfNeeded(): Promise<void> {
 }
 
 /**
+ * 读取用户填写的「岗位名称」，供认领任务时复核历史脏任务。
+ *
+ * 修复前采集入队的「产品经理 / 销售」任务可能还躺在队列里，
+ * 光改采集层拦不住它们被下一轮 tick 认领投递；这里在后台侧再读一次方向，
+ * 保证旧队列里的不符岗位同样不会投出去。读取失败时返回空数组（不启用闸门），
+ * 宁可放行也不能因为设置读不到就把整条流水线卡死。
+ */
+async function readCareerGateDirections(): Promise<string[]> {
+  try {
+    const [resume, filters] = await Promise.all([
+      getDefaultResume(),
+      loadSharedApplyFilters(),
+    ])
+    return extractTargetCareers(resume, filters)
+  } catch (err) {
+    logWarn(MOD, 'readCareerGateDirections', err)
+    return []
+  }
+}
+
+/**
  * 推进一次投递队列执行（核心 Tick 循环）
  */
 export async function runCampaignTick(): Promise<void> {
@@ -1157,6 +1189,26 @@ export async function runCampaignTick(): Promise<void> {
       return
     }
 
+    // 4.1 岗位名称硬闸门（后台兜底）：修复前采集入队的历史任务里可能还留着
+    // 「产品经理 / 销售 / 客服」等不符岗位，只改采集层拦不住它们被认领投递。
+    // 认领后、真正打开页面前再核一次方向，命中就标 skipped 并立刻推进下一个任务。
+    const gateCareers = await readCareerGateDirections()
+    if (isCareerGateActive(gateCareers)) {
+      const verdict = isJobTitleAllowed(task.jobTitle, gateCareers)
+      if (!verdict.allowed) {
+        await updateTaskResult(task.id, {
+          status: 'skipped',
+          failReason: `岗位名称硬闸门：${verdict.reason}`,
+        })
+        await appendCampaignLog(
+          `🚫 已拦截不符岗位：[${task.platform}] ${task.jobTitle} @ ${task.company}（${verdict.reason}；${describeCareerGate(gateCareers)}）`,
+          'warn',
+        )
+        scheduleNextTick(1000)
+        return
+      }
+    }
+
     log(MOD, 'runCampaignTick', `Claimed task: [${task.platform}] ${task.jobTitle} @ ${task.company}`)
     await appendCampaignLog(
       `🎯 认领任务：[${task.platform}] ${task.jobTitle} @ ${task.company}`,
@@ -1366,7 +1418,7 @@ async function autoCollectJobsForCampaign(
           reason: 'ok',
         }
         await appendCampaignLog(
-          '⚠️ 必达模式没读到搜索词：本轮改从平台推荐流补仓（技术栈硬约束仍生效，不会乱投跨栈岗位）。建议到「设置 → 岗位名称」补充职位名，例如「php开发, 后端开发, AI 全栈开发」，下一轮自动切回精准搜索',
+          '⚠️ 必达模式没读到搜索词：本轮改从平台推荐流补仓（岗位名称硬闸门 + 技术栈硬约束仍生效，不会乱投产品经理 / 销售 / 跨栈岗位）。建议到「设置 → 岗位名称」补充职位名，例如「php开发, 后端开发, AI 全栈开发」，下一轮自动切回精准搜索',
           'warn',
         )
       } else {
@@ -1429,13 +1481,14 @@ async function autoCollectJobsForCampaign(
     }
   }
 
-  // 连续多轮被“职业方向”过滤到零新增时自动放宽，改由 AI 匹配分把关，避免永远补不到货。
-  // 必达模式直接全程放宽同义匹配严格度（方向白名单与技术栈硬约束仍保留，不清空）。
+  // 连续多轮零新增时自动放宽「同义匹配严格度」等可控参数，避免永远补不到货。
+  // 岗位名称硬闸门不属于可控参数：海投 / 必达 / 放宽模式都不许清空方向，
+  // 销售 / 产品经理 / 客服等岗位继续被拦，用户想扩大范围只能自己补职位词。
   const relaxCareerFilter = mustAchieve || careerFilterMissStreak >= CAREER_RELAX_THRESHOLD
   if (!mustAchieve && relaxCareerFilter && !careerRelaxAnnounced) {
     careerRelaxAnnounced = true
     await appendCampaignLog(
-      `🔓 已连续 ${careerFilterMissStreak} 轮因职业方向过滤导致零新增，本轮起放宽同义匹配严格度（方向白名单仍保留，明确跨技术栈岗位继续硬拦），先保证有岗位可投。建议同步检查「期望职位」是否填成了长句`,
+      `🔓 已连续 ${careerFilterMissStreak} 轮零新增，本轮起放宽同义匹配严格度（${describeCareerGate(targetCareers)}仍生效，销售 / 产品 / 客服等不符岗位继续拦截，跨技术栈岗位也继续硬拦）。若想扩大范围，请在「岗位名称」里补充新的短职位词`,
       'warn',
     )
   }
@@ -1500,7 +1553,7 @@ async function autoCollectJobsForCampaign(
     }
 
     try {
-      let collectRes = await sendTabMessageWithRetry<CollectJobsResult>(
+      const collectRes = await sendTabMessageWithRetry<CollectJobsResult>(
         tab.id,
         {
           type: 'COLLECT_PLATFORM_JOBS',
@@ -1519,9 +1572,9 @@ async function autoCollectJobsForCampaign(
         3,
       )
 
-      // 命中率过低时「同轮放宽重采」：
-      // 抓了 50 个岗位却因为方向白名单过窄只入队 0~1 个，没必要干等好几轮退避，
-      // 直接本轮放宽方向再采一次（AI 匹配分仍会把关，不会乱投不相关岗位）。
+      // 岗位名称是硬闸门：旧版「命中率低就放宽方向同轮重采一次」现在毫无作用
+      // （方向不可放宽，重采只会拿到同一批结果，还白跑一轮页面通信）。
+      // 改成给用户一条能自己操作的建议，而不是假装系统替他改了方向。
       const collectedCount = collectRes?.collected ?? 0
       const filteredByCareerCount = collectRes?.filteredByCareer ?? 0
       const hitRateTooLow =
@@ -1529,30 +1582,12 @@ async function autoCollectJobsForCampaign(
         filteredByCareerCount >= 5 &&
         filteredByCareerCount >= collectedCount * 0.5
 
-      if (hitRateTooLow && !relaxCareerFilter) {
+      if (hitRateTooLow && Date.now() - lastCareerGateWarnAt > 10 * 60_000) {
+        lastCareerGateWarnAt = Date.now()
         await appendCampaignLog(
-          `🔓 【${pName}】${collectedCount} 个岗位里有 ${filteredByCareerCount} 个被职业方向筛掉（白名单过窄），本轮立即放宽方向限制重采一次`,
+          `🚫 【${pName}】${collectedCount} 个岗位里有 ${filteredByCareerCount} 个被${collectRes?.careerGate || describeCareerGate(targetCareers)}拦截（方向不对口，海投 / 必达同样不放宽）。想扩大范围请在「设置 → 岗位名称」补充新的短职位词，而不是让 bot 改投产品经理 / 销售`,
           'warn',
         )
-        collectRes = await sendTabMessageWithRetry<CollectJobsResult>(
-          tab.id,
-          {
-            type: 'COLLECT_PLATFORM_JOBS',
-            payload: {
-              maxJobs: collectMaxJobs,
-              existingJobIds,
-              targetCareers,
-              relaxCareerFilter: true,
-              mustAchieve,
-              keyword: primaryCareerKeyword,
-              page: currentPage,
-              filters,
-              retryCooldownMs,
-            },
-          },
-          3,
-        )
-        careerFilterMissStreak = 0
       }
 
       // 通信成功（无论是否新增岗位）都应清空该平台的连续失败计数
@@ -1612,6 +1647,7 @@ async function autoCollectJobsForCampaign(
         // 明细诊断：区分“页面根本没抓到岗位”与“抓到了但被筛掉”，避免无脑循环看不到原因
         const collected = collectRes?.collected ?? 0
         const byCareer = collectRes?.filteredByCareer ?? 0
+        const byCareerGate = collectRes?.filteredByCareerGate ?? 0
         const byTime = collectRes?.filteredByTime ?? 0
         const byBlacklist = collectRes?.filteredByBlacklist ?? 0
         const excludedOnPage = collectRes?.excludedOnPage ?? 0
@@ -1653,9 +1689,9 @@ async function autoCollectJobsForCampaign(
         // 旧版把 maxJobs*2 的截断数当成「已投过」，日志会凭空写出「其中 5 个已投过」。
         const detail = pageCardTotal === 0
           ? '页面未解析到任何岗位卡片（搜索结果为空或页面未加载完成）'
-          : `本页 ${pageCardTotal} 张卡片，去重跳过 ${excludedOnPage} 张、采集上限截断 ${truncatedByCap} 张，实际筛选 ${collected} 张；职业方向筛掉 ${byCareer} 个、活跃时间筛掉 ${byTime} 个、黑名单筛掉 ${byBlacklist} 个、其他条件筛掉 ${filteredOther} 个${relevanceNote}；通过全部筛选可入队 ${tasksProduced} 个，其中 ${duplicatesAtAppend} 个是历史已处理岗位被去重挡下`
+          : `本页 ${pageCardTotal} 张卡片，去重跳过 ${excludedOnPage} 张、采集上限截断 ${truncatedByCap} 张，实际筛选 ${collected} 张；岗位名称硬闸门拦下 ${byCareerGate} 个（职业方向合计筛掉 ${byCareer} 个）、活跃时间筛掉 ${byTime} 个、黑名单筛掉 ${byBlacklist} 个、其他条件筛掉 ${filteredOther} 个${relevanceNote}；通过全部筛选可入队 ${tasksProduced} 个，其中 ${duplicatesAtAppend} 个是历史已处理岗位被去重挡下`
         await appendCampaignLog(
-          `ℹ️ 【${pName}】本轮未新增岗位：${detail}。目标【${careerLabel} · ${freshnessLabel} · 来源：${careerSourceLabel}】${relaxCareerFilter ? '（本轮已放宽方向限制）' : ''}`,
+          `ℹ️ 【${pName}】本轮未新增岗位：${detail}。目标【${careerLabel} · ${freshnessLabel} · 来源：${careerSourceLabel}】${collectRes?.careerGate || describeCareerGate(targetCareers)}${relaxCareerFilter ? '（同义严格度已放宽，方向硬闸门仍生效）' : ''}`,
           'info',
         )
 
@@ -1673,8 +1709,8 @@ async function autoCollectJobsForCampaign(
         if (opts.managePageCursor && collectRes?.success && pageCardTotal > 0) {
           const nextPage = nextSearchPage(currentPage)
           await setSearchPageCursor(pageKey, nextPage)
-          // 不清 careerFilterMissStreak：连续多页都因方向白名单过窄零产出时，
-          // 原有的「自动放宽方向」机制仍要能累计生效
+          // 不清 careerFilterMissStreak：连续多页都因方向不对口零产出时，
+          // 「放宽同义严格度 / 活跃时间」机制仍要能累计生效（方向硬闸门本身不放宽）
           await appendCampaignLog(
             `📄 【${pName}】关键词【${primaryCareerKeyword}】第 ${currentPage} 页本轮 0 新增，本页挖尽；下次自动${nextPage === 1 ? '回到第 1 页并换关键词轮转' : `翻到第 ${nextPage} 页`}${retryCooldownMs === 0 ? '（产能优先：已同时解除历史跳过岗位的回收冷却）' : ''}`,
             'info',

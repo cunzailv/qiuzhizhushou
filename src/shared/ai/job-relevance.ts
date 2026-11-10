@@ -16,6 +16,10 @@
 import { chatCompletion } from './api-client'
 import { isJobMatchingCareer, isUnrelatedCareer } from '../agent/job-filter'
 import {
+  isJobTitleAllowed,
+  isCareerGateActive,
+} from '../agent/career-gate'
+import {
   isCrossStackJob,
   describeTargetStacks,
   type TechStack,
@@ -64,7 +68,7 @@ const MAX_CACHE_ENTRIES = 40
 
 /** 明显不是「在招这个技术方向的人」的岗位性质，含关键词字样也要否决 */
 const NON_TARGET_ROLE_RE =
-  /(技术支持|售后支持|售前|客服|销售|课程顾问|讲师|培训|咨询|行政|人事|招聘专员|猎头|心理咨询|空间设计|平面设计|ui设计|视觉设计|院长|主播|地推|外卖|司机|普工|操作工|保安|保洁|理财|保险经纪)/
+  /(技术支持|售后支持|售前|客服|销售|课程顾问|讲师|培训|咨询|行政|人事|招聘专员|猎头|心理咨询|空间设计|平面设计|ui设计|视觉设计|院长|主播|地推|外卖|司机|普工|操作工|保安|保洁|理财|保险经纪|产品经理|产品专员|产品运营|运营经理|市场经理|市场专员|项目经理|设计师)/
 
 /** 真正的技术岗语义词，用于兜底「字符串命中但岗位性质不对」 */
 const DEV_ROLE_RE =
@@ -100,6 +104,13 @@ export function computeLocalRelevance(job: RelevanceJob, input: JobRelevanceInpu
   if (!title) return false
   const dirText = dirs.join('')
 
+  // 岗位名称硬闸门先行：本地语义判定必须先服从用户填写的岗位方向。
+  // 旧版「AI」这类泛词会让「AI产品经理」因为标题含 ai 被算成相关岗位，
+  // 海投 / 必达又会把语义闸门关掉，最终整页不相关岗位进队列。
+  if (isCareerGateActive(dirs) && !isJobTitleAllowed(job.title || '', dirs).allowed) {
+    return false
+  }
+
   // 技术栈硬约束优先于一切同义族谱：
   // 搜「php 后台开发」时，后端族谱会把其他语言的后端岗当同义词，这里必须先否决。
   if (isCrossStackJob(job.title || '', input.targetStacks || [])) return false
@@ -123,7 +134,13 @@ export function computeLocalRelevance(job: RelevanceJob, input: JobRelevanceInpu
   // 字符串兜底：必须同时具备技术岗语义，挡住「PHP技术支持」
   if (dirs.some((d) => d.length >= 2 && title.includes(d)) && DEV_ROLE_RE.test(title)) return true
 
-  return false
+  // 岗位名称硬闸门已经确认「这就是用户填写方向里的技术岗」时，
+  // 不再让上面偏保守的字符串 / 族谱启发式把它误杀。
+  // 典型例子：方向「php 后台 AI 全栈开发」搜到「高级软件工程师」——
+  // 它是正经开发岗，只是没写一个字面命中的词。语义闸门常开后如果这里直接
+  // return false，必达模式会被自己砍掉供给，与目标必达相冲突。
+  // 不对口岗位（产品经理 / 销售）在函数开头就已被硬闸门否决，不会走到这里。
+  return isCareerGateActive(dirs)
 }
 
 function makeResult(
