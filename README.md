@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1412%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1426%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -32,7 +32,7 @@
 - **会自检也会复盘**：L2 语义相关性自愈、L3 真实回复率回流反哺搜索方向、Planner 防数字幻觉，Tool-Calling 中控对话台支持多轮上下文与危险动作人工审批。
 - **数据留在本地**：简历、画像、队列、日志保存在浏览器本地（Dexie / IndexedDB + `chrome.storage`）；AI 能力走你自己配置的模型接口，不上传第三方服务。
 
-> 当前状态：`93` 个测试文件 / `1412` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
+> 当前状态：`94` 个测试文件 / `1426` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
@@ -174,6 +174,8 @@
 边界说明（不藏着）：**「暂停」≠「关闭」** —— 人工暂停仍保留 5 分钟宽限后自动恢复，这是必达模式原有语义；想彻底停请点「关闭 AIbot」。另外用户**主动点「开始投递 / 恢复」**时侧栏仍会展开，因为 content 侧在 `closed` 状态会拒绝执行投递任务；如果你希望「关着侧栏也能纯后台投」，这是另一项改造，说一声我再改。
 
 回归测试 `tests/user-intent-lock.test.ts`（19 例）锁死停机锁落盘、保护名单增删、看门狗遇停机锁一律 idle、配额规划跳过受保护平台、面板归一与全链路接线。
+
+**第四轮补强（用户反馈「我打开网页，插件 bot 自动跑了」）**：前三轮的停机锁只装在「把停掉的 bot 拉回 running 的复活入口」，但 `runCampaignTick()` 只要 campaign 状态残留 `running` 就一路派任务、开 tab、采集，还会自己续挂下一次 tick；同时 `onInstalled` 的验证码自愈、`tabs.onUpdated` 的成功页补记会把 shutdown 清掉的 alarm 重新挂回来，content 侧又会在 `closed` 状态下重建浮窗、扫描入队。现在统一为**一处总闸 + 各入口复核 + 页面最后一道闸**：`planAutomationHalt()` 纯决策 + `haltAutomationIfUserStopped()` 在每轮 tick 最前面拆掉定时器 / 两个 alarm / 残留 running 状态；看门狗注册、验证码自愈、成功页补记、自动补采、外部 AI 启动类 RPC 全部先读停机锁；content 的 `init()` 停机时不再把 `bubble` 归一成 `expanded`、不写回全局、不重建浮窗，`EXECUTE_CAMPAIGN_TASK` 与 `COLLECT_PLATFORM_JOBS` 在投递 / 扫描之前再拦一次。**停机后日志会出现一行 `🛑 AIbot 已被你关闭：已阻止一次自动恢复…`，看到它就说明新代码在跑**。回归测试 `tests/user-stop-hard-stop.test.ts`（14 例，含实跑 `runCampaignTick()` 验证停机后不开 tab）。
 
 > **真实账号「投递后平台是否真的多一条记录」仍需按上方验收清单第 4–5 步核对**，模拟页面 E2E 不能替代登录态、反爬与平台确认回执。第六轮修复同样需要用户手动在 `chrome://extensions` 点一次「重新加载」才会生效。
 

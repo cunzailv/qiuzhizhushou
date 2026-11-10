@@ -45,6 +45,7 @@ import {
   readUserDisabledPlatforms,
   setUserDisabledPlatform,
   syncUserDisabledPlatforms,
+  planAutomationHalt,
 } from '../shared/agent/user-intent'
 import {
   startCampaign as startAgentCampaign,
@@ -352,6 +353,8 @@ function describeRunnerDiagnostics(raw: string): string {
 /** Content Script 采集岗位后回传的统计结果 */
 interface CollectJobsResult {
   success: boolean
+  /** 页面侧读到「用户已停机」时返回的结构完整空结果，后台据此立刻停止调度 */
+  userStopped?: boolean
   collected?: number
   added?: number
   filteredByCareer?: number
@@ -613,6 +616,66 @@ async function applyMustAchieveTakeover(
   }
 }
 
+/**
+ * 用户停机意图的**总闸**：任何自动化推进之前先过这里。
+ *
+ * 历史漏点：停机锁只装在「把非 running 拉回 running 的复活入口」
+ * （resumeAutomationIfAllowed / ensureMustAchieveAlive / watchdog 状态机），
+ * 而 `runCampaignTick()` 只要看到 `campaign.status === 'running'` 就继续派任务、
+ * 开平台 tab、采集、再给自己挂下一次 tick。用户关掉 bot 后，只要有一条路径
+ * （tabs.onUpdated 补记成功页、验证码自愈、外部 RPC、残留 alarm）把状态或
+ * 定时器留成 running，流水线就会在「打开一个网页」后自己接着跑。
+ *
+ * 所以这里做两件事：① 无条件拦住本轮；② 把复活的根（定时器 / alarm /
+ * 残留 running 状态）一起拆掉，让后续即使还有 alarm 响也只会再次被拦。
+ * 返回 true 表示调用方必须立刻 return。
+ */
+let lastHaltLogAt = 0
+
+export async function haltAutomationIfUserStopped(): Promise<boolean> {
+  if (!(await readUserStopped())) return false
+
+  const [tickAlarm, watchdogAlarm] = await Promise.all([
+    chrome.alarms.get(ALARM_APPLY_TICK).catch(() => undefined),
+    chrome.alarms.get(MUST_ACHIEVE_WATCHDOG_ALARM).catch(() => undefined),
+  ]).catch(() => [undefined, undefined])
+  let campaign: Campaign | null = null
+  try { campaign = await getCampaign() } catch (e) { logWarn(MOD, 'haltAutomationIfUserStopped', e) }
+
+  const plan = planAutomationHalt({
+    userStopped: true,
+    campaignRunning: campaign?.status === 'running',
+    hasTickAlarm: !!tickAlarm,
+    hasWatchdogAlarm: !!watchdogAlarm,
+    hasTimer: !!scheduledTimer,
+  })
+
+  if (plan.clearTimer && scheduledTimer) {
+    clearTimeout(scheduledTimer)
+    scheduledTimer = null
+  }
+  if (plan.clearTickAlarm) {
+    try { await chrome.alarms.clear(ALARM_APPLY_TICK) } catch { /* 预期内异常 */ }
+  }
+  if (plan.clearWatchdogAlarm) {
+    try { await chrome.alarms.clear(MUST_ACHIEVE_WATCHDOG_ALARM) } catch { /* 预期内异常 */ }
+  }
+  // 关闭时的在途任务回执可能用旧快照把 status 覆盖回 running / paused，
+  // 这里幂等地改回 aborted，避免「下次打开网页又继续跑」。
+  if (plan.abortCampaign) {
+    try { await abortAgentCampaign() } catch (e) { logWarn(MOD, 'haltAutomationIfUserStopped', e) }
+  }
+
+  if (Date.now() - lastHaltLogAt > 60_000) {
+    lastHaltLogAt = Date.now()
+    await appendCampaignLog(
+      '🛑 AIbot 已被你关闭：已阻止一次自动恢复（清掉调度定时器与看门狗，状态保持停止）。想继续请重新点「开始投递」',
+      'info',
+    ).catch(() => {})
+  }
+  return plan.halt
+}
+
 /** 设定下一次 tick 触发（结合 setTimeout 与 Alarm 机制双重保险） */
 export function scheduleNextTick(delayMs = 60_000) {
   if (scheduledTimer) {
@@ -643,6 +706,13 @@ export function scheduleNextTick(delayMs = 60_000) {
  */
 export async function ensureWatchdogAlarm(): Promise<void> {
   try {
+    // 所有「顺手挂回周期看门狗」的调用点统一在这里收口：用户停机时不仅不注册，
+    // 还要把可能已经存在的 alarm 清掉（shutdown 之后又被人调了本函数的情况）。
+    // campaignService.start/resume 会先 setUserStopped(false)，不受影响。
+    if (await readUserStopped()) {
+      await chrome.alarms.clear(MUST_ACHIEVE_WATCHDOG_ALARM)
+      return
+    }
     const existing = await chrome.alarms.get(MUST_ACHIEVE_WATCHDOG_ALARM)
     if (existing) return
     chrome.alarms.create(MUST_ACHIEVE_WATCHDOG_ALARM, {
@@ -676,6 +746,7 @@ export async function ensureMustAchieveAlive(known?: Campaign | null): Promise<b
     const goal = campaign.capacityGoal
     const progress = summarizeQuotaProgress(campaign)
     const decision = decideMustAchieveWatchdog({
+      userStopped: await readUserStopped(),
       status: campaign.status,
       pausedReason: campaign.pausedReason,
       pausedAt: await readPausedAt(),
@@ -760,6 +831,9 @@ export async function cleanupDirtyJobTitles(): Promise<void> {
  */
 export async function resumeFalseCaptchaPauseIfNeeded(): Promise<void> {
   try {
+    // onInstalled 会无条件调本函数（扩展重载 / 浏览器启动），它是「把 paused 写回
+    // running」的复活入口。用户已停机时绝不能借验证码自愈把 bot 拉起来。
+    if (await readUserStopped()) return
     const campaign = await getCampaign()
     if (!campaign || campaign.status !== 'paused' || campaign.pausedReason !== 'captcha') return
 
@@ -823,6 +897,9 @@ async function readCareerGateDirections(): Promise<string[]> {
  * 推进一次投递队列执行（核心 Tick 循环）
  */
 export async function runCampaignTick(): Promise<void> {
+  // 停机意图优先于一切状态：只要用户关过 AIbot，不管 campaign 是不是残留 running、
+  // 也不管这条 tick 是被哪个 alarm / 网页事件唤醒的，一律拦下并拆掉调度根。
+  if (await haltAutomationIfUserStopped()) return
   if (isTicking) return
   isTicking = true
 
@@ -1581,6 +1658,12 @@ async function autoCollectJobsForCampaign(
         3,
       )
 
+      // 页面侧确认用户已停机时，立刻拆掉调度根并结束本轮，不写「没找到岗位」这类误导日志。
+      if ((collectRes as CollectJobsResult | undefined)?.userStopped) {
+        await haltAutomationIfUserStopped()
+        return false
+      }
+
       // 岗位名称是硬闸门：旧版「命中率低就放宽方向同轮重采一次」现在毫无作用
       // （方向不可放宽，重采只会拿到同一批结果，还白跑一轮页面通信）。
       // 改成给用户一条能自己操作的建议，而不是假装系统替他改了方向。
@@ -2049,6 +2132,9 @@ async function handleTaskExecutionResult(task: ApplyTask, result: ExecuteTaskRes
  * 幂等：findApplySuccessTask 排除已 done 的任务，同一成功页重复触发不会重复计数。
  */
 export async function recordApplySuccessFromUrl(url: string): Promise<boolean> {
+  // 「打开 / 导航一个网页」直接触发的入口。停机后不再补记、也不让它下游
+  // handleTaskExecutionResult 顺手把 apply-tick 重新挂回来。
+  if (await readUserStopped()) return false
   if (!isApplySuccessUrl(url)) return false
   const campaign = await getCampaign()
   if (!campaign || campaign.status !== 'running') return false
@@ -2316,6 +2402,9 @@ export const campaignService = {
     return cmp
   },
   triggerAutoCollect: async () => {
+    // 无 campaign 时本函数会直接 startAgentCampaign() 造出一个 running 活动并派采集，
+    // 停机期间必须挡住，否则外部指令 / 旧客户端一调就「自己开跑」。
+    if (await readUserStopped()) return false
     let cmp = await getCampaign()
     if (!cmp) {
       // 尚未创建活动时，先初始化一个处于 paused 状态的活动用于承载待投队列

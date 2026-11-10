@@ -9,7 +9,7 @@ import { setSharedResumeSummary } from '../shared/db/shared-state'
 import { resetDailyCounter } from '../shared/antiBot'
 import { log, logError, logGroup, logGroupEnd } from '../shared/utils/logger'
 import { butlerRunDaily, getActiveFollowUps } from '../shared/agent/butler'
-import { campaignService, resumeSchedulerIfNeeded, cleanupDirtyJobTitles, resumeFalseCaptchaPauseIfNeeded, ensureMustAchieveAlive, ensureWatchdogAlarm, recordApplySuccessFromUrl } from './campaign-service'
+import { campaignService, resumeSchedulerIfNeeded, cleanupDirtyJobTitles, resumeFalseCaptchaPauseIfNeeded, ensureMustAchieveAlive, ensureWatchdogAlarm, recordApplySuccessFromUrl, haltAutomationIfUserStopped } from './campaign-service'
 import { isApplySuccessUrl } from '../shared/agent/apply-success'
 import { readUserStopped, setUserStopped } from '../shared/agent/user-intent'
 import { reviveDedicatedTabs } from './tab-manager'
@@ -105,9 +105,11 @@ installGlobalErrorCapture()
 // 51job 投递是整页跳转到 applysuccess.php?jobid=XXX，content script 上下文会被销毁，
 // 「点击 → 采集平台确认 → 回传 done」跑不完，岗位上其实投成功了却没记配额。
 // 在后台按 URL 补记，完全不依赖 content script 生命周期；纯函数保证幂等。
-chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+chrome.tabs.onUpdated.addListener(async (_tabId, changeInfo, tab) => {
   const url = changeInfo.url || (changeInfo.status === 'complete' ? tab?.url : '')
   if (!url || !isApplySuccessUrl(url)) return
+  // 用户停机后，打开 / 导航网页不得成为自动化复活的触发器。
+  if (await readUserStopped()) return
   void recordApplySuccessFromUrl(url).catch((err) => {
     logError(MOD, 'applySuccessWatcher', err, 'Failed to record apply-success page')
   })
@@ -214,6 +216,9 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 
   if (alarm.name === 'apply-tick') {
+    // 停机后即便残留 alarm 还响，也在这里先拆掉调度根并直接返回；
+    // runCampaignTick 里还有同一道总闸做双保险。
+    if (await haltAutomationIfUserStopped()) return
     log(MOD, 'alarm', 'Running campaign tick...')
     await campaignService.tick()
   }
@@ -221,6 +226,8 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   if (alarm.name === MUST_ACHIEVE_WATCHDOG_ALARM) {
     // 只要目标没达成，就把被挂起 / 调度丢失的流水线拉回来；达成后完全不干预。
     // 这条路径不依赖 apply-tick，因此不存在「一次早退就永久静默」的问题。
+    // 用户停机时先清掉这个周期 alarm 本身，否则每分钟都会被唤醒一次。
+    if (await haltAutomationIfUserStopped()) return
     await ensureMustAchieveAlive()
   }
 

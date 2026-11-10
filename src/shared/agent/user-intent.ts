@@ -53,6 +53,67 @@ export async function readUserDisabledPlatforms(): Promise<PlatformId[]> {
   }
 }
 
+/**
+ * 停机总闸的**纯决策**：读到当前快照后，决定要拆掉哪些「自动化复活根」。
+ *
+ * 单独抽出来是为了能实跑验证，而不是只靠读源码断言：
+ * 只要 `userStopped === true`，无论 campaign 是否残留 running、有没有 alarm / 定时器，
+ * 本轮都必须 halt，并把仍然存在的调度根逐个拆掉。
+ */
+export interface AutomationHaltSnapshot {
+  userStopped: boolean
+  campaignRunning: boolean
+  hasTickAlarm: boolean
+  hasWatchdogAlarm: boolean
+  hasTimer: boolean
+}
+
+export interface AutomationHaltPlan {
+  halt: boolean
+  clearTimer: boolean
+  clearTickAlarm: boolean
+  clearWatchdogAlarm: boolean
+  abortCampaign: boolean
+}
+
+export function planAutomationHalt(s: AutomationHaltSnapshot): AutomationHaltPlan {
+  if (!s.userStopped) {
+    return {
+      halt: false,
+      clearTimer: false,
+      clearTickAlarm: false,
+      clearWatchdogAlarm: false,
+      abortCampaign: false,
+    }
+  }
+  return {
+    halt: true,
+    clearTimer: s.hasTimer,
+    clearTickAlarm: s.hasTickAlarm,
+    clearWatchdogAlarm: s.hasWatchdogAlarm,
+    abortCampaign: s.campaignRunning,
+  }
+}
+
+/**
+ * 会把 AIbot 从停止态拉起来的「启动类」外部工具。
+ *
+ * 外部 AI 桥接（offscreen 长轮询 / MCP / OpenClaw）在用户停机后仍可能被远端指令
+ * 唤醒，这些工具最终都会调 campaignService.start/resume 并 `setUserStopped(false)`
+ * 主动清锁。停机意图必须由用户本人在扩展里点「开始投递」才能解除。
+ * 智能中控对话台（用户本人在界面下指令）不走这道闸。
+ */
+export const AUTOMATION_START_TOOLS = [
+  'start_campaign',
+  'resume_campaign',
+  'trigger_auto_collect',
+  'clear_pending_tasks',
+] as const
+
+export function isAutomationStartTool(toolName: string): boolean {
+  return (AUTOMATION_START_TOOLS as readonly string[]).includes(String(toolName || '').trim())
+}
+
 /** 用户手动关平台 → 记入保护名单；手动开回来 → 移出保护名单 */
 export async function setUserDisabledPlatform(
   platform: PlatformId,

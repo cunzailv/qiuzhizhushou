@@ -23,6 +23,7 @@ import { listErrors, getErrorCount, clearErrors } from '../shared/db/error-store
 import { getDeveloperFixSuggestions, listSelfHealingEvents } from '../shared/db/diagnostics-store'
 import { getSavedPlatformQuotas, savePlatformQuotas, normalizePlatformQuotas, PLATFORM_IDS } from '../shared/agent/quota'
 import { getCampaign } from '../shared/agent/queue-store'
+import { readUserStopped, isAutomationStartTool } from '../shared/agent/user-intent'
 import { checkAllPlatformsAuth } from '../shared/platform/auth-checker'
 import { generateDailyButlerReport } from '../shared/agent/butler/daily-report-generator'
 import { dispatchButlerChatMessage } from '../shared/agent/butler/chat-to-action'
@@ -260,6 +261,16 @@ export async function handleExternalAiRpc(request: RpcRequest, deps: RpcDeps): P
   const config = await getExternalAiConfig()
   const gate = gateTool(tool, config, args)
   if (!gate.allowed) return { ok: false, error: gate.reason || '操作被拒绝' }
+
+  // 用户显式关闭 AIbot 后，外部 AI / offscreen 长轮询里排队或迟到的启动类指令
+  // 不许把 bot 拉起来：这些工具最终会调 campaignService.start/resume 并清掉停机锁。
+  // 停机意图只能由用户本人在扩展里点「开始投递」解除（对话台是用户本人，不走这道闸）。
+  if (isAutomationStartTool(tool.name) && (await readUserStopped())) {
+    return {
+      ok: false,
+      error: 'AIbot 已被用户关闭：外部指令不能自动启动投递。请先在扩展里点「开始投递」',
+    }
+  }
 
   try {
     const handler = buildHandlers(deps)[tool.name]

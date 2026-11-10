@@ -73,6 +73,7 @@ import {
 } from '../shared/agent/stack-guard'
 import { getBlacklist } from '../shared/db/blacklist-store'
 import { getRuntimeState, reportBatchProgress } from '../shared/runtime-state'
+import { readUserStopped } from '../shared/agent/user-intent'
 import { loadSharedApplyFilters } from '../shared/agent/filter-config'
 
 const MOD = 'ContentScript'
@@ -316,11 +317,20 @@ async function init(): Promise<void> {
     // Apply the user's configured one-click defaults before showing the panel.
     await loadApplyDefaultsFromSettings()
     const storedState = await getAssistantState()
+    const stoppedByUser = await readUserStopped()
     assistantState = normalizeInitialPanelState(storedState)
-    if (assistantState.panelState === 'expanded' && storedState.panelState !== 'expanded') {
+    if (stoppedByUser && assistantState.panelState !== 'expanded') {
+      // 用户已关闭 AIbot：打开网页不把 bubble / floating 归一成 expanded，
+      // 也不写回全局状态。旧版只保护了 closed，bubble（点 × 收起）在新页面
+      // 会被归一展开并写回，看起来就是「插件自己打开了」。
+      assistantState = { ...assistantState, panelState: 'closed' }
+    } else if (!stoppedByUser && assistantState.panelState === 'expanded' && storedState.panelState !== 'expanded') {
       // 上次「关闭 / 收起浮球」不应让本次打开页面继续隐藏；同步写回，配置页也会跟着恢复
       await patchAssistantState({ panelState: 'expanded' }).catch(() => {})
     }
+    // 停机且没有被用户主动展开时不重建浮窗 / 浮球，也不启动 HR 消息助手。
+    // 重新打开的入口仍然是用户点扩展图标（TOGGLE_ASSISTANT_PANEL 会按需创建）。
+    const keepPanelHidden = stoppedByUser && assistantState.panelState === 'closed'
 
     if (defaultResume) {
       log(MOD, 'init', `Resume loaded: ${defaultResume.name}`)
@@ -328,21 +338,24 @@ async function init(): Promise<void> {
       logWarn(MOD, 'init', 'NO resume found. User needs to upload in popup first.')
     }
 
-    panelHost = createFloatingPanel()
+    if (!keepPanelHidden) panelHost = createFloatingPanel()
     subscribeAssistantState(syncFromAssistantState)
     syncFromAssistantState(assistantState)
-    const initPageType = adapter.detectPageType()
-    updatePanelContent(panelHost, {
-      mode: currentMode,
-      status: 'idle',
-      filters: currentFilters, resumeMode: liepinResumeMode,
-      pageType: initPageType,
-      isChatPage: initPageType === 'chat',
-    })
-    log(MOD, 'init', 'Floating panel created')
-
-    if (initPageType === 'chat') {
-      startChatCopilotObserver()
+    if (panelHost) {
+      const initPageType = adapter.detectPageType()
+      updatePanelContent(panelHost, {
+        mode: currentMode,
+        status: 'idle',
+        filters: currentFilters, resumeMode: liepinResumeMode,
+        pageType: initPageType,
+        isChatPage: initPageType === 'chat',
+      })
+      log(MOD, 'init', 'Floating panel created')
+      if (initPageType === 'chat') {
+        startChatCopilotObserver()
+      }
+    } else {
+      log(MOD, 'init', 'AIbot 已被用户关闭：本次打开网页不重建浮窗、不自动展开、不启动 HR 助手')
     }
   } else {
     log(MOD, 'init', `Skipping — page type "${pageType}" not supported`)
@@ -403,6 +416,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'EXECUTE_CAMPAIGN_TASK') {
     const task = message.payload?.task
     ;(async () => {
+      // 执行层最后一道停机闸：不依赖后台是否读到意图锁。
+      // 旧版这里先 createFloatingPanel() 才判 closed，任务一派发浮窗就自己冒出来。
+      if (await readUserStopped()) {
+        sendResponse({
+          taskId: task?.id,
+          status: 'skipped',
+          failReason: 'AIbot 已关闭（用户显式停机，执行层拦截）',
+        })
+        return
+      }
+      if (assistantState.panelState === 'closed') {
+        sendResponse({ taskId: task?.id, status: 'failed', failReason: 'AIbot 已关闭' })
+        return
+      }
       // 执行层最后一道岗位名称硬闸门：即使后台认领 / 其它入口漏了方向校验，
       // 也绝不允许真的把不符岗位投出去。放在最前面，连浮窗都不用重建。
       // 状态必须是 skipped 且 failReason 带 CAREER_GATE_BLOCK_MARK 前缀：
@@ -444,10 +471,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (!panelHost?.isConnected) panelHost = createFloatingPanel()
       // 自愈清理可能隐藏浮窗，每个任务开始时按统一状态恢复形态
       setPanelState(panelHost!, assistantState.panelState)
-      if (assistantState.panelState === 'closed') {
-        sendResponse({ taskId: task?.id, status: 'failed', failReason: 'AIbot 已关闭' })
-        return
-      }
       // 互斥二次校验：概览半自动正在跑时，绝不执行全自动投递任务（防抢同一页面 DOM）
       const rt = await getRuntimeState().catch(() => null)
       if (rt?.mode === 'manual') {
@@ -523,6 +546,37 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     }
 
     ;(async () => {
+      // 采集层同样不依赖上游：用户停机后，打开网页不再重建浮窗、不再扫描入队。
+      // 返回一个结构完整的「空结果」，避免后台把它当成通信失败去重试三轮。
+      if ((await readUserStopped()) || assistantState.panelState === 'closed') {
+        sendResponse({
+          success: true,
+          userStopped: true,
+          collected: 0,
+          added: 0,
+          tasksProduced: 0,
+          duplicatesAtAppend: 0,
+          filteredOther: 0,
+          filteredByCareer: 0,
+          filteredByCareerGate: 0,
+          filteredByTime: 0,
+          filteredByBlacklist: 0,
+          filteredByRelevance: 0,
+          filteredByStack: 0,
+          careerGate: describeCareerGate([]),
+          targetStackLabels: [],
+          pageCardTotal: 0,
+          excludedOnPage: 0,
+          truncatedByCap: false,
+          mustAchieve,
+          keywordHits: 0,
+          relevantHits: -1,
+          relevanceSource: 'local',
+          relevanceConfidence: 1,
+          relevanceReason: 'AIbot 已被用户关闭',
+        })
+        return
+      }
       if (!adapter) adapter = await getActivePlatform()
 
       // 等待页面职位卡片渲染（最多等待 8 秒）
