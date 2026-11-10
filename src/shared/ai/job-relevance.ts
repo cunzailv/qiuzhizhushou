@@ -18,6 +18,7 @@ import { isJobMatchingCareer, isUnrelatedCareer } from '../agent/job-filter'
 import {
   isJobTitleAllowed,
   isCareerGateActive,
+  matchesCareerFamily,
 } from '../agent/career-gate'
 import {
   isCrossStackJob,
@@ -134,13 +135,20 @@ export function computeLocalRelevance(job: RelevanceJob, input: JobRelevanceInpu
   // 字符串兜底：必须同时具备技术岗语义，挡住「PHP技术支持」
   if (dirs.some((d) => d.length >= 2 && title.includes(d)) && DEV_ROLE_RE.test(title)) return true
 
-  // 岗位名称硬闸门已经确认「这就是用户填写方向里的技术岗」时，
-  // 不再让上面偏保守的字符串 / 族谱启发式把它误杀。
-  // 典型例子：方向「php 后台 AI 全栈开发」搜到「高级软件工程师」——
-  // 它是正经开发岗，只是没写一个字面命中的词。语义闸门常开后如果这里直接
-  // return false，必达模式会被自己砍掉供给，与目标必达相冲突。
-  // 不对口岗位（产品经理 / 销售）在函数开头就已被硬闸门否决，不会走到这里。
-  return isCareerGateActive(dirs)
+  // 最后再向**同一个方向族谱真源**核对一次：硬闸门已经放行、上面偏保守的
+  // 字面启发式却没认出来的同义岗位（例如方向「后台」搜到「Laravel 开发」），
+  // 这里补放行，避免改严后把必达模式的对口供给一起砍掉。
+  if (matchesCareerFamily(job.title || '', dirs)) return true
+
+  // 没有任何一条同义 / 栈命中规则能证明它属于用户填的方向 → 判为不相关。
+  //
+  // 这里曾经写成 `return isCareerGateActive(dirs)`（只要填了方向就放行），
+  // 本意是给必达模式保留供给，实际后果是**把整条语义闸门架空**：
+  // 硬闸门放行任何「软件开发岗」，语义闸门又不再否决，
+  // 「MES系统开发工程师（含WMS模块）」这类通用业务系统岗在精投 / 海投里
+  // 全部畅通无阻，用户看到的就是「精投也变乱投」。
+  // 方向正确性由 career-gate 一处裁定，语义层不再开后门。
+  return false
 }
 
 function makeResult(

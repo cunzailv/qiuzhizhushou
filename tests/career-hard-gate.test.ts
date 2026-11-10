@@ -26,6 +26,7 @@ import {
 } from '../src/shared/agent/job-filter'
 import {
   hasSoftwareDirection,
+  matchesCareerFamily,
   NON_SOFTWARE_DOMAIN_RE,
   SOFTWARE_DEV_ROLE_RE,
 } from '../src/shared/agent/career-gate'
@@ -70,9 +71,10 @@ describe('岗位名称硬闸门：用户填了 php / 后台 / AI / 全栈开发'
       'AI算法工程师',
       '高级PHP后台开发工程师',
       'PHP开发工程师（销售系统方向）',
-      '电商销售系统开发工程师',
       '兼职Java后端开发工程师',
-      '技术总监',
+      '医疗软件后端开发工程师',
+      // 方向只写「后台」时，只写语言栈、不写「后端」二字的岗位仍算同族
+      'Laravel开发工程师',
     ]
     for (const title of allowed) {
       expect(isJobTitleAllowed(title, USER_DIRECTIONS).allowed, title).toBe(true)
@@ -119,6 +121,47 @@ describe('岗位名称硬闸门：用户填了 php / 后台 / AI / 全栈开发'
     expect(leaked).toEqual([])
   })
 
+  it('用户第三轮反馈：MES / WMS 等通用业务系统开发岗不算「php 后台 AI 全栈开发」', () => {
+    const denied = [
+      'MES系统开发工程师（含WMS模块）',
+      'MES系统开发工程师',
+      'WMS开发工程师',
+      'ERP系统开发工程师',
+      'OA系统开发工程师',
+      'CRM系统开发',
+      '系统开发工程师',
+      '软件工程师',
+      '高级软件工程师',
+      '研发工程师',
+      '业务系统开发',
+      '嵌入式软件工程师',
+      '电商销售系统开发工程师',
+      // 技术管理岗白名单也不能绕过方向族谱（用户没填架构 / 技术总监）
+      '技术总监',
+      '架构师',
+      '技术经理',
+      // 含 ai 字母但不是 AI 方向的岗位
+      'Email系统开发工程师',
+    ]
+    const leaked = denied.filter((title) => isJobTitleAllowed(title, USER_DIRECTIONS).allowed)
+    expect(leaked).toEqual([])
+  })
+
+  it('用户明确填了架构 / 技术总监时，同方向技术管理岗照常放行', () => {
+    expect(isJobTitleAllowed('架构师', ['架构师']).allowed).toBe(true)
+    expect(isJobTitleAllowed('技术总监', ['技术总监']).allowed).toBe(true)
+    expect(isJobTitleAllowed('技术负责人', ['技术经理', '架构师']).allowed).toBe(true)
+  })
+
+  it('方向族谱匹配：同义不同字 / 语言栈命中才算同方向', () => {
+    expect(matchesCareerFamily('PHP开发工程师', ['后台开发'])).toBe(true)
+    expect(matchesCareerFamily('后端开发工程师', ['后台'])).toBe(true)
+    expect(matchesCareerFamily('AI算法工程师', ['AI'])).toBe(true)
+    expect(matchesCareerFamily('全栈工程师', ['全栈开发'])).toBe(true)
+    expect(matchesCareerFamily('MES系统开发工程师', USER_DIRECTIONS)).toBe(false)
+    expect(matchesCareerFamily('高级软件工程师', USER_DIRECTIONS)).toBe(false)
+  })
+
   it('否决原因带上用户填的方向，便于日志里核对到底按什么在筛', () => {
     const verdict = isJobTitleAllowed('AI产品经理', USER_DIRECTIONS)
     expect(verdict.allowed).toBe(false)
@@ -143,9 +186,11 @@ describe('岗位名称硬闸门：用户填了 php / 后台 / AI / 全栈开发'
     expect(isJobTitleAllowed('产品经理', ['研发助理']).allowed).toBe(false)
   })
 
-  it('「前台开发工程师」是前端开发岗，不被行政职能词误杀', () => {
-    expect(isJobTitleAllowed('前台开发工程师', ['后台开发']).allowed).toBe(true)
+  it('用户填「前台开发」时，前端开发岗不被行政职能词误杀', () => {
+    expect(isJobTitleAllowed('前台开发工程师', ['前台开发']).allowed).toBe(true)
     expect(isJobTitleAllowed('行政前台', USER_DIRECTIONS).allowed).toBe(false)
+    // 用户填「后台开发」时前端岗本就不该投
+    expect(isJobTitleAllowed('前台开发工程师', ['后台开发']).allowed).toBe(false)
   })
 })
 
@@ -189,14 +234,15 @@ describe('入队评估：方向不符是硬拦截，不再标 soft 被补回队�
     expect(res.pass).toBe(true)
   })
 
-  it('历史调用点仍保留软过滤语义（不破坏既有 API）', () => {
+  it('填写了岗位名称时，方向不符一律硬拦截（不再保留 soft 补足语义）', () => {
     const res = evaluateJobCandidate(job('Java开发工程师'), {
       filters: null,
       targetCareers: ['PHP开发'],
       blacklist: new Set(),
     })
     expect(res.pass).toBe(false)
-    expect(res.soft).toBe(true)
+    expect(res.reason).toContain('岗位名称硬闸门')
+    expect(res.soft).not.toBe(true)
   })
 })
 
@@ -213,9 +259,9 @@ describe('软件方向识别与领域闸门', () => {
     expect(isJobTitleAllowed('PHP开发工程师', ['电子研发']).allowed).toBe(false)
   })
 
-  it('「嵌入式软件工程师」是软件岗不被领域词误杀，「医疗软件后端开发」也不被行业名误杀', () => {
-    expect(isJobTitleAllowed('嵌入式软件工程师', USER_DIRECTIONS).allowed).toBe(true)
+  it('行业修饰词不误杀同方向岗位，但不对口的嵌入式软件岗仍然拦下', () => {
     expect(isJobTitleAllowed('医疗软件后端开发工程师', USER_DIRECTIONS).allowed).toBe(true)
+    expect(isJobTitleAllowed('嵌入式软件工程师', USER_DIRECTIONS).allowed).toBe(false)
   })
 
   it('领域常量与软件开发语义常量各自边界清晰', () => {

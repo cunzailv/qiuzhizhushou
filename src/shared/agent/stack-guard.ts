@@ -31,7 +31,10 @@ const STACK_PATTERNS: Array<{ id: TechStack; re: RegExp }> = [
   { id: 'rust', re: /\brust\b/i },
   { id: 'frontend', re: /前端|frontend|\bvue\b|\breact\b|angular|webpack|typescript|\bh5\b|web\s?前端|小程序开发/i },
   { id: 'mobile', re: /android|\bios\b|\bswift\b|flutter|移动端|安卓|客户端开发/i },
-  { id: 'data', re: /算法工程师|机器学习|数据开发|大数据|数据仓库|\betl\b|数据挖掘/i },
+  // AI 方向也是用户会明确填写的求职方向（例如「php 后台 AI 全栈开发」）。
+  // 以前它不在任何栈里，导致「AI算法工程师」被判成跨栈，用户自己填的方向反而投不了。
+  // ai 两侧不能紧挨英文字母，避免 email / maintenance 之类被误判成 AI 栈。
+  { id: 'data', re: /算法工程师|机器学习|数据开发|大数据|数据仓库|\betl\b|数据挖掘|人工智能|智能体|大模型|aigc|\bllm\b|(?<![a-z])ai(?![a-z])/i },
 ]
 
 export const STACK_LABELS: Record<TechStack, string> = {

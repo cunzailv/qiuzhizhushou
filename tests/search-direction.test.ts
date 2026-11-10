@@ -124,6 +124,15 @@ describe('技术栈硬约束：PHP 方向不投 Java / 前端', () => {
     expect(describeTargetStacks(['php'])).toBe('PHP')
   })
 
+  it('用户明确填了 AI 时，把数据/算法栈一起纳入目标，别把自己填的方向投不了', () => {
+    const stacks = extractTargetStacks({ directions: ['php 后台 AI 全栈开发'] })
+    expect(stacks).toContain('php')
+    expect(stacks).toContain('data')
+    expect(isCrossStackJob('AI算法工程师', stacks)).toBe(false)
+    expect(isCrossStackJob('Java开发工程师', stacks)).toBe(true)
+    expect(isCrossStackJob('前端开发工程师', stacks)).toBe(true)
+  })
+
   it('技能里的 Vue / MySQL 不会把前端算成求职方向', () => {
     expect(extractTargetStacks({
       directions: [''],

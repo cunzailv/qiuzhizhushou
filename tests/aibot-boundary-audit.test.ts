@@ -135,13 +135,14 @@ describe('职业方向匹配 isJobMatchingCareer', () => {
     expect(res.pass).toBe(false)
   })
 
-  it('方向不匹配标记为软过滤，交由匹配分把关而不是直接丢弃', () => {
+  it('岗位名称硬闸门生效时，方向不匹配是硬拦截，不再标 soft 补回队列', () => {
     const res = evaluateJobCandidate(
       { id: '1', title: 'Java开发工程师', companyName: 'C', tags: [], jobUrl: 'u' } as any,
       { filters: null, targetCareers: ['PHP开发'], blacklist: new Set() },
     )
     expect(res.pass).toBe(false)
-    expect(res.soft).toBe(true)
+    expect(res.reason).toContain('岗位名称硬闸门')
+    expect(res.soft).not.toBe(true)
   })
 
   it('无关行业与黑名单属于硬过滤，不得标记为软过滤', () => {

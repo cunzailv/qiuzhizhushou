@@ -92,8 +92,24 @@ describe('本地语义相关性 computeLocalRelevance', () => {
     expect(computeLocalRelevance(job('a2', 'AI销售顾问'), aiInput)).toBe(false)
     expect(computeLocalRelevance(job('a3', 'AI算法工程师'), aiInput)).toBe(true)
     expect(computeLocalRelevance(job('a4', 'PHP开发工程师'), aiInput)).toBe(true)
-    // 硬闸门确认是同方向技术岗后，别让字面启发式砍掉必达模式的供给
-    expect(computeLocalRelevance(job('a5', '高级软件工程师'), aiInput)).toBe(true)
+    expect(computeLocalRelevance(job('a4b', 'Laravel开发工程师'), aiInput)).toBe(true)
+    expect(computeLocalRelevance(job('a4c', '后端开发工程师'), aiInput)).toBe(true)
+    // 第三轮：通用业务系统开发岗 / 泛软件岗不再是「填了方向就放行」
+    expect(computeLocalRelevance(job('a5', '高级软件工程师'), aiInput)).toBe(false)
+    expect(computeLocalRelevance(job('a6', 'MES系统开发工程师（含WMS模块）'), aiInput)).toBe(false)
+    expect(computeLocalRelevance(job('a7', 'WMS开发工程师'), aiInput)).toBe(false)
+    expect(computeLocalRelevance(job('a8', 'ERP系统开发工程师'), aiInput)).toBe(false)
+  })
+
+  it('用户第三轮反馈：「精投也变乱投」——语义闸门不得再给方向开后门', () => {
+    const input: JobRelevanceInput = {
+      keyword: 'php',
+      targetCareers: ['php', '后台', 'AI', '全栈开发'],
+      jobs: [],
+    }
+    for (const title of ['系统开发工程师', '研发工程师', '软件工程师', '业务系统开发']) {
+      expect(computeLocalRelevance(job(`c-${title}`, title), input), title).toBe(false)
+    }
   })
 
   it('用户第二轮反馈的「项目主管 / 电子研发」在本地语义层同样判为不相关', () => {

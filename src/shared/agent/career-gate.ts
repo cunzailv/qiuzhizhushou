@@ -77,6 +77,81 @@ export function hasSoftwareDirection(targetCareers: readonly string[] | null | u
   return (targetCareers || []).some((c) => SOFTWARE_DIRECTION_RE.test(cleanKey(c)))
 }
 
+/**
+ * 岗位标题是否命中用户填写的**方向族谱**。
+ *
+ * 这是「按岗位名称投」的核心：只证明「这是个软件开发岗」不够，
+ * 「MES系统开发工程师（含WMS模块）」也是软件开发岗，但用户填的是
+ * php / 后台 / AI / 全栈开发，它一个都没沾，就不该进队列。
+ *
+ * 族谱覆盖同义不同字：方向「后台」↔ 岗位「后端开发工程师」、
+ * 方向「php」↔ 岗位「PHP开发工程师」、方向「AI」↔ 岗位「AI算法工程师」。
+ * 这样既严格又不会把「搜后台却投不了 PHP 开发」的老问题带回来。
+ */
+export function matchesCareerFamily(
+  jobTitle: string,
+  targetCareers: readonly string[] | null | undefined,
+): boolean {
+  const main = cleanMainTitle(jobTitle)
+  const dirs = (targetCareers || []).map(cleanKey).filter(Boolean)
+  if (!main || dirs.length === 0) return false
+  const dirText = dirs.join('')
+
+  // 1. 方向词直接命中（或被方向词完整包含）。
+  //    短英文方向词必须落在单词边界上：方向「ai」不能因为「email / maintenance」里
+  //    有 ai 两个字母就把非 AI 岗位判成同族，方向「go」同理不能被 golang 误命中。
+  const LATIN_TOKEN_RE = /^[a-z0-9.+#/]+$/i
+  for (const d of dirs) {
+    if (d.length < 2 || !(main.includes(d) || d.includes(main))) continue
+    if (LATIN_TOKEN_RE.test(d)) {
+      const escaped = d.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      if (!new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, 'i').test(main)) continue
+    }
+    return true
+  }
+
+  // 2. 后端 / 后台 / 服务端族谱
+  if (/(后端|后台|服务端|backend|server)/.test(dirText) &&
+      /(后端|后台|服务端|backend|server)/.test(main)) return true
+
+  // 3. 前端族谱
+  if (/(前端|frontend)/.test(dirText) && /(前端|frontend|web开发)/.test(main)) return true
+
+  // 4. 全栈族谱
+  if (/(全栈|fullstack|前后端)/.test(dirText) && /(全栈|fullstack|前后端)/.test(main)) return true
+
+  // 5. AI / 智能体族谱。ai 两侧不能紧挨英文字母，否则「email / maintenance
+  //    开发工程师」会因为含 ai 被当成 AI 方向岗位（又一种乱投）。
+  const AI_TOKEN_RE = /(?<![a-z])ai(?![a-z])|人工智能|智能体|agent|大模型|llm|aigc/i
+  if (AI_TOKEN_RE.test(dirText) && new RegExp(`${AI_TOKEN_RE.source}|算法`, 'i').test(main)) return true
+
+  // 5.1 历史假阴性：方向只写「后台 / 后端 / 全栈」时，
+  //     「PHP开发工程师」「Java后端」这类只写语言栈、不写「后端」二字的岗位
+  //     也必须算同族，否则会退回「搜后台却一个岗位都投不了」的老问题。
+  //     跨栈（方向锁定 PHP 却投 Java）由 stack-guard 独立硬拦，这里不管。
+  if (/(后端|后台|服务端|backend|server|全栈|fullstack)/.test(dirText) &&
+      /(php|laravel|thinkphp|swoole|java|spring|python|django|flask|golang|go语言|node|nestjs|\.net|c#|ruby|rust)/.test(main)) {
+    return true
+  }
+
+  // 6. 明确的语言 / 框架栈
+  const stacks = [
+    'php', 'laravel', 'thinkphp', 'swoole', 'java', 'spring', 'python',
+    'django', 'flask', 'golang', 'go语言', 'node', 'vue', 'react',
+    '.net', 'c#', 'rust', 'mysql', 'redis',
+  ]
+  for (const s of stacks) {
+    if (dirText.includes(s) && main.includes(s)) return true
+  }
+
+  // 7. 架构 / 技术管理族谱（白名单岗位本身已在 4.2 放行）
+  const LEADERSHIP_FAMILY_RE =
+    /(架构|技术经理|技术总监|技术主管|技术负责人|技术专家|cto|研发经理|研发架构|首席架构)/i
+  if (LEADERSHIP_FAMILY_RE.test(dirText) && LEADERSHIP_FAMILY_RE.test(main)) return true
+
+  return false
+}
+
 /** 泛修饰词：只是技术/级别/领域修饰，单独出现不能代表一个岗位方向 */
 const GENERIC_MODIFIER_RE =
   /^(ai|人工智能|智能体|agent|大模型|llm|aigc|数据|软件|互联网|信息化|数字化|云原生|高级|资深|专家|急聘|招聘|全职|远程|实习|应届)$/i
@@ -122,8 +197,9 @@ export function describeCareerGate(targetCareers: readonly string[] = []): strin
  *     若标题同时有强开发语义（「XX系统开发工程师」），视为开发岗继续判断；
  *  3. 用户方向本身是非开发职能（例如他就要找「产品经理」）→ 按职能词严格匹配；
  *  4. 软件方向 → 先否决非软件领域职能（电子 / 硬件 / 机械 / 电气）与纯管理岗，
- *     再要求标题具备软件开发语义；技术管理岗（技术总监 / 架构师）走白名单。
- *     同义不同字（「后台开发」搜到「PHP开发工程师」）不再被族谱白名单误杀；
+ *     再要求「软件开发语义 + 命中用户方向族谱」两个条件同时成立；
+ *     技术管理岗（技术总监 / 架构师）走白名单。
+ *     同义不同字由 matchesCareerFamily 承担（「后台」↔「后端开发工程师」），
  *     跨技术栈由 stack-guard 独立硬拦，这里不重复实现。
  *  5. 非软件方向（例如用户填「电子研发」）→ 沿用宽松技术岗判定，不越权替他改方向。
  */
@@ -177,8 +253,17 @@ export function isJobTitleAllowed(
       }
     }
 
-    // 4.2 同方向的技术管理岗（技术总监 / 架构师）照常放行
-    if (TECH_LEADERSHIP_RE.test(main)) return { allowed: true }
+    // 4.2 技术管理岗（技术总监 / 架构师）只豁免下面的「纯管理岗否决」，
+    //     仍必须命中方向族谱。旧版在这里直接 return allowed，
+    //     等于给「架构师 / 技术总监」开了一道绕过岗位名称的后门。
+    if (TECH_LEADERSHIP_RE.test(main)) {
+      return matchesCareerFamily(title, careers)
+        ? { allowed: true }
+        : {
+            allowed: false,
+            reason: `岗位「${title}」不在你填写的方向族谱内（${careers.join(' / ')}）`,
+          }
+    }
 
     // 4.3 纯管理岗：「项目主管」「研发主管」「部门经理」不是开发岗
     const mgmtHit = main.match(MANAGEMENT_ROLE_RE)?.[0] || ''
@@ -189,12 +274,16 @@ export function isJobTitleAllowed(
       }
     }
 
-    // 4.4 正向准入：必须是软件 / 互联网开发岗，泛词「AI」「研发」「工程师」不算
-    if (SOFTWARE_DEV_ROLE_RE.test(main)) return { allowed: true }
+    // 4.4 正向准入：既是软件开发岗，**又必须命中用户填的方向族谱**。
+    //     只满足「是个开发岗」不够 —— MES / WMS / ERP 业务系统开发、通用软件工程师
+    //     都是开发岗，但和「php 后台 AI 全栈开发」不是一个方向，精投 / 海投都不投。
+    if (SOFTWARE_DEV_ROLE_RE.test(main) && matchesCareerFamily(title, careers)) {
+      return { allowed: true }
+    }
 
     return {
       allowed: false,
-      reason: `岗位「${title}」不是软件开发岗，与填写的方向（${careers.join(' / ')}）不符`,
+      reason: `岗位「${title}」不在你填写的方向族谱内（${careers.join(' / ')}）`,
     }
   }
 
