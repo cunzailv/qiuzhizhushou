@@ -204,11 +204,17 @@ describe('关闭竞态防护', () => {
   })
 })
 
-describe('关闭状态不跨页面持久化', () => {
-  it('读取到 closed 时恢复为展开，其它形态保持不变', () => {
+describe('关闭状态是持久意图，不跨页面被自动展开', () => {
+  it('用户主动关闭后，刷新 / 新页面 / 置顶常驻都不许重新展开', () => {
     const closed = { ...DEFAULT_ASSISTANT_STATE, panelState: 'closed' as const }
-    expect(normalizeInitialPanelState(closed).panelState).toBe('expanded')
+    expect(normalizeInitialPanelState(closed).panelState).toBe('closed')
+    expect(normalizeInitialPanelState({ ...closed, pinned: true }).panelState).toBe('closed')
+  })
+
+  it('其余形态仍按原规则归一：浮球恢复展开、collapsed 保留兼容', () => {
     expect(normalizeInitialPanelState(DEFAULT_ASSISTANT_STATE).panelState).toBe('expanded')
+    const bubble = { ...DEFAULT_ASSISTANT_STATE, panelState: 'bubble' as const }
+    expect(normalizeInitialPanelState(bubble).panelState).toBe('expanded')
     const collapsed = { ...DEFAULT_ASSISTANT_STATE, panelState: 'collapsed' as const }
     expect(normalizeInitialPanelState(collapsed).panelState).toBe('collapsed')
   })

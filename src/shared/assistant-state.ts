@@ -96,18 +96,26 @@ export function isAssistantTaskCancelled(
 }
 
 /**
- * 「收起浮球 / 关闭 AIbot」都是一次性运行时动作，不是跨页面的永久偏好：
- * - 置顶常驻：新页面直接展开侧栏
- * - 其余情况：残留的 closed / bubble 恢复为展开，避免刷新后助手一直不可见
- * - 历史版本可能残留 floating（已废弃的小浮窗），一并归一为展开
- * - collapsed 是旧版窄把手，保留兼容
+ * 页面初始化时归一面板形态。
+ *
+ * 现场问题「插件关闭了，有时候自动打开」的另一半根因在这里：旧版把 `closed`
+ * 当成「一次性运行时动作」，新页面 / 刷新一律归一为 `expanded`，还会
+ * `patchAssistantState` 写回全局状态 —— 于是用户刚关掉，打开任意招聘页又冒出来。
+ *
+ * 现在区分两种意图：
+ * - **closed = 用户主动关闭 AIbot**，是持久意图，刷新和换页面都不许擅自展开。
+ *   重新打开的唯一入口是用户点扩展图标（`resolvePanelPresence` 把 closed → expanded）。
+ * - bubble（收起为浮球）仍是一次性动作，新页面恢复展开。
+ * - 置顶常驻仍展开，但用户显式关掉时 closed 优先。
+ * - 历史版本残留的 floating（已废弃）归一为展开；collapsed 保留兼容。
  */
 export function normalizeInitialPanelState(
   state: AssistantControlState,
 ): AssistantControlState {
+  if (state.panelState === 'closed') return state
   if (state.pinned) return { ...state, panelState: 'expanded' }
   const legacyFloating = (state.panelState as string) === 'floating'
-  if (legacyFloating || state.panelState === 'closed' || state.panelState === 'bubble') {
+  if (legacyFloating || state.panelState === 'bubble') {
     return { ...state, panelState: 'expanded' }
   }
   return state

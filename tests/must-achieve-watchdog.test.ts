@@ -136,7 +136,9 @@ describe('目标必达看门狗：真实接线契约', () => {
     expect(service).toContain('periodInMinutes: MUST_ACHIEVE_WATCHDOG_PERIOD_MINUTES')
     expect(service).toContain('delayInMinutes: MUST_ACHIEVE_WATCHDOG_PERIOD_MINUTES')
     expect(bg).toContain('MUST_ACHIEVE_WATCHDOG_ALARM')
-    expect(bg).toContain('void ensureWatchdogAlarm()')
+    // 注册统一收敛到带用户意图闸的恢复入口，用户关闭 AIbot 时不许重建 watchdog
+    expect(bg).toContain('await ensureWatchdogAlarm()')
+    expect(bg).toContain('if (await readUserStopped()) return')
     expect(bg).toContain('await ensureMustAchieveAlive()')
   })
 
@@ -192,11 +194,12 @@ describe('目标必达看门狗：真实接线契约', () => {
     expect(service).toContain("await abortAgentCampaign('blocked')")
   })
 
-  it('人工暂停 / 终止会记录时间，让看门狗按宽限期自动恢复', () => {
+  it('人工暂停是宽限，关闭 AIbot 则是彻底停止（不再 15 分钟后自己复活）', () => {
     const service = read(SERVICE)
     expect(service).toContain('markPausedAt(Date.now())')
     expect(service).toContain('5 分钟后看门狗会自动恢复投递')
-    expect(service).toContain('15 分钟后看门狗会自动恢复投递')
+    expect(service).toContain('⏹ 已彻底停止：目标必达不会自动恢复投递')
+    expect(service).not.toContain('15 分钟后看门狗会自动恢复投递')
   })
 
   it('任务执行前回到「关键词 + 来源页码」列表页，避免找不到岗位卡片', () => {

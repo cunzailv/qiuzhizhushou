@@ -4,6 +4,10 @@
  * 设定目标后，系统不能再拿「配额不够 / 只开了一个平台 / 平台被标日限」当停机理有：
  * 这些全是插件自己能改的参数。这里只算**该改成什么**，实际写盘由后台服务负责，
  * 保证策略可单测、可复现，不夹杂 storage 副作用。
+ *
+ * 但「可控参数」有硬边界：**用户手动关闭的 bot / 平台不是可控参数**。
+ * 现场反馈「关了又自动打开」就是旧版把这些也一并接管了；现在 `userStopped`
+ * 与 `protectedPlatforms` 是最高优先级，任何必达规则都不得越过。
  */
 import type { PlatformId } from './quota'
 import type { ApplyFilters } from '../types/filters'
@@ -41,6 +45,8 @@ export interface MustAchievePlan {
   enablePlatforms: PlatformId[]
   /** 需要解除「日限耗尽」标记的平台 */
   revivePlatforms: PlatformId[]
+  /** 用户手动关闭、本轮明确跳过接管的平台 */
+  protectedPlatforms: PlatformId[]
   /** 规划后的已启用配额合计 */
   plannedTotalQuota: number
   /** 人类可读的接管说明，直接写进行为日志 */
@@ -52,9 +58,12 @@ export interface MustAchievePlan {
  *
  * 规则：
  *  - 目标之外留 25%（至少 10 份）余量，覆盖跳过 / 未确认 / 重复岗位；
- *  - 平台一律全开（用户仍可在面板手动关，但下一次规划会重新拉起，因为目标必须达成）；
+ *  - 除「用户手动关闭」的平台外一律全开（后者是硬约束，见 protectedPlatforms）；
  *  - 配额只升不降，平均分摊到所有平台，单平台不超过 500；
  *  - 已投数未达新上限的 exhausted 平台解除耗尽标记，继续参与调度。
+ *
+ * 旧注释写的是「用户仍可在面板手动关，但下一次规划会重新拉起」—— 这正是
+ * 现场「平台关闭了总是自动打开，一开启投递又自动打开」的根因，已改掉。
  */
 export function planMustAchieveQuotas(
   quotas: MustAchieveQuotaMap,
@@ -64,6 +73,8 @@ export function planMustAchieveQuotas(
     headroomRatio?: number
     /** 全平台日限冷却期内置 false：只重新规划配额，不立刻复活被限流的平台 */
     allowRevive?: boolean
+    /** 用户手动关闭的平台：不改配额、不开启、不解除日限，完全不碰 */
+    protectedPlatforms?: readonly PlatformId[]
   } = {},
 ): MustAchievePlan {
   const ids = Object.keys(quotas) as PlatformId[]
@@ -81,13 +92,22 @@ export function planMustAchieveQuotas(
   const nextQuotas: Partial<Record<PlatformId, number>> = {}
   const enablePlatforms: PlatformId[] = []
   const revivePlatforms: PlatformId[] = []
+  const protectedPlatforms: PlatformId[] = []
   const reasons: string[] = []
   let plannedTotalQuota = 0
+  const protectedSet = new Set<PlatformId>(opts.protectedPlatforms ?? [])
 
   for (const pid of ids) {
     const state = quotas[pid]
     if (!state) continue
     const current = Number.isFinite(state.quota) ? state.quota : 0
+    // 用户手动关闭 = 硬约束。连配额都不抬，否则下一轮「已启用平台」的合计
+    // 会被这个永远不参与投递的平台虚增，进度判断跟着失真。
+    if (protectedSet.has(pid)) {
+      protectedPlatforms.push(pid)
+      plannedTotalQuota += current
+      continue
+    }
     // 上限只约束「新规划出来的分摊值」，不能把用户已设的更高配额压小：
     // 必达模式是接管加码，不是覆盖用户配置。
     const next = Math.max(current, Math.min(maxPerPlatform, perPlatform))
@@ -113,6 +133,7 @@ export function planMustAchieveQuotas(
     quotas: nextQuotas,
     enablePlatforms,
     revivePlatforms,
+    protectedPlatforms,
     plannedTotalQuota,
     reasons,
   }
@@ -205,6 +226,8 @@ export const MUST_ACHIEVE_EXHAUSTED_RETRY_MS = 30_000
 export interface MustAchieveWatchdogInput {
   status: 'running' | 'paused' | 'done' | 'aborted'
   pausedReason?: 'captcha' | 'user' | 'rate' | 'blocked' | 'no_source'
+  /** 用户主动关闭了 AIbot：最高优先级，任何必达规则都不许复活 */
+  userStopped?: boolean
   /** 最近一次挂起时间戳；0 / 缺失代表历史脏数据，按「已挂起足够久」处理 */
   pausedAt: number
   mustAchieve: boolean
@@ -223,6 +246,7 @@ export type MustAchieveWatchdogAction =
  * 判断本轮看门狗该做什么。纯函数，不碰 storage / alarm，便于单测穷举状态组合。
  *
  * 安全边界：
+ *  - **用户主动关闭 AIbot → 一律 idle**，绝不与「目标必达」对抗；
  *  - 目标已达成 / 未启用必达 → 完全不干预，用户想停就停；
  *  - 账号受限 → 冷却 15 分钟（继续猛点会加重账号处罚），到点自动恢复；
  *  - 人工暂停 / 被误判 done → 宽限 5 分钟后自动回来，并明确留痕；
@@ -231,6 +255,9 @@ export type MustAchieveWatchdogAction =
 export function decideMustAchieveWatchdog(
   input: MustAchieveWatchdogInput,
 ): MustAchieveWatchdogAction {
+  // 旧版只认「暂停 / 挂起」，用户点了关闭也会被当成 15 分钟冷却的 aborted，
+  // 时间一到自动 resume → 后台重新下发任务 → 浮窗又冒出来。用户关了就是关了。
+  if (input.userStopped) return { kind: 'idle' }
   if (!input.mustAchieve || input.achieved) return { kind: 'idle' }
   if (input.status === 'running') return { kind: 'idle' }
 

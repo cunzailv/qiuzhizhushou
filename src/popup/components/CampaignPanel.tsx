@@ -498,16 +498,16 @@ export const CampaignPanel: React.FC<CampaignPanelProps> = ({ onNotify, onNaviga
     setEnabledPlatforms(updated)
     await setSetting('aibot_enabled_platforms', updated)
 
-    if (stats) {
-      try {
-        await chrome.runtime.sendMessage({
-          type: 'TOGGLE_PLATFORM',
-          payload: { platform, enabled: nextState },
-        })
-        await fetchStats()
-      } catch {
-        // 忽略
-      }
+    // 无条件通知后台：即使 campaign 还没创建（stats 为 null），也要把「用户手动关闭」
+    // 记进保护名单，否则必达模式接管时仍会把它自动打开。后台无 campaign 时会安全返回 null。
+    try {
+      await chrome.runtime.sendMessage({
+        type: 'TOGGLE_PLATFORM',
+        payload: { platform, enabled: nextState },
+      })
+      if (stats) await fetchStats()
+    } catch {
+      // 忽略
     }
   }
 

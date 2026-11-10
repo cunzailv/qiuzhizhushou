@@ -39,6 +39,13 @@ import {
   TASK_RETRY_COOLDOWN_MS,
 } from '../shared/agent/queue-store'
 import {
+  readUserStopped,
+  setUserStopped,
+  readUserDisabledPlatforms,
+  setUserDisabledPlatform,
+  syncUserDisabledPlatforms,
+} from '../shared/agent/user-intent'
+import {
   startCampaign as startAgentCampaign,
   pauseCampaign as pauseAgentCampaign,
   resumeCampaign as resumeAgentCampaign,
@@ -131,6 +138,8 @@ const consecutiveNotFoundMap: Partial<Record<PlatformId, number>> = {}
 /** 连续「点了按钮但平台没确认」的次数，用于提示用户检查登录态 / 风控 / 页面结构 */
 const consecutiveUnverifiedMap: Partial<Record<PlatformId, number>> = {}
 const UNVERIFIED_ALERT_THRESHOLD = 3
+/** 「已尊重手动关闭平台」提示的节流，避免每轮接管刷屏 */
+let lastProtectedPlatformsNoteAt = 0
 
 /**
  * 连续因“职业方向”过滤导致零新增的轮次。
@@ -552,8 +561,12 @@ async function applyMustAchieveTakeover(
     sendNotification('目标必达 · 已自动切海投', describeMustAchieveTakeover())
   }
 
+  // 用户手动关闭的平台是硬约束，不能因为「目标必达」又被自动打开。
+  // 意图单独存在 user-intent 里（quotas 会被接管反复覆盖），这里每轮重新读。
+  const protectedPlatforms = await readUserDisabledPlatforms()
   const plan = planMustAchieveQuotas(campaign.quotas, goal.targetJobs, {
     allowRevive: opts.allowRevive,
+    protectedPlatforms,
   })
   if (Object.keys(plan.quotas).length > 0) {
     await savePlatformQuotas(plan.quotas)
@@ -561,6 +574,16 @@ async function applyMustAchieveTakeover(
   }
   for (const pid of plan.enablePlatforms) {
     await togglePlatformEnabled(pid, true)
+  }
+  if (plan.protectedPlatforms.length > 0 && Date.now() - lastProtectedPlatformsNoteAt > 10 * 60_000) {
+    lastProtectedPlatformsNoteAt = Date.now()
+    const allClosed = plan.protectedPlatforms.length >= Object.keys(campaign.quotas).length
+    await appendCampaignLog(
+      allClosed
+        ? `⛔ 所有平台都是你手动关闭的（${plan.protectedPlatforms.join(' / ')}），目标必达不会替你打开。当前没有可投递平台，请手动开启至少一个，或点「关闭 AIbot」彻底停止`
+        : `🔒 已尊重你手动关闭的 ${plan.protectedPlatforms.length} 个平台（${plan.protectedPlatforms.join(' / ')}），目标必达不会再自动打开它们；需要参与投递请到平台开关手动开启`,
+      allClosed ? 'warn' : 'info',
+    )
   }
   // 配额没变但被标 exhausted 的平台，updateCampaignQuotas 会跳过，这里单独解除
   const quotaOnly = plan.revivePlatforms.filter((pid) => !(pid in plan.quotas))
@@ -630,6 +653,10 @@ export async function ensureMustAchieveAlive(known?: Campaign | null): Promise<b
   if (ensuringAlive) return false
   ensuringAlive = true
   try {
+    // 用户主动关闭 AIbot 后必须彻底静默：连周期 alarm 都不要再注册回来，
+    // 更不能 resume。旧版只清 apply-tick、故意留着 watchdog，于是 15 分钟后
+    // 流水线自动复活、content 侧重新 createFloatingPanel，浮窗就「自己打开了」。
+    if (await readUserStopped()) return false
     await ensureWatchdogAlarm()
     const campaign = known !== undefined ? known : await getCampaign()
     if (!campaign) return false
@@ -1998,7 +2025,15 @@ export const campaignService = {
     enabledPlatforms?: PlatformId[],
     windows?: TimeWindow[],
   ) => {
+    // 用户主动点「开始投递」= 明确解除上一次的关闭意图，看门狗重新生效。
+    await setUserStopped(false)
     const cmp = await startAgentCampaign(customQuotas, enabledPlatforms, windows)
+    // 启动时只勾选部分平台也是显式意图，其余平台必须一起进保护名单，
+    // 否则下面 applyMustAchieveTakeover('start') 会立刻把它们全开回来。
+    await syncUserDisabledPlatforms(
+      Object.keys(cmp.quotas) as PlatformId[],
+      enabledPlatforms,
+    )
     // 把「N 小时投满 M 份」写进本轮 campaign（参数不变则沿用原倒计时）
     const savedGoal = normalizeCapacityGoal(
       await getSetting<unknown>(CAPACITY_GOAL_KEY, DEFAULT_CAPACITY_GOAL),
@@ -2064,7 +2099,7 @@ export const campaignService = {
   },
   pause: async (reason: Campaign['pausedReason'] = 'user') => {
     // 必达目标未达成时，人工暂停只是「宽限」而非终止：记下时间让周期看门狗
-    // 5 分钟后自动拉回 running。想彻底停就在目标卡片里关掉「必达模式」。
+    // 5 分钟后自动拉回 running。暂停 ≠ 关闭，想彻底停请点「关闭 AIbot」。
     const before = await getCampaign()
     const unfinished = !!before && isMustAchieve(before.capacityGoal) &&
       !isGoalAchieved(before.capacityGoal!, summarizeQuotaProgress(before).applied)
@@ -2072,7 +2107,7 @@ export const campaignService = {
     if (unfinished) {
       await markPausedAt(Date.now())
       await appendCampaignLog(
-        '⏸ 已暂停，但目标必达仍未达成：5 分钟后看门狗会自动恢复投递，不需要手动重启。若想彻底停止，请关闭「必达模式」',
+        '⏸ 已暂停，但目标必达仍未达成：5 分钟后看门狗会自动恢复投递，不需要手动重启。若要彻底停止，请点「关闭 AIbot」',
         'info',
       )
     }
@@ -2084,22 +2119,22 @@ export const campaignService = {
     return cmp
   },
   resume: async () => {
+    // 用户主动恢复 = 解除关闭意图，重新挂上周期看门狗
+    await setUserStopped(false)
     const cmp = await resumeAgentCampaign()
+    await ensureWatchdogAlarm()
     scheduleNextTick(1000)
     return cmp
   },
   abort: async () => {
-    const before = await getCampaign()
-    const unfinished = !!before && isMustAchieve(before.capacityGoal) &&
-      !isGoalAchieved(before.capacityGoal!, summarizeQuotaProgress(before).applied)
     const cmp = await abortAgentCampaign()
-    if (unfinished) {
-      await markPausedAt(Date.now())
-      await appendCampaignLog(
-        '⏹ 已终止，但目标必达仍未达成：账号安全冷却 15 分钟后看门狗会自动恢复投递。若想彻底停止，请关闭「必达模式」',
-        'info',
-      )
-    }
+    // 终止是用户显式停机：写死意图锁，周期看门狗不得再把它拉回来。
+    // 旧版这里反而写「15 分钟后自动恢复」并留着 watchdog，就是「关了又自动打开」的根因。
+    await setUserStopped(true)
+    await appendCampaignLog(
+      '⏹ 已彻底停止：目标必达不会自动恢复投递。想继续请重新点击「开始投递」',
+      'info',
+    )
     if (scheduledTimer) clearTimeout(scheduledTimer)
     scheduledTimer = null
     try { await chrome.alarms.clear(ALARM_APPLY_TICK) } catch { /* 预期内异常，安全忽略 */ }
@@ -2183,7 +2218,16 @@ export const campaignService = {
     return getCampaign()
   },
   togglePlatform: async (platform: PlatformId, enabled: boolean) => {
-    return togglePlatformEnabled(platform, enabled)
+    // 手动关 = 记进保护名单，必达接管不得再打开；手动开回来 = 解除保护。
+    await setUserDisabledPlatform(platform, !enabled)
+    const cmp = await togglePlatformEnabled(platform, enabled)
+    if (!enabled) {
+      await appendCampaignLog(
+        `🔒 已记住你手动关闭了【${PLATFORM_NAMES[platform] || platform}】，目标必达不会再自动打开它；需要时请在平台开关里手动开启`,
+        'info',
+      )
+    }
+    return cmp
   },
   updateWindows: async (windows: TimeWindow[]) => {
     const cmp = await updateCampaignWindows(windows)

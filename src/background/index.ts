@@ -11,6 +11,7 @@ import { log, logError, logGroup, logGroupEnd } from '../shared/utils/logger'
 import { butlerRunDaily, getActiveFollowUps } from '../shared/agent/butler'
 import { campaignService, resumeSchedulerIfNeeded, cleanupDirtyJobTitles, resumeFalseCaptchaPauseIfNeeded, ensureMustAchieveAlive, ensureWatchdogAlarm, recordApplySuccessFromUrl } from './campaign-service'
 import { isApplySuccessUrl } from '../shared/agent/apply-success'
+import { readUserStopped, setUserStopped } from '../shared/agent/user-intent'
 import { reviveDedicatedTabs } from './tab-manager'
 import { MUST_ACHIEVE_WATCHDOG_ALARM } from '../shared/agent/must-achieve'
 import { migrateDefaultModelName } from '../shared/db/settings-store'
@@ -112,6 +113,20 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
   })
 })
 
+/**
+ * 扩展重载 / 浏览器启动后恢复自动化的统一入口。
+ *
+ * 用户主动关闭 AIbot 时**全部跳过**：不注册周期看门狗、不刷新专用后台 tab、
+ * 不恢复调度。旧版没有这道闸：用户刚关掉，一次扩展重载或 15 分钟冷却就把
+ * 流水线唤醒，content 侧跟着重建浮窗，看起来就是「插件自己打开了」。
+ */
+async function resumeAutomationIfAllowed(): Promise<void> {
+  if (await readUserStopped()) return
+  await ensureWatchdogAlarm()
+  await reviveDedicatedTabs().catch(() => 0)
+  await resumeSchedulerIfNeeded()
+}
+
 // Listen for installation
 chrome.runtime.onInstalled.addListener(() => {
   log(MOD, 'installed', 'Extension installed')
@@ -143,17 +158,9 @@ chrome.runtime.onInstalled.addListener(() => {
     if (cfg.enabled) return ensureOffscreenDocument()
   }).catch(() => {})
 
-  // 目标必达的独立周期看门狗：与一次性 apply-tick 解耦，浏览器会持久化这个 alarm，
-  // 即使 Service Worker 被回收、tick 早退、campaign 被挂起，也会每分钟校验一次目标状态。
-  void ensureWatchdogAlarm()
-
-  // 扩展重新加载会清空上一轮注册的 tick alarm：若流水线仍在运行则立即重建调度。
-  // 但必须先复活专用后台 tab —— 它们页面里的 content script 属于上一代扩展上下文，
-  // 消息端口已失效；不刷新就恢复调度，第一轮采集/投递必然撞上
-  // "Could not establish connection. Receiving end does not exist."
-  void reviveDedicatedTabs().catch(() => 0).finally(() => {
-    void resumeSchedulerIfNeeded()
-  })
+  // 周期看门狗、专用后台 tab 复活、调度恢复统一走 resumeAutomationIfAllowed()：
+  // 用户已关闭 AIbot 时一个都不做，避免「关了又自己打开」。
+  void resumeAutomationIfAllowed()
 
   // 修复历史脏数据：清洗被 AI 提案/简历项目名写进「岗位名称」的长句
   void cleanupDirtyJobTitles()
@@ -175,12 +182,10 @@ chrome.runtime.onStartup.addListener(() => {
     if (cfg.enabled) return ensureOffscreenDocument()
   }).catch(() => {})
 
-  // 浏览器重启后 alarm 可能已丢失，自愈恢复 AIbot 调度与必达看门狗。
+  // 浏览器重启后 alarm 可能已丢失，自愈恢复 AIbot 调度与必达看门狗；
   // 会话恢复出来的招聘站 tab 同样带着上一代 content script，先刷新再放行调度。
-  void ensureWatchdogAlarm()
-  void reviveDedicatedTabs().catch(() => 0).finally(() => {
-    void resumeSchedulerIfNeeded()
-  })
+  // 用户已主动关闭时整条恢复链一起跳过。
+  void resumeAutomationIfAllowed()
 })
 
 // Handle alarms
@@ -320,10 +325,15 @@ async function broadcastAssistantCancel(): Promise<void> {
   }
 }
 
-/** 关闭浮窗 = 关闭 bot：终止流水线、清定时器/alarm、取消当前任务、同步三方状态 */
+/** 关闭浮窗 = 关闭 bot：终止流水线、清掉全部 alarm、取消当前任务、同步三方状态 */
 async function shutdownAssistant() {
   const campaign = await campaignService.abort()
   try { await chrome.alarms.clear(APPLY_TICK_ALARM) } catch { /* 预期内异常，安全忽略 */ }
+  // 周期看门狗必须一起清掉。旧版特意留着它「按必达规则把流水线拉回来」，
+  // 结果用户关掉 bot 15 分钟后它自动 resume，后台又下发任务、浮窗重新冒出来。
+  try { await chrome.alarms.clear(MUST_ACHIEVE_WATCHDOG_ALARM) } catch { /* 预期内异常，安全忽略 */ }
+  // 写死「用户已停机」意图：扩展重载 / 浏览器重启都不许重新注册看门狗。
+  await setUserStopped(true)
   await patchAssistantState({ panelState: 'closed' })
   // 全局停止：无论当前是半自动还是全自动，都释放互斥锁
   await releaseRunMode('idle')

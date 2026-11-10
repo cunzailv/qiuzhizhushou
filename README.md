@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1355%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1375%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -31,7 +31,7 @@
 - **会自检也会复盘**：L2 语义相关性自愈、L3 真实回复率回流反哺搜索方向、Planner 防数字幻觉，Tool-Calling 中控对话台支持多轮上下文与危险动作人工审批。
 - **数据留在本地**：简历、画像、队列、日志保存在浏览器本地（Dexie / IndexedDB + `chrome.storage`）；AI 能力走你自己配置的模型接口，不上传第三方服务。
 
-> 当前状态：`91` 个测试文件 / `1355` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
+> 当前状态：`92` 个测试文件 / `1375` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
@@ -156,6 +156,23 @@
 - **任务不判死刑**：通信异常是环境故障，旧版直接标 `failed` 把岗位永久踢出待投队列（现场表现就是「投了很多轮进度不涨」）。现统一标 `skipped` 保留任务、重置连续未定位计数、下轮自动重试；采集侧失联错误也不再计入连续失败，不再弹「平台页面改版 / 请手动检查页面」这种误导告警
 
 诚实披露：活跃页不允许自动刷新时，最终错误会明确写「自动刷新未执行…请手动刷新此页面」，日志只说「已尝试自动刷新」，不会谎报已恢复。回归测试 `tests/content-script-revive.test.ts`（16 例）覆盖失联识别、五平台后台页放行 / 活跃页拦截、reload 一次后重试成功、启动批量复活与全链路接线。
+
+**「关了又自动打开」修复（2026-11-10）**：用户反馈 `1、插件关闭了，有时候自动打开`、`2、平台关闭了投递了，总是自动打开，一开启投递又自动打开了`。这两条都源于**必达模式把「用户手动关掉的东西」也当成了可控参数**，不是玄学：
+
+| 现象 | 旧代码的真实行为 |
+|---|---|
+| 插件关了有时自己打开 | `shutdownAssistant()` 只清 `apply-tick`，**故意留着周期 `must-achieve-watchdog`**（注释写「负责按必达规则按时把流水线拉回来」）；15 分钟冷却一过自动 `resume`，后台复活后下发任务，content 侧 `EXECUTE_CAMPAIGN_TASK` 会 `createFloatingPanel()` → 浮窗自己冒出来。另外 `normalizeInitialPanelState()` 把 `closed` 归一成 `expanded` 并写回全局，刷新 / 打开任意招聘页就重现 |
+| 平台关了总是被打开 | `planMustAchieveQuotas()` 每轮把 `enabled === false` 的平台列进 `enablePlatforms`，`applyMustAchieveTakeover()` 在 `start` / `goal` / `blocked` / `watchdog` / tick 里反复 `togglePlatformEnabled(pid, true)`；一点击「开始投递」立刻全开回来 |
+
+原则是：**用户手动关的，系统不许开；用户自己重新开，才算解除。** 新增 `src/shared/agent/user-intent.ts` 把意图单独持久化（不能存在 `campaign.quotas` 里，那里会被接管反复覆盖）：
+
+- **停机锁**：关闭助手时写 `aibot_user_stopped` 并**一并清掉周期看门狗 alarm**；`decideMustAchieveWatchdog()` 见停机锁一律 `idle`，`ensureMustAchieveAlive()` 连 alarm 都不再注册；`onInstalled` / `onStartup` 统一走带意图闸的 `resumeAutomationIfAllowed()`，扩展重载也不会把刚关掉的 bot 唤醒。重新点「开始投递 / 恢复」才清锁并重建看门狗，日志也改成「已彻底停止：目标必达不会自动恢复投递」
+- **平台保护名单**：手动关平台写入 `aibot_user_disabled_platforms`，手动开回来才移除；`planMustAchieveQuotas()` 新增 `protectedPlatforms`，受保护的平台不抬配额、不开启、不解除日限；启动时只勾选部分平台也同步进名单。UI 现在**无条件**上报开关（旧版只在 `stats` 存在时上报，campaign 还没创建时用户关的平台记不住）。全都关了会明确提示「当前没有可投递平台」，而不是偷偷替你开
+- **面板形态**：`closed` 是持久意图，刷新 / 换页面都不再自动展开；重新打开的唯一入口是用户点扩展图标。`bubble`（收起浮球）仍是一次性动作，新页面恢复展开
+
+边界说明（不藏着）：**「暂停」≠「关闭」** —— 人工暂停仍保留 5 分钟宽限后自动恢复，这是必达模式原有语义；想彻底停请点「关闭 AIbot」。另外用户**主动点「开始投递 / 恢复」**时侧栏仍会展开，因为 content 侧在 `closed` 状态会拒绝执行投递任务；如果你希望「关着侧栏也能纯后台投」，这是另一项改造，说一声我再改。
+
+回归测试 `tests/user-intent-lock.test.ts`（19 例）锁死停机锁落盘、保护名单增删、看门狗遇停机锁一律 idle、配额规划跳过受保护平台、面板归一与全链路接线。
 
 > **真实账号「投递后平台是否真的多一条记录」仍需按上方验收清单第 4–5 步核对**，模拟页面 E2E 不能替代登录态、反爬与平台确认回执。第六轮修复同样需要用户手动在 `chrome://extensions` 点一次「重新加载」才会生效。
 

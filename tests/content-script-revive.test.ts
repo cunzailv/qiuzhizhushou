@@ -248,11 +248,17 @@ describe('接线契约：通信异常不能判岗位死刑', () => {
     expect(TM).toContain('shouldReloadStaleTab(tab)')
   })
 
-  it('onInstalled 与 onStartup 都在恢复调度之前复活专用 tab', () => {
-    expect((BG.match(/void reviveDedicatedTabs\(\)/g) || []).length).toBe(2)
-    expect(BG).toContain('reviveDedicatedTabs().catch(() => 0).finally(() => {')
-    const firstRevive = BG.indexOf('void reviveDedicatedTabs()')
-    expect(BG.indexOf('void resumeSchedulerIfNeeded()', firstRevive)).toBeGreaterThan(firstRevive)
+  it('onInstalled 与 onStartup 都走带用户意图闸的统一恢复入口', () => {
+    expect((BG.match(/void resumeAutomationIfAllowed\(\)/g) || []).length).toBe(2)
+    const helper = BG.slice(
+      BG.indexOf('async function resumeAutomationIfAllowed'),
+      BG.indexOf('// Listen for installation'),
+    )
+    // 用户主动关闭 AIbot 后：不注册看门狗、不刷 tab、不恢复调度
+    expect(helper).toContain('if (await readUserStopped()) return')
+    expect(helper).toContain('await ensureWatchdogAlarm()')
+    expect(helper).toContain('await reviveDedicatedTabs().catch(() => 0)')
+    expect(helper).toContain('await resumeSchedulerIfNeeded()')
   })
 
   it('执行侧通信异常标 skipped 保留任务，并清掉连续未定位计数', () => {
