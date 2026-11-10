@@ -33,7 +33,7 @@ import { getCandidatePreferences } from '../shared/db/settings-store'
 
 // 当前活动平台适配器（由 PlatformManager 按网址自动识别，或按设置手动覆盖）。
 let adapter: PlatformAdapter
-import { createFloatingPanel, updatePanelContent, showPanelToast, setPanelState, setPinned, type ChatCopilotData } from './inject-ui'
+import { createFloatingPanel, updatePanelContent, showPanelToast, setPanelState, setPinned, setPushLayoutActive, type ChatCopilotData } from './inject-ui'
 import {
   DEFAULT_ASSISTANT_STATE,
   getAssistantState,
@@ -74,6 +74,13 @@ import {
 import { getBlacklist } from '../shared/db/blacklist-store'
 import { getRuntimeState, reportBatchProgress } from '../shared/runtime-state'
 import { readUserStopped } from '../shared/agent/user-intent'
+import {
+  readPushLayoutSetting,
+  writePushLayoutSetting,
+  subscribePushLayout,
+  shouldApplyPushLayout,
+  applyPushLayout,
+} from '../shared/sidebar-layout'
 import { loadSharedApplyFilters } from '../shared/agent/filter-config'
 
 const MOD = 'ContentScript'
@@ -104,6 +111,8 @@ let isApplying = false
 let runStopped = false
 let assistantState: AssistantControlState = DEFAULT_ASSISTANT_STATE
 let campaignTaskCancelled = false
+/** 窗口 resize 防抖：挤压只依赖宿主页面宽度，不碰侧栏本体与投递链路 */
+let pushLayoutResizeTimer: ReturnType<typeof setTimeout> | null = null
 
 // Content 侧全局未捕获异常上报至 Background
 if (typeof window !== 'undefined') {
@@ -229,6 +238,27 @@ async function loadApplyDefaultsFromSettings(): Promise<void> {
   }
 }
 
+/**
+ * 按「开关 + 面板形态 + 停机状态 + 视口宽度」重新决定是否挤压网页。
+ * 收起 / 浮球 / 关闭 / 停机 / 窄屏都会立刻撤销挤压，不留空白带。
+ */
+async function refreshPushLayout(panelStateOverride?: PanelState): Promise<void> {
+  const [enabled, stopped] = await Promise.all([
+    readPushLayoutSetting(),
+    readUserStopped(),
+  ])
+  applyPushLayout(shouldApplyPushLayout({
+    enabled,
+    // 允许调用方传入「即将生效」的形态，但不提前改全局 assistantState ——
+    // syncFromAssistantState 靠 closed → expanded 的跳变解除上一轮取消标记。
+    panelState: panelStateOverride ?? assistantState.panelState,
+    userStopped: stopped,
+    viewportWidth: window.innerWidth,
+  }))
+  // 按钮反映的是开关本身，不是本帧是否真的在挤压
+  if (panelHost) setPushLayoutActive(panelHost, enabled)
+}
+
 /** 把统一控制状态同步到 content 本地变量与浮窗形态 */
 function syncFromAssistantState(state: AssistantControlState): void {
   // bot 重新展开/收缩即视为再次启动，解除上一轮的取消标记
@@ -243,6 +273,8 @@ function syncFromAssistantState(state: AssistantControlState): void {
     setPanelState(panelHost, state.panelState)
     setPinned(panelHost, state.pinned)
   }
+  // 面板形态一变就重算挤压：收起 / 关闭绝不能让网页留一条 456px 空白
+  void refreshPushLayout().catch(() => {})
 }
 
 /** 写统一控制状态（后台负责广播给 popup / 其他 tab） */
@@ -259,6 +291,8 @@ function markAssistantShutdown(): void {
   isApplying = false
   runStopped = true
   assistantState = { ...assistantState, panelState: 'closed' }
+  // 关闭 bot 立刻撤销挤压，不等后台写停机锁回来
+  void refreshPushLayout().catch(() => {})
 }
 
 function shutdownAssistantFromPanel(): void {
@@ -294,6 +328,8 @@ async function toggleAssistantPanelPresence(ensureExpanded = false): Promise<voi
   const next: PanelState = resolvePanelPresence(assistantState.panelState, ensureExpanded)
   setPanelState(panelHost, next)
   writeAssistantState({ panelState: next })
+  // 兜底创建浮窗时同步开关按钮状态与挤压（状态值可能没变，storage 不会广播）
+  void refreshPushLayout(next).catch(() => {})
 }
 
 // ------ Initialization ------
@@ -357,6 +393,16 @@ async function init(): Promise<void> {
     } else {
       log(MOD, 'init', 'AIbot 已被用户关闭：本次打开网页不重建浮窗、不自动展开、不启动 HR 助手')
     }
+
+    // 挤压布局：开关跨标签页同步；窗口变窄时自动退回浮层，避免把岗位列表压成一条
+    subscribePushLayout(() => { void refreshPushLayout().catch(() => {}) })
+    window.addEventListener('resize', () => {
+      if (pushLayoutResizeTimer) clearTimeout(pushLayoutResizeTimer)
+      pushLayoutResizeTimer = setTimeout(() => {
+        void refreshPushLayout().catch(() => {})
+      }, 150)
+    })
+    await refreshPushLayout().catch(() => {})
   } else {
     log(MOD, 'init', `Skipping — page type "${pageType}" not supported`)
   }
@@ -879,6 +925,14 @@ window.addEventListener('message', (event) => {
     log(MOD, 'panelMessage', `TOGGLE_PIN ${pinned}`)
     if (panelHost) setPinned(panelHost, pinned)
     writeAssistantState({ pinned })
+  }
+  if (data?.type === 'BOSS_ASSISTANT_TOGGLE_PUSH_LAYOUT') {
+    void (async () => {
+      const next = !(await readPushLayoutSetting())
+      await writePushLayoutSetting(next)
+      log(MOD, 'panelMessage', `TOGGLE_PUSH_LAYOUT ${next}`)
+      await refreshPushLayout()
+    })().catch(() => {})
   }
   if (data?.type === 'BOSS_ASSISTANT_OPEN_OPTIONS') {
     log(MOD, 'panelMessage', 'OPEN_OPTIONS')

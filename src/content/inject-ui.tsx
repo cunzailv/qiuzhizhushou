@@ -222,6 +222,15 @@ export function setPanelState(host: HTMLElement, state: PanelState): void {
   applySidebarLayout(host)
 }
 
+/** 挤压布局按钮的视觉状态：开关打开时高亮，标题随状态切换 */
+export function setPushLayoutActive(host: HTMLElement, active: boolean): void {
+  const btn = host.shadowRoot?.getElementById('btn-push') as HTMLButtonElement | null
+  if (!btn) return
+  btn.classList.toggle('active', active)
+  btn.setAttribute('aria-pressed', String(active))
+  btn.title = active ? '恢复浮层布局' : '挤压网页布局'
+}
+
 /** 置顶常驻按钮的视觉状态（高亮 + aria-pressed） */
 export function setPinned(host: HTMLElement, pinned: boolean): void {
   const btn = host.shadowRoot?.getElementById('btn-pin') as HTMLButtonElement | null
@@ -302,6 +311,9 @@ export function createFloatingPanel(): HTMLElement {
         <button class="btn-header" id="btn-pin" title="置顶常驻" aria-label="置顶常驻" aria-pressed="false">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76V4h6v6.76l3 3.24H6l3-3.24Z"/></svg>
         </button>
+        <button class="btn-header" id="btn-push" title="挤压网页布局" aria-label="挤压网页布局" aria-pressed="false">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M16 4v16"/></svg>
+        </button>
         <button class="btn-header btn-header-stop" id="btn-stop" title="停止 AIbot" aria-label="停止 AIbot">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v9"/><path d="M6.3 6.3a8 8 0 1 0 11.4 0"/></svg>
         </button>
@@ -356,6 +368,11 @@ export function createFloatingPanel(): HTMLElement {
   // 置顶常驻：不自动收起，新页面直接展开
   shadow.getElementById('btn-pin')?.addEventListener('click', () => {
     window.postMessage({ type: 'BOSS_ASSISTANT_TOGGLE_PIN' }, '*')
+  })
+
+  // 挤压布局：让网页内容把右侧宽度让出来，而不是被浮层盖住（默认关，可随时切回）
+  shadow.getElementById('btn-push')?.addEventListener('click', () => {
+    window.postMessage({ type: 'BOSS_ASSISTANT_TOGGLE_PUSH_LAYOUT' }, '*')
   })
 
   // 打开管理后台（去掉 popup 后，这是简历/设置/数据的主入口）

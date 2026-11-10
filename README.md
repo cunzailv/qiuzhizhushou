@@ -16,7 +16,7 @@
   <img src="https://img.shields.io/badge/platform-Chrome%20|%20Edge-brightgreen" alt="Platform">
   <img src="https://img.shields.io/badge/manifest-v3-blueviolet" alt="Manifest V3">
   <img src="https://img.shields.io/badge/platforms-5%20(5%E5%A4%A7%E5%B9%B3%E5%8F%B0)-orange" alt="Platforms">
-  <img src="https://img.shields.io/badge/tests-1426%20passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-1446%20passed-brightgreen" alt="Tests">
 </p>
 
 ---
@@ -32,7 +32,7 @@
 - **会自检也会复盘**：L2 语义相关性自愈、L3 真实回复率回流反哺搜索方向、Planner 防数字幻觉，Tool-Calling 中控对话台支持多轮上下文与危险动作人工审批。
 - **数据留在本地**：简历、画像、队列、日志保存在浏览器本地（Dexie / IndexedDB + `chrome.storage`）；AI 能力走你自己配置的模型接口，不上传第三方服务。
 
-> 当前状态：`94` 个测试文件 / `1426` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
+> 当前状态：`95` 个测试文件 / `1446` 例通过，含真实 Chromium E2E。功能全景见下方四层能力表，版本演进见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
@@ -197,7 +197,8 @@
 
 | 能力 | 说明 |
 |------|------|
-| **点击图标 = 右侧整高侧栏** | 点插件图标在**招聘网站页面右侧**展开整屏高侧栏（宽 440px，留 8px 边距），正文就是完整助手面板（概览 / AIbot / 管家 / 简历 / 追踪 / 设置，同源 iframe 复用 popup 应用），标题栏只保留 ⚙ 置顶 ⏻ × 四个操作。**不会弹出独立整页面板** |
+| **点击图标 = 右侧整高侧栏** | 点插件图标在**招聘网站页面右侧**展开整屏高侧栏（宽 440px，留 8px 边距），正文就是完整助手面板（概览 / AIbot / 管家 / 简历 / 追踪 / 设置，同源 iframe 复用 popup 应用），标题栏为 ⚙ 置顶 / 挤压布局 / ⏻ / × 五个图标。**不会弹出独立整页面板** |
+| **挤压布局开关（默认关）** | 侧栏本体是 `position: fixed` 浮层，默认盖在网页右侧内容上 —— 这是为了兼容 5 个招聘站各不相同的布局，且不干扰 bot 点岗位卡片。想要「内容被顶过去左边」的观感，点标题栏的**挤压布局**图标（置顶图标右边）：`src/shared/sidebar-layout.ts` 给 `html` 注入 `padding-right: 456px + border-box`，让网页内容区收窄，侧栏与内容并排不重叠。只在「开关开 + 侧栏展开 + 未停机 + 视口 ≥ 1180px」时生效，收起 / 关闭 / 停机 / 窄屏立刻撤销，不留空白带；开关跨标签页同步，SPA 重写根 class 或删掉注入样式会自动补回。**已知边界**：站点自己的 `position: fixed` 顶栏和 `100vw` 组件不受 html padding 影响，仍可能与侧栏重叠，需逐平台验证后再做定点兼容 |
 | **入口只回助手，绝不跳后台** | 入口决策收敛到 `src/shared/assistant-entry.ts`：只有「可注入 + 当前就是招聘网站」才在当前页展开侧栏；新标签页 / `chrome://` / 扩展页 / 任意普通网页，一律激活已打开的招聘网站标签页（没有则新开平台首页）并在右侧展开侧栏。`?standalone=1` 独立面板**只在两条路都失败时才兜底**，管理后台永远不作为兜底。编排依赖签名里根本没有「打开后台」这个函数 |
 | **注入不再误判失败** | 扩展刚装 / 刚重载时 content script 的 crxjs loader 会异步 import 多个 chunk，旧版固定等 300ms 就判定失败并回退成独立面板。现改为动态注入后最多轮询 5 次 × 250ms 等消息端就绪；兜底路径额外发「确保展开」消息（`ensureExpanded`），避免和已写入的 `expanded` 状态打架把侧栏收成浮球 |
 | **后台页有回家入口** | 管理后台左侧栏顶部「返回助手侧栏」（找到 / 新开招聘网站标签页并展开侧栏）与「打开独立助手面板」；独立助手面板顶部提示 + 右上角「展开侧栏」一键回到网页侧栏 |
