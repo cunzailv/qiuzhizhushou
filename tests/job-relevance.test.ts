@@ -96,6 +96,17 @@ describe('本地语义相关性 computeLocalRelevance', () => {
     expect(computeLocalRelevance(job('a5', '高级软件工程师'), aiInput)).toBe(true)
   })
 
+  it('用户第二轮反馈的「项目主管 / 电子研发」在本地语义层同样判为不相关', () => {
+    const aiInput: JobRelevanceInput = {
+      keyword: 'php',
+      targetCareers: ['php', '后台', 'AI', '全栈开发'],
+      jobs: [],
+    }
+    for (const title of ['项目主管', '项目总监', '研发主管', '电子研发', '硬件研发工程师', '电气工程师']) {
+      expect(computeLocalRelevance(job(`b-${title}`, title), aiInput), title).toBe(false)
+    }
+  })
+
   it('用户主动找非开发职能时按职能词放行，不被负向词误杀', () => {
     const pm: JobRelevanceInput = { keyword: '产品经理', targetCareers: ['产品经理'], jobs: [] }
     expect(computeLocalRelevance(job('p1', '高级产品经理'), pm)).toBe(true)

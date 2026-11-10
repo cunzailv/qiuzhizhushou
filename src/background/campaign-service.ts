@@ -34,6 +34,7 @@ import {
   persistRestState,
   persistCapacityGoal,
   isRecyclableTask,
+  CAREER_GATE_BLOCK_MARK,
   clearPlatformExhausted,
   purgeStaleJobUrlTasks,
   TASK_RETRY_COOLDOWN_MS,
@@ -1198,10 +1199,11 @@ export async function runCampaignTick(): Promise<void> {
       if (!verdict.allowed) {
         await updateTaskResult(task.id, {
           status: 'skipped',
-          failReason: `岗位名称硬闸门：${verdict.reason}`,
+          // 带标记 ⇒ isRecyclableTask 永不回收，避免「认领→跳过→回收→再认领」死循环
+          failReason: `${CAREER_GATE_BLOCK_MARK}（认领层拦截）：${verdict.reason}`,
         })
         await appendCampaignLog(
-          `🚫 已拦截不符岗位：[${task.platform}] ${task.jobTitle} @ ${task.company}（${verdict.reason}；${describeCareerGate(gateCareers)}）`,
+          `🚫 已拦截不符岗位：[${task.platform}] ${task.jobTitle} @ ${task.company}（${verdict.reason}；${describeCareerGate(gateCareers)}）。该任务已永久剔除，不会再次入队`,
           'warn',
         )
         scheduleNextTick(1000)
@@ -1247,8 +1249,15 @@ export async function runCampaignTick(): Promise<void> {
         {
           type: 'EXECUTE_CAMPAIGN_TASK',
           // 产能优先 / 必达必须随任务一起下发到页面执行层，
-          // 否则评分门槛还是会把已过硬筛的对口岗位全跳过
-          payload: { task, capacityUrgent, mustAchieve: mustAchieveActive },
+          // 否则评分门槛还是会把已过硬筛的对口岗位全跳过。
+          // targetCareers 让 content 在真正投递前再核一次方向（最后一道闸），
+          // 即使后台认领层因设置读取失败 / 旧任务漏过，也不会把不符岗位投出去。
+          payload: {
+            task,
+            capacityUrgent,
+            mustAchieve: mustAchieveActive,
+            targetCareers: gateCareers,
+          },
         },
         3,
       )
@@ -1641,7 +1650,13 @@ async function autoCollectJobsForCampaign(
           added: collectRes.added ?? 0,
           pendingCount,
         })
-        await appendCampaignLog(logMsg, 'success')
+        // 把「岗位名称硬闸门」写进每轮成功日志：用户重载扩展后一眼就能确认
+        // 跑的是新代码，而不是继续看旧队列 / 旧 content 的表现。
+        const gateNote = collectRes?.careerGate || describeCareerGate(targetCareers)
+        await appendCampaignLog(
+          `${logMsg}｜${gateNote}已生效（本页拦下 ${collectRes?.filteredByCareerGate ?? 0} 个不符岗位，如产品经理 / 销售 / 电子研发）`,
+          'success',
+        )
         return true
       } else {
         // 明细诊断：区分“页面根本没抓到岗位”与“抓到了但被筛掉”，避免无脑循环看不到原因
@@ -1919,7 +1934,13 @@ async function handleTaskExecutionResult(task: ApplyTask, result: ExecuteTaskRes
       'success',
     )
   } else if (result.status === 'skipped') {
-    if (result.failReason?.includes('列表页未就绪')) {
+    if (result.failReason?.includes(CAREER_GATE_BLOCK_MARK)) {
+      // content 执行层拦下的不符岗位：明确写「永久剔除」，不写成「匹配分低」
+      await appendCampaignLog(
+        `🚫 执行层已拦截不符岗位：[${task.platform}] ${task.jobTitle} — ${result.failReason}（任务永久剔除，不会再次入队）`,
+        'warn',
+      )
+    } else if (result.failReason?.includes('列表页未就绪')) {
       // 空壳页 / 投递成功遗留页：岗位本身没问题，只是页面还没渲染好。
       // 标 skipped 让任务按回收机制重试，**不**计入「连续找不到卡片」自愈，
       // 否则会误判成站点改版去 clearPendingTasks，把新采到的岗位一起清掉。

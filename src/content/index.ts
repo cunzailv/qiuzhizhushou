@@ -62,6 +62,7 @@ import {
   evaluateJobCandidate,
   isJobMatchingCareer,
   isJobMatchingFreshness,
+  normalizeCareerTokens,
 } from '../shared/agent/job-filter'
 import {
   extractTargetStacks,
@@ -72,6 +73,7 @@ import {
 } from '../shared/agent/stack-guard'
 import { getBlacklist } from '../shared/db/blacklist-store'
 import { getRuntimeState, reportBatchProgress } from '../shared/runtime-state'
+import { loadSharedApplyFilters } from '../shared/agent/filter-config'
 
 const MOD = 'ContentScript'
 
@@ -401,6 +403,34 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'EXECUTE_CAMPAIGN_TASK') {
     const task = message.payload?.task
     ;(async () => {
+      // 执行层最后一道岗位名称硬闸门：即使后台认领 / 其它入口漏了方向校验，
+      // 也绝不允许真的把不符岗位投出去。放在最前面，连浮窗都不用重建。
+      // 状态必须是 skipped 且 failReason 带 CAREER_GATE_BLOCK_MARK 前缀：
+      // 后台据此永久剔除该任务，不做冷却回收，避免无限认领 → 跳过循环。
+      let execGateCareers: string[] = Array.isArray(message.payload?.targetCareers)
+        ? message.payload.targetCareers
+        : []
+      // 后台漏传（旧版消息 / 设置读取失败）时执行层自己再读一次方向，
+      // 保证这道闸不依赖上游是否配合。
+      if (!isCareerGateActive(execGateCareers)) {
+        try {
+          const sharedFilters = await loadSharedApplyFilters()
+          execGateCareers = extractTargetCareers(null, sharedFilters)
+        } catch {
+          // 读不到设置时不擅自启用闸门，避免拿空方向把流水线锁死
+        }
+      }
+      if (isCareerGateActive(execGateCareers)) {
+        const verdict = isJobTitleAllowed(task?.jobTitle || '', execGateCareers)
+        if (!verdict.allowed) {
+          sendResponse({
+            taskId: task?.id,
+            status: 'skipped',
+            failReason: `岗位名称硬闸门（执行层拦截）：${verdict.reason}`,
+          })
+          return
+        }
+      }
       if (!adapter) adapter = await getActivePlatform()
       if (!defaultResume) defaultResume = await fetchFullResume()
       if (!defaultResume) {
@@ -876,9 +906,15 @@ function filterJobs(jobs: JobCard[], filters: ApplyFilters): { passed: JobCard[]
   const excludeKeywords = filters.excludeKeywords.trim().toLowerCase().split(/\s+/).filter(Boolean)
   // 半自动只认用户明确填的岗位名称，不从简历技能推断，避免误伤用户主动打开的页面
   const filterStacks = extractTargetStacks({ directions: [filters.jobTitles || ''] })
+  // 半自动批量沟通同样走岗位名称硬闸门：产品经理 / 销售 / 电子研发一个都不投
+  const gateDirections = normalizeCareerTokens(filters.jobTitles || '')
+  const gateActive = isCareerGateActive(gateDirections)
 
   for (const job of jobs) {
     let skip = false
+
+    // 岗位名称硬闸门优先于所有其它条件
+    if (!skip && gateActive && !isJobTitleAllowed(job.title, gateDirections).allowed) skip = true
 
     // 技术栈硬约束：填了「php 后台开发」就不要把 Java / 前端岗位投出去
     if (!skip && isCrossStackJob(job.title, filterStacks)) skip = true

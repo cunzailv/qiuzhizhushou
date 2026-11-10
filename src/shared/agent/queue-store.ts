@@ -12,6 +12,13 @@ import {
   MAX_PLATFORM_QUOTA,
 } from './quota'
 
+/**
+ * 「岗位名称硬闸门」拦截任务的 failReason 标记。
+ * 带这个标记的任务永久剔除、不参与回收，避免每轮 tick 反复认领同一个不符岗位。
+ * content 执行层与 background 认领层必须用同一个前缀写 failReason。
+ */
+export const CAREER_GATE_BLOCK_MARK = '岗位名称硬闸门'
+
 const QUOTA_PLATFORM_NAMES: Record<PlatformId, string> = {
   boss: 'Boss直聘',
   liepin: '猎聘',
@@ -473,12 +480,15 @@ export interface AppendTasksOptions {
  * done / pending / running / paused 同样占位不动。
  */
 export function isRecyclableTask(
-  task: Pick<ApplyTask, 'status' | 'createdAt' | 'attempts'>,
+  task: Pick<ApplyTask, 'status' | 'createdAt' | 'attempts'> & { failReason?: string },
   now: number,
   cooldownMs: number = TASK_RETRY_COOLDOWN_MS,
   maxRecycles: number = MAX_TASK_RECYCLES,
 ): boolean {
   if (task.status !== 'skipped') return false
+  // 被岗位名称硬闸门拦下的不符岗位是**永久剔除**，不能过冷却期又回收成 pending，
+  // 否则每个 tick 都会「认领 → 跳过 → 回收 → 再认领」死循环，还会一直刷日志。
+  if ((task.failReason || '').includes(CAREER_GATE_BLOCK_MARK)) return false
   if ((Number(task.attempts) || 0) >= maxRecycles) return false
   const createdAt = Number(task.createdAt) || 0
   return now - createdAt >= cooldownMs

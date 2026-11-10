@@ -254,7 +254,8 @@ describe('目标产能优先 · 评分门槛', () => {
   it('静态契约：紧急状态从后台一路下发到页面执行层，并在日志里说明放宽原因', () => {
     const service = read(SERVICE)
     expect(service).toContain('mustAchieveActive || isCapacityUrgent(capacity?.status)')
-    expect(service).toContain('payload: { task, capacityUrgent, mustAchieve: mustAchieveActive }')
+    expect(service).toContain('mustAchieve: mustAchieveActive,\n            targetCareers: gateCareers,')
+    expect(service).toContain('type: \'EXECUTE_CAMPAIGN_TASK\'')
     expect(service).toContain('autoCollectJobsForCampaign(campaign, activePlatforms, {\n        capacityUrgent,\n        mustAchieve: mustAchieveActive,\n        managePageCursor: true,\n      })')
     expect(read(CONTENT)).toContain('capacityUrgent: message.payload?.capacityUrgent === true')
     expect(read(CONTENT)).toContain('mustAchieve: message.payload?.mustAchieve === true')

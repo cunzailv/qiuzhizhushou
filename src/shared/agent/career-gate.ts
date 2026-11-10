@@ -42,6 +42,41 @@ export const STRONG_DEV_ROLE_RE =
 export const DEV_SEMANTIC_RE =
   /(开发|研发|工程师|程序员|架构|全栈|前后端|前端|后端|服务端|后台|算法|运维|测试|嵌入式|移动端|小程序|技术|程序|数据开发|大数据|软件工程)/i
 
+/**
+ * 非软件领域的**职能**词：电子 / 硬件 / 机械 / 电气 / 传统工程。
+ *
+ * 用户反馈「还是乱投 项目主管 电子研发」：旧版第 4 步只看 DEV_SEMANTIC_RE，
+ * 「电子研发」「硬件研发工程师」「PCB Layout工程师」因为带「研发 / 工程师」全被放行。
+ * 这里只放职能词，不放「医疗 / 汽车」这类行业修饰词 —— 「医疗软件后端开发」
+ * 依然是对口的软件开发岗，不该被行业名误杀。
+ */
+export const NON_SOFTWARE_DOMAIN_RE =
+  /(电子|硬件|电路|pcb|原理图|射频|微波|模拟电路|数字电路|单片机|plc|fpga|嵌入式硬件|机械|结构|模具|钣金|电气|电力|工业自动化|自动化控制|仪器仪表|通信工程|光电子|半导体|晶圆|材料|化工|化学|土木|建筑|装修|暖通|给排水|测绘|工艺|装配|品控|车辆|汽车电子|航空|航天|船舶)/i
+
+/** 明确的软件栈 / 软件岗位信号：出现时说明这确实是软件开发岗，领域词只是修饰 */
+const SOFTWARE_STACK_RE =
+  /(php|java|python|golang|go语言|node|vue|react|spring|laravel|thinkphp|django|flask|\.net|c#|web|app|小程序|后端|前端|全栈|前后端|服务端|后台|软件|算法工程师|数据开发|大数据|saas|中间件|数据库|devops|sre)/i
+
+/** 软件开发方向下的正向准入：必须是软件 / 互联网开发岗，而不只是「带工程师三个字」 */
+export const SOFTWARE_DEV_ROLE_RE =
+  /(开发|软件|架构|全栈|前后端|前端|后端|服务端|后台|程序员|程序|算法|数据开发|大数据|php|java|python|golang|go语言|node|vue|react|web|app|小程序|移动端|saas|中间件|数据库|devops|sre|运维开发|测试开发)/i
+
+/** 纯管理职能：不是开发岗。技术管理（技术总监 / 架构师）走下面的白名单 */
+const MANAGEMENT_ROLE_RE =
+  /(项目主管|项目总监|项目经理|项目助理|研发主管|研发经理|研发总监|部门主管|部门经理|组长|主管|总监|负责人|leader|ceo)/i
+
+/** 同方向的技术管理岗，视为对口，不被管理否决误杀 */
+const TECH_LEADERSHIP_RE =
+  /(技术经理|技术总监|技术主管|技术负责人|架构师|cto|技术专家|首席架构|研发架构)/i
+
+/** 用户填的方向是不是软件 / 互联网开发方向（硬件求职者不该被软件领域闸门误伤） */
+const SOFTWARE_DIRECTION_RE =
+  /(开发|软件|后端|前端|全栈|前后端|服务端|后台|架构|算法|程序|php|java|python|golang|node|vue|react|web|app|小程序|移动端|ai|智能体|大模型|llm|agent|数据|运维|测试|互联网)/i
+
+export function hasSoftwareDirection(targetCareers: readonly string[] | null | undefined): boolean {
+  return (targetCareers || []).some((c) => SOFTWARE_DIRECTION_RE.test(cleanKey(c)))
+}
+
 /** 泛修饰词：只是技术/级别/领域修饰，单独出现不能代表一个岗位方向 */
 const GENERIC_MODIFIER_RE =
   /^(ai|人工智能|智能体|agent|大模型|llm|aigc|数据|软件|互联网|信息化|数字化|云原生|高级|资深|专家|急聘|招聘|全职|远程|实习|应届)$/i
@@ -86,9 +121,11 @@ export function describeCareerGate(targetCareers: readonly string[] = []): strin
  *  2. 标题主部命中非开发职能，且用户方向里没写这个职能 → 否决；
  *     若标题同时有强开发语义（「XX系统开发工程师」），视为开发岗继续判断；
  *  3. 用户方向本身是非开发职能（例如他就要找「产品经理」）→ 按职能词严格匹配；
- *  4. 其余（技术方向）→ 只要岗位确实是技术/开发岗就放行，
+ *  4. 软件方向 → 先否决非软件领域职能（电子 / 硬件 / 机械 / 电气）与纯管理岗，
+ *     再要求标题具备软件开发语义；技术管理岗（技术总监 / 架构师）走白名单。
  *     同义不同字（「后台开发」搜到「PHP开发工程师」）不再被族谱白名单误杀；
  *     跨技术栈由 stack-guard 独立硬拦，这里不重复实现。
+ *  5. 非软件方向（例如用户填「电子研发」）→ 沿用宽松技术岗判定，不越权替他改方向。
  */
 export function isJobTitleAllowed(
   jobTitle: string,
@@ -128,11 +165,55 @@ export function isJobTitleAllowed(
       : { allowed: false, reason: `岗位「${title}」不是你填写的方向（${careers.join(' / ')}）` }
   }
 
-  // 4. 技术方向：只要是技术岗就放行，泛词「AI」不再单独构成匹配依据
+  // 4. 软件方向：职能领域 + 管理岗 + 软件开发语义三层收口
+  if (hasSoftwareDirection(careers)) {
+    // 4.1 电子 / 硬件 / 机械 / 电气等不是软件开发岗；
+    //     标题里同时出现明确软件栈信号时只当修饰词，不误杀「嵌入式软件工程师」。
+    const domainHit = main.match(NON_SOFTWARE_DOMAIN_RE)?.[0] || ''
+    if (domainHit && !SOFTWARE_STACK_RE.test(main)) {
+      return {
+        allowed: false,
+        reason: `「${domainHit}」属于非软件领域，不是你填写的岗位方向（${careers.join(' / ')}）`,
+      }
+    }
+
+    // 4.2 同方向的技术管理岗（技术总监 / 架构师）照常放行
+    if (TECH_LEADERSHIP_RE.test(main)) return { allowed: true }
+
+    // 4.3 纯管理岗：「项目主管」「研发主管」「部门经理」不是开发岗
+    const mgmtHit = main.match(MANAGEMENT_ROLE_RE)?.[0] || ''
+    if (mgmtHit && !dirText.includes(cleanKey(mgmtHit))) {
+      return {
+        allowed: false,
+        reason: `「${mgmtHit}」是管理岗，不是你填写的开发方向（${careers.join(' / ')}）`,
+      }
+    }
+
+    // 4.4 正向准入：必须是软件 / 互联网开发岗，泛词「AI」「研发」「工程师」不算
+    if (SOFTWARE_DEV_ROLE_RE.test(main)) return { allowed: true }
+
+    return {
+      allowed: false,
+      reason: `岗位「${title}」不是软件开发岗，与填写的方向（${careers.join(' / ')}）不符`,
+    }
+  }
+
+  // 5. 非软件方向（例如用户填「电子研发」）：不越权替他改成软件方向。
+  //    软件开发岗与硬件领域互斥；同领域的同义技术岗照常放行。
+  const dirHasSoftwareStack = SOFTWARE_STACK_RE.test(dirText)
+  // 只有方向**明确落在非软件领域**（电子 / 硬件 / 机械 …）才互斥；
+  // 「研发助理」这种泛研发词仍按开发方向处理，不能把 PHP 开发岗误杀。
+  const userIsNonSoftwareDomain = careers.some((c) => NON_SOFTWARE_DOMAIN_RE.test(cleanKey(c)))
+  if (userIsNonSoftwareDomain && SOFTWARE_DEV_ROLE_RE.test(main) && !dirHasSoftwareStack) {
+    return {
+      allowed: false,
+      reason: `岗位「${title}」是软件开发岗，与你填写的方向（${careers.join(' / ')}）不符`,
+    }
+  }
   if (DEV_SEMANTIC_RE.test(main)) return { allowed: true }
 
   return {
     allowed: false,
-    reason: `岗位「${title}」不是技术开发岗，与填写的方向（${careers.join(' / ')}）不符`,
+    reason: `岗位「${title}」不是技术岗，与填写的方向（${careers.join(' / ')}）不符`,
   }
 }

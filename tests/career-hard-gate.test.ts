@@ -24,7 +24,13 @@ import {
   isJobMatchingCareer,
   evaluateJobCandidate,
 } from '../src/shared/agent/job-filter'
+import {
+  hasSoftwareDirection,
+  NON_SOFTWARE_DOMAIN_RE,
+  SOFTWARE_DEV_ROLE_RE,
+} from '../src/shared/agent/career-gate'
 import { shouldBypassRelevanceGate } from '../src/shared/agent/must-achieve'
+import { isRecyclableTask, CAREER_GATE_BLOCK_MARK } from '../src/shared/agent/queue-store'
 
 const ROOT = process.cwd()
 const read = (rel: string) => readFileSync(join(ROOT, rel), 'utf-8')
@@ -95,10 +101,22 @@ describe('岗位名称硬闸门：用户填了 php / 后台 / AI / 全栈开发'
       'PHP技术支持',
       'AI训练师',
       '招聘PHP培训讲师',
+      // 用户第二轮反馈：「还是乱投 项目主管 电子研发」
+      '项目主管',
+      '项目总监',
+      '研发主管',
+      '电子研发',
+      '电子研发工程师',
+      '硬件研发工程师',
+      '电路设计工程师',
+      'PCB Layout工程师',
+      '机械结构工程师',
+      '电气工程师',
+      '射频工程师',
+      '工艺工程师',
     ]
-    for (const title of denied) {
-      expect(isJobTitleAllowed(title, USER_DIRECTIONS).allowed, title).toBe(false)
-    }
+    const leaked = denied.filter((title) => isJobTitleAllowed(title, USER_DIRECTIONS).allowed)
+    expect(leaked).toEqual([])
   })
 
   it('否决原因带上用户填的方向，便于日志里核对到底按什么在筛', () => {
@@ -182,6 +200,49 @@ describe('入队评估：方向不符是硬拦截，不再标 soft 被补回队�
   })
 })
 
+describe('软件方向识别与领域闸门', () => {
+  it('用户填的方向是软件开发，规则只对软件方向启用', () => {
+    expect(hasSoftwareDirection(USER_DIRECTIONS)).toBe(true)
+    expect(hasSoftwareDirection(['电子研发', '硬件工程师'])).toBe(false)
+    expect(hasSoftwareDirection([])).toBe(false)
+  })
+
+  it('硬件求职者填「电子研发」时不被软件闸门越权否决', () => {
+    expect(isJobTitleAllowed('电子研发工程师', ['电子研发']).allowed).toBe(true)
+    expect(isJobTitleAllowed('硬件研发工程师', ['电子研发']).allowed).toBe(true)
+    expect(isJobTitleAllowed('PHP开发工程师', ['电子研发']).allowed).toBe(false)
+  })
+
+  it('「嵌入式软件工程师」是软件岗不被领域词误杀，「医疗软件后端开发」也不被行业名误杀', () => {
+    expect(isJobTitleAllowed('嵌入式软件工程师', USER_DIRECTIONS).allowed).toBe(true)
+    expect(isJobTitleAllowed('医疗软件后端开发工程师', USER_DIRECTIONS).allowed).toBe(true)
+  })
+
+  it('领域常量与软件开发语义常量各自边界清晰', () => {
+    expect(NON_SOFTWARE_DOMAIN_RE.test('电子研发')).toBe(true)
+    expect(NON_SOFTWARE_DOMAIN_RE.test('PHP开发工程师')).toBe(false)
+    expect(SOFTWARE_DEV_ROLE_RE.test('PHP开发工程师')).toBe(true)
+    expect(SOFTWARE_DEV_ROLE_RE.test('电子研发')).toBe(false)
+  })
+})
+
+describe('闸门拦下的任务永不回收，避免无限认领', () => {
+  const base = { status: 'skipped' as const, createdAt: 0, attempts: 0 }
+
+  it('普通 skipped 过冷却期仍可回收', () => {
+    expect(isRecyclableTask(base, 10 * 60_000, 60_000)).toBe(true)
+  })
+
+  it('带岗位名称硬闸门标记的任务即使过冷却期也不回收', () => {
+    const blocked = { ...base, failReason: `${CAREER_GATE_BLOCK_MARK}（执行层拦截）：不属于填写的方向` }
+    expect(isRecyclableTask(blocked, 10 * 60_000, 60_000)).toBe(false)
+  })
+
+  it('非 skipped 状态一律不回收', () => {
+    expect(isRecyclableTask({ ...base, status: 'failed' }, 10 * 60_000, 60_000)).toBe(false)
+  })
+})
+
 describe('运行模式不允许绕过岗位方向', () => {
   it('必达 / 海投的语义闸门绕过开关恒为 false', () => {
     expect(shouldBypassRelevanceGate(true)).toBe(false)
@@ -214,8 +275,26 @@ describe('静态契约：防止旧逻辑回退', () => {
     expect(src).toContain('readCareerGateDirections')
     expect(src).toContain('isJobTitleAllowed(task.jobTitle, gateCareers)')
     expect(src).toContain("status: 'skipped'")
-    expect(src).toContain('岗位名称硬闸门：')
+    expect(src).toContain('CAREER_GATE_BLOCK_MARK')
     expect(src).not.toContain('本轮立即放宽方向限制重采一次')
+  })
+
+  it('执行层有最后一道闸，后台会把方向随任务下发', () => {
+    const content = read('src/content/index.ts')
+    expect(content).toContain('message.payload?.targetCareers')
+    expect(content).toContain('loadSharedApplyFilters')
+    expect(content).toContain('岗位名称硬闸门（执行层拦截）')
+    // 半自动批量沟通也接了硬闸门
+    expect(content).toContain('isJobTitleAllowed(job.title, gateDirections)')
+    const service = read('src/background/campaign-service.ts')
+    expect(service).toContain('targetCareers: gateCareers')
+    expect(service).toContain('CAREER_GATE_BLOCK_MARK')
+    expect(service).toContain('已生效（本页拦下')
+  })
+
+  it('闸门拦截任务在回收层被永久排除，且写进 failReason 标记', () => {
+    expect(read('src/shared/agent/queue-store.ts')).toContain('CAREER_GATE_BLOCK_MARK')
+    expect(read('src/content/index.ts')).toContain(`${CAREER_GATE_BLOCK_MARK}（执行层拦截）`)
   })
 
   it('设置页明确告知：岗位名称是硬闸门，海投 / 必达都不放宽', () => {
